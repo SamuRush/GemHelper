@@ -144,19 +144,27 @@ dotnet run -- --download-model
 
 ## 🗣️ TTS: Отказоустойчивый синтез речи (СТРОГО мужские голоса)
 
-`CompositeVoiceFeedbackService` реализует трёхуровневую цепочку отказоустойчивости с гарантией строго мужского тембра:
+`CompositeVoiceFeedbackService` реализует трёхуровневую цепочку отказоустойчивости с гарантией строго мужского тембра. Режим работы определяется флагом `EnableEdgeTts` в `appsettings.json`:
 
+**Режим `EnableEdgeTts: true` (по умолчанию, онлайн):**
 ```
-1. EdgeTtsEngine        ──(таймаут 5000 мс, Retry Policy: 2 повтора)──>
+1. EdgeTtsEngine        ──(таймаут 5000 мс, Retry Policy: 2 повтора: 1я—5000мс, повторы—3000мс)──>
 2. SileroTtsEngine      ──(локальный ONNX v4_ru.onnx / aidar / Guided Setup)──>
-3. SystemSpeechTtsEngine (Windows SAPI: Pavel или занижение тона -40% prosody)
+3. SystemSpeechTtsEngine (SAPI5: Silero Aidar > Silero Baya > Pavel > pitch-shift -40%)
+```
+
+**Режим `EnableEdgeTts: false` (полностью офлайн, Silero SAPI5 как первичный):**
+```
+1. (Edge-TTS пропускается — сетевые запросы не выполняются)
+2. SileroTtsEngine      ──(локальный ONNX, если доступен)──>
+3. SystemSpeechTtsEngine (SAPI5: Silero Aidar > Silero Baya > Pavel — первичный голос)
 ```
 
 | Движок | Тип | Голос | Особенности |
 |---|---|---|---|
-| **EdgeTtsEngine** | Онлайн, WebSocket | `ru-RU-DmitryNeural` | Нейросетевое качество; базовый таймаут 5000 мс; политика повторов (Retry Policy до 2 повторных попыток переподключения при сбоях сокета или задержках сети без сброса Дмитрия); автоматический сброс счетчика ошибок при успешном синтезе; WebSocket Keep-Alive пинг (15 с) |
-| **SileroTtsEngine** | Офлайн, ONNX | `aidar` (или `baya`) | Быстрый локальный синтез ONNX (`Models/Silero/v4_ru.onnx`); Guided Setup: без автозагрузок по HTTP и задержек; при отсутствии файла выводит понятную инструкцию со ссылкой для ручной установки и моментально передает работу fallback-движку |
-| **SystemSpeechTtsEngine** | Офлайн, SAPI | `Microsoft Pavel` / Male Modulation | Исключает женский голос `Microsoft Irina Desktop`; выбирает мужские голоса системы или принудительно занижает питч до мужского тембра |
+| **EdgeTtsEngine** | Онлайн, WebSocket | `ru-RU-DmitryNeural` | Нейросетевое качество; таймаут 5000 мс; Retry Policy до 2 повторных попыток (повторы — 3000 мс FastReconnect); Keep-Alive пинг (15 с); **управляется флагом `EnableEdgeTts`** |
+| **SileroTtsEngine** | Офлайн, ONNX | `aidar` / `baya` | Локальный ONNX `Models/Silero/v4_ru.onnx`; Guided Setup — без HTTP; при отсутствии файла — инструкция для ручной установки |
+| **SystemSpeechTtsEngine** | Офлайн, SAPI5 | **Silero Aidar > Silero Baya > Pavel** | При старте выводит все найденные SAPI5 голоса; Silero Aidar (установлен через `SileroTTS_Ru_Setup`) — наивысший приоритет; запрет Ирины |
 
 ### Инструкция по ручной установке модели Silero TTS
 Для использования офлайн-синтеза речи Silero (голос `aidar`):
@@ -284,9 +292,10 @@ Processing ──(conf ∈ [0.60, 0.82))──> AwaitingConfirmation
   "Tts": {
     "PreferredEngine": "Edge",
     "EdgeVoice": "ru-RU-DmitryNeural",
-    "SileroModelPath": "Models/Silero/ru_v3.onnx",
+    "SileroModelPath": "Models/Silero/v4_ru.onnx",
     "SileroSpeaker": "aidar",
-    "ConnectionTimeoutMs": 2500
+    "ConnectionTimeoutMs": 5000,
+    "EnableEdgeTts": true
   },
   "Vosk": {
     "ModelPath": "./model"
@@ -297,6 +306,9 @@ Processing ──(conf ∈ [0.60, 0.82))──> AwaitingConfirmation
   }
 }
 ```
+
+> **💡 `EnableEdgeTts: false`** — полностью отключает Edge-TTS (Дмитрий, онлайн). Ассистент работает строго офлайн: первичным голосом становится **Silero SAPI5 Aidar** (установленный через `SileroTTS_Ru_Setup`), без сетевых запросов.
+> **💡 `EnableEdgeTts: true`** (по умолчанию) — Edge-TTS Дмитрий работает как Primary с Retry Policy (до 2 попыток) и автоматическим сбросом на Silero / SAPI5 при сбоях.
 
 ---
 

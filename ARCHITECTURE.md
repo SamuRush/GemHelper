@@ -48,9 +48,9 @@ flowchart TD
     VFS --> TTS[CompositeVoiceFeedbackService]
 
     subgraph TTS_Pipeline [Resilient TTS Pipeline - Strictly Male Voices]
-        TTS -->|1. Primary| EDGE[EdgeTtsEngine / ru-RU-DmitryNeural + 5000ms Connect + Retry Policy 2 retries + Keep-Alive]
+        TTS -->|1. Primary (EnableEdgeTts=true)| EDGE[EdgeTtsEngine / ru-RU-DmitryNeural + 5000ms Connect + Retry Policy 2 retries с FastReconnect 3000ms]
         EDGE -.->|Failover on All Retries Exhausted| SILERO[SileroTtsEngine / Guided Setup ONNX v4_ru.onnx: aidar / baya]
-        SILERO -.->|Failover on Missing Model| SAPI[SystemSpeechTtsEngine / Windows SAPI: Pavel or Pitch-Shift -40%]
+        SILERO -.->|Failover on Missing Model| SAPI[SystemSpeechTtsEngine / SAPI5: Silero Aidar > Silero Baya > Microsoft Pavel > pitch-shift]
         TTS -->|Pause / Resume & Confirmation| VL
     end
 ```
@@ -117,7 +117,7 @@ flowchart TD
 - [`Voice/WakeWord/VoskGrammarWakeWordDetector.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Voice/WakeWord/VoskGrammarWakeWordDetector.cs):
   - KWS-детектор по умолчанию для целевого слова («джарвис») и любых кастомных имен («петрович», «гена», «цицерон» и др.).
   - Использует малую акустическую модель `vosk-model-small-ru` (~45 МБ, автозагрузка при отсутствии) с жестко ограниченной грамматикой `["{customName}", "[unk]"]`.
-  - Маршалинг грамматики выполняется строго как UTF-8 через нативный P/Invoke (`vosk_recognizer_new_grm` с `LPUTF8Str`), устраняя предупреждение Kaldi `Ignoring word missing in vocabulary: ''`.
+  - Маршалинг грамматики выполняется **строго как UTF-8** через нативный P/Invoke (`vosk_recognizer_new_grm` с `LPUTF8Str`), устраняя предупреждение Kaldi `Ignoring word missing in vocabulary: ''`. Небезопасный fallback на стандартный конструктор `VoskRecognizer(Model, float, string)` (без гарантии UTF-8) полностью исключён: при недоступности Reflection бросается явное `InvalidOperationException` с диагностическим сообщением.
 - [`Voice/WakeWord/WakeWordFactory.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Voice/WakeWord/WakeWordFactory.cs):
   - Фабрика: по умолчанию инициализирует `VoskGrammarWakeWordDetector` для мгновенной 0 мс детекции как для имени «джарвис», так и для кастомных имен.
 - [`Services/VoiceListener.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/VoiceListener.cs):
@@ -167,15 +167,15 @@ flowchart TD
 - [`Services/CompositeVoiceFeedbackService.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/CompositeVoiceFeedbackService.cs):
   - Реализует `IVoiceFeedbackService`.
   - Гибридный оркестратор со строго мужским тембром речи и цепочкой отказоустойчивости:
-    1. **Primary**: `EdgeTtsEngine` (`ru-RU-DmitryNeural`, онлайн, базовый таймаут 5000 мс, Retry Policy до 2 повторных попыток переподключения, Keep-Alive пинг).
+    1. **Primary**: `EdgeTtsEngine` (`ru-RU-DmitryNeural`, онлайн) — **только при `EnableEdgeTts=true`** (по умолчанию `true`). При `EnableEdgeTts=false` шаг пропускается, первичным становится System.Speech (Silero SAPI5 Aidar).
     2. **Secondary**: `SileroTtsEngine` (локальный ONNX `Models/Silero/v4_ru.onnx`, мужской голос `aidar`/`baya`, Guided Setup).
-    3. **Safety Fallback**: `SystemSpeechTtsEngine` (Windows SAPI, мужской голос `Microsoft Pavel` или модуляция ExtraLow pitch prosody; запрет голоса Ирины).
+    3. **Safety Fallback**: `SystemSpeechTtsEngine` (Windows SAPI5, приоритет: Silero Aidar > Silero Baya > Microsoft Pavel > модуляция ExtraLow pitch; запрет голоса Ирины).
   - Потокобезопасный `SemaphoreSlim(1, 1)` для сериализации речи.
   - Детальное логирование каждого шага: `[TTS] Попытка синтеза...`, `[TTS: Edge] Воспроизведение завершено.`, `[TTS: Warning] Сбой...`, `[TTS: Error]`.
   - Координация с Vosk: пауза микрофона перед речью, 300 мс кулдаун для затухания акустического эха, активация `EnterConfirmationListening` при наличии активного `PendingAction`.
-- [`Services/TTS/EdgeTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/EdgeTtsEngine.cs): WebSocket-клиент Edge Speech (`ru-RU-DmitryNeural`), генерация DRM-токена `Sec-MS-GEC`, базовый таймаут подключения 5000 мс, политика повторов Retry Policy (до 2 повторных попыток переподключения перед переключением на fallback), автоматический сброс счетчика ошибок при успешном синтезе и фоновый Keep-Alive WebSocket пинг каждые 15 сек.
+- [`Services/TTS/EdgeTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/EdgeTtsEngine.cs): WebSocket-клиент Edge Speech (`ru-RU-DmitryNeural`), генерация DRM-токена `Sec-MS-GEC`, базовый таймаут подключения **5000 мс**, политика повторов Retry Policy (**до 2 повторных попыток** переподключения перед переключением на fallback) — первая попытка с `ConnectionTimeoutMs` (5000 мс), повторные — с `FastReconnectTimeoutMs` (3000 мс) для ускорения сброса на SAPI5, автоматический сброс счетчика ошибок при успешном синтезе и фоновый Keep-Alive WebSocket пинг каждые 15 сек.
 - [`Services/TTS/SileroTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/SileroTtsEngine.cs): Локальный ONNX Runtime движок (`Models/Silero/v4_ru.onnx`, мужской голос `aidar`/`baya`). Guided Setup режим: сетевые загрузки через `HttpClient` и списки зеркал полностью удалены; при отсутствии локальной модели мгновенно выводится консольная рамка со ссылкой на ручное скачивание (`https://models.silero.ai/models/tts/ru/v4_ru.onnx` -> `./Models/Silero/v4_ru.onnx`), статус переключается в `IsAvailable = false` без задержек и подвисаний.
-- [`Services/TTS/SystemSpeechTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/SystemSpeechTtsEngine.cs): Надежный системный fallback. Исключает женский голос `Microsoft Irina Desktop`, выбирает установленные мужские голоса (`Microsoft Pavel`, `David`) или применяет занижение тона/питча (SSML `-40% prosody`) для сохранения мужского тембра.
+- [`Services/TTS/SystemSpeechTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/SystemSpeechTtsEngine.cs): Надежный системный fallback. При старте выводит в лог **все обнаруженные голоса SAPI5** (`[TTS: SAPI5] Обнаружен голос: ...`). Приоритет выбора голоса: **Silero SAPI5 Aidar** (установленный через `SileroTTS_Ru_Setup`) > **Silero SAPI5 Baya** > **Microsoft Pavel** > любой мужской > принудительная модуляция тона (SSML `-40% prosody`). Женский голос `Microsoft Irina Desktop` категорически заблокирован.
 
 ### 3.4 Обработчики команд (`Handlers/`)
 Все обработчики получают экземпляр `IVoiceFeedbackService` через внедрение зависимостей (DI) в конструкторе, что устраняет обход синтеза и гарантирует прохождение через первичный Edge-TTS с безопасным откатом:
@@ -280,6 +280,7 @@ stateDiagram-v2
 ### Правило 3. Конфигурация исключительно через `appsettings.json`
 - Никаких захардкоженных API-ключей, сетевых URL, путей к моделям или голосов TTS в коде.
 - Все параметры добавляются в `appsettings.json`, маппятся в классы DTO в `AppSettingsService.cs` и инжектируются через `IConfiguration`.
+- Ключевые параметры секции `Tts`: `PreferredEngine`, `EdgeVoice`, `SileroModelPath`, `SileroSpeaker`, `ConnectionTimeoutMs`, **`EnableEdgeTts`** (bool, по умолчанию `true` — при `false` Edge-TTS отключается, первичным движком становится System.Speech с голосом Silero SAPI5 Aidar).
 
 ### Правило 4. Запрет на коммит тяжелых бинарников и моделей в Git
 - Каталоги `model/` (Vosk: `vosk-model-ru-0.42`, ~1.5 ГБ), `Models/TTS/` (Silero ONNX), кэши, временные аудиофайлы (`*.wav`, `*.mp3`) и сборки (`bin/`, `obj/`) строго занесены в `.gitignore`.

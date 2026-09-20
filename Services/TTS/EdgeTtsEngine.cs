@@ -192,7 +192,8 @@ public sealed class EdgeTtsEngine : ITtsEngine, IDisposable
             // Начальная попытка + до 2 повторных попыток переподключения (всего до 3 попыток)
             for (int attempt = 0; attempt <= maxRetries; attempt++)
             {
-                int currentTimeout = baseTimeout;
+                // При повторных попытках используем FastReconnectTimeoutMs для ускоренного сброса на SAPI5
+                int currentTimeout = attempt == 0 ? baseTimeout : FastReconnectTimeoutMs;
 
                 try
                 {

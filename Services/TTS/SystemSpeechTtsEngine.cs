@@ -33,13 +33,23 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
 
     /// <summary>
     /// Configures strictly male voice, excluding Irina and female voices completely.
-    /// If no male voices are available on Windows, sets needPitchShift to true to modify voice pitch.
+    /// Priority order: Silero Aidar (SAPI5) > Silero Baya (SAPI5) > Microsoft Pavel > Any Russian male > Any male > pitch-shift fallback.
+    /// Logs all discovered SAPI5 voices at startup.
     /// </summary>
     public static (string? voiceName, bool needPitchShift) ConfigureMaleRussianVoice(SpeechSynthesizer synthesizer)
     {
         try
         {
             var installedVoices = synthesizer.GetInstalledVoices();
+
+            // Вывести в лог все обнаруженные в системе голоса SAPI5
+            Console.ForegroundColor = ConsoleColor.DarkCyan;
+            foreach (var voice in installedVoices)
+            {
+                Console.WriteLine($"[TTS: SAPI5] Обнаружен голос: {voice.VoiceInfo.Name} ({voice.VoiceInfo.Culture})");
+            }
+            Console.ResetColor();
+
             if (installedVoices.Count == 0)
             {
                 return (null, true);
@@ -57,6 +67,49 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
                        name.Contains("Susan", StringComparison.OrdinalIgnoreCase) ||
                        name.Contains("Hana", StringComparison.OrdinalIgnoreCase) ||
                        name.Contains("Female", StringComparison.OrdinalIgnoreCase);
+            }
+
+            // Priority 0: Установленный Silero SAPI5 — голос Aidar (мужской)
+            var sileroAidar = installedVoices.FirstOrDefault(v =>
+                v.Enabled &&
+                (v.VoiceInfo.Name.Equals("Aidar", StringComparison.OrdinalIgnoreCase) ||
+                 v.VoiceInfo.Name.Contains("Silero Aidar", StringComparison.OrdinalIgnoreCase) ||
+                 v.VoiceInfo.Name.Contains("Silero - Aidar", StringComparison.OrdinalIgnoreCase) ||
+                 v.VoiceInfo.Name.Contains("Aidar", StringComparison.OrdinalIgnoreCase)));
+
+            if (sileroAidar != null)
+            {
+                synthesizer.SelectVoice(sileroAidar.VoiceInfo.Name);
+                synthesizer.Rate = 1;
+                synthesizer.Volume = 100;
+
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"[TTS: System.Speech] Выбран Silero SAPI5 голос: '{sileroAidar.VoiceInfo.Name}' (Aidar, мужской, приоритет 0).");
+                Console.ResetColor();
+
+                return (sileroAidar.VoiceInfo.Name, false);
+            }
+
+            // Priority 0.5: Установленный Silero SAPI5 — голос Baya (мужской баритон)
+            var sileroBaya = installedVoices.FirstOrDefault(v =>
+                v.Enabled &&
+                !IsFemale(v) &&
+                (v.VoiceInfo.Name.Equals("Baya", StringComparison.OrdinalIgnoreCase) ||
+                 v.VoiceInfo.Name.Contains("Silero Baya", StringComparison.OrdinalIgnoreCase) ||
+                 v.VoiceInfo.Name.Contains("Silero - Baya", StringComparison.OrdinalIgnoreCase) ||
+                 v.VoiceInfo.Name.Contains("Baya", StringComparison.OrdinalIgnoreCase)));
+
+            if (sileroBaya != null)
+            {
+                synthesizer.SelectVoice(sileroBaya.VoiceInfo.Name);
+                synthesizer.Rate = 1;
+                synthesizer.Volume = 100;
+
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"[TTS: System.Speech] Выбран Silero SAPI5 голос: '{sileroBaya.VoiceInfo.Name}' (Baya, мужской, приоритет 0.5).");
+                Console.ResetColor();
+
+                return (sileroBaya.VoiceInfo.Name, false);
             }
 
             // Priority 1: Russian male voice (e.g. Microsoft Pavel)
@@ -108,7 +161,7 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
                 synthesizer.Volume = 100;
 
                 Console.ForegroundColor = ConsoleColor.DarkYellow;
-                Console.WriteLine($"[TTS: System.Speech Warning] В системе не найден установленный мужской голос SAPI (например, Pavel). " +
+                Console.WriteLine($"[TTS: System.Speech Warning] В системе не найден установленный мужской голос SAPI5 (Silero Aidar, Baya, Pavel). " +
                                   $"Включена модуляция питча (ExtraLow Pitch): женский голос Ирины заблокирован, тембр занижен до мужского.");
                 Console.ResetColor();
 

@@ -215,8 +215,15 @@ public sealed class VoskGrammarWakeWordDetector : IWakeWordDetector
             }
         }
 
-        // Fallback to standard constructor if reflection fails
-        return new VoskRecognizer(model, sampleRate, grammarJson);
+        // Небезопасный fallback на стандартный конструктор категорически исключён:
+        // VoskRecognizer(Model, float, string) не гарантирует передачу строки как UTF-8,
+        // что приводит к предупреждению Kaldi "Ignoring word missing in vocabulary: ''"
+        // при кириллических именах пробуждения (например, "джарвис").
+        // При недоступности Reflection — бросаем явное исключение с диагностикой.
+        throw new InvalidOperationException(
+            "[VoskGrammarWakeWordDetector] Не удалось создать Grammar Recognizer через UTF-8 P/Invoke. " +
+            "Reflection getCPtr/IntPtr-конструктор недоступен. " +
+            "Убедитесь, что libvosk.dll загружена и сборка не выполнена в режиме AOT без Reflection Metadata.");
     }
 
     public bool ProcessFrame(ReadOnlySpan<byte> pcmData)

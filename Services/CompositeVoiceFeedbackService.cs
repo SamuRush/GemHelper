@@ -14,6 +14,7 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
     private readonly ITtsEngine _systemSpeech;
     private readonly VoiceListener? _voiceListener;
     private readonly SemaphoreSlim _speakingSemaphore = new(1, 1);
+    private readonly bool _enableEdgeTts;
     private bool _disposed = false;
 
     /// <summary>
@@ -41,7 +42,8 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
             sileroTts: new SileroTtsEngine(
                 configuration?["Tts:SileroModelPath"] ?? SileroTtsEngine.DefaultModelPath,
                 configuration?["Tts:SileroSpeaker"] ?? "aidar"),
-            systemSpeech: new SystemSpeechTtsEngine())
+            systemSpeech: new SystemSpeechTtsEngine(),
+            enableEdgeTts: !bool.TryParse(configuration?["Tts:EnableEdgeTts"], out bool edgeFlag) || edgeFlag)
     {
     }
 
@@ -52,7 +54,8 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
             voiceListener: voiceListener,
             edgeTts: new EdgeTtsEngine(ttsConfig.EdgeVoice, ttsConfig.ConnectionTimeoutMs),
             sileroTts: new SileroTtsEngine(ttsConfig.SileroModelPath, ttsConfig.SileroSpeaker),
-            systemSpeech: new SystemSpeechTtsEngine())
+            systemSpeech: new SystemSpeechTtsEngine(),
+            enableEdgeTts: ttsConfig.EnableEdgeTts)
     {
     }
 
@@ -60,12 +63,14 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
         VoiceListener? voiceListener,
         ITtsEngine edgeTts,
         ITtsEngine sileroTts,
-        ITtsEngine systemSpeech)
+        ITtsEngine systemSpeech,
+        bool enableEdgeTts = true)
     {
         _voiceListener = voiceListener;
         _edgeTts = edgeTts;
         _sileroTts = sileroTts;
         _systemSpeech = systemSpeech;
+        _enableEdgeTts = enableEdgeTts;
 
         Instance = this;
 
@@ -75,9 +80,10 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
 
         Console.ForegroundColor = ConsoleColor.Green;
         Console.WriteLine($"[+] [TTS] Инициализирована гибридная архитектура озвучки:");
-        Console.WriteLine($"    - Primary (Online):  {_edgeTts.Name} ({edgeVoice}, Доступен: {_edgeTts.IsAvailable})");
+        Console.WriteLine($"    - EnableEdgeTts:     {_enableEdgeTts}");
+        Console.WriteLine($"    - Primary (Online):  {_edgeTts.Name} ({edgeVoice}, Доступен: {_edgeTts.IsAvailable}{(!_enableEdgeTts ? ", ОТКЛЮЧЁН" : "")})");
         Console.WriteLine($"    - Secondary (Local): {_sileroTts.Name} (ONNX: {sileroSpeaker}, Доступен: {_sileroTts.IsAvailable})");
-        Console.WriteLine($"    - Fallback (SAPI):   {_systemSpeech.Name} ({systemVoice}, Доступен: {_systemSpeech.IsAvailable})");
+        Console.WriteLine($"    - Fallback (SAPI5):  {_systemSpeech.Name} ({systemVoice}, Доступен: {_systemSpeech.IsAvailable})");
         Console.ResetColor();
     }
 
@@ -102,34 +108,43 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
             string sileroSpeaker = (_sileroTts as SileroTtsEngine)?.Speaker ?? "aidar";
             string systemVoice = (_systemSpeech as SystemSpeechTtsEngine)?.SelectedVoiceName ?? "Default";
 
-            // Step 1: Primary Engine (Edge-TTS)
-            try
+            // Step 1: Primary Engine (Edge-TTS) — только если включён в конфиге
+            if (_enableEdgeTts)
             {
-                if (_edgeTts.IsAvailable)
+                try
                 {
-                    Console.ForegroundColor = ConsoleColor.Cyan;
-                    Console.WriteLine($"[TTS Engine: Edge-TTS ({edgeVoice})]");
-                    Console.ResetColor();
+                    if (_edgeTts.IsAvailable)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Cyan;
+                        Console.WriteLine($"[TTS Engine: Edge-TTS ({edgeVoice})]");
+                        Console.ResetColor();
 
-                    await _edgeTts.SpeakAsync(text, cancellationToken);
-                    LastUsedEngineName = _edgeTts.Name;
-                    spoken = true;
+                        await _edgeTts.SpeakAsync(text, cancellationToken);
+                        LastUsedEngineName = _edgeTts.Name;
+                        spoken = true;
 
-                    Console.ForegroundColor = ConsoleColor.Green;
-                    Console.WriteLine("[TTS: Edge] Воспроизведение завершено.");
-                    Console.ResetColor();
+                        Console.ForegroundColor = ConsoleColor.Green;
+                        Console.WriteLine("[TTS: Edge] Воспроизведение завершено.");
+                        Console.ResetColor();
+                    }
+                    else
+                    {
+                        Console.ForegroundColor = ConsoleColor.DarkYellow;
+                        Console.WriteLine("[TTS: Warning] Сбой Edge-TTS: сетевой интерфейс недоступен (нет сети). Переключение на Silero TTS...");
+                        Console.ResetColor();
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
                     Console.ForegroundColor = ConsoleColor.DarkYellow;
-                    Console.WriteLine("[TTS: Warning] Сбой Edge-TTS: сетевой интерфейс недоступен (нет сети). Переключение на Silero TTS...");
+                    Console.WriteLine($"[TTS: Warning] Сбой Edge-TTS: {ex.Message}. Переключение на Silero TTS...");
                     Console.ResetColor();
                 }
             }
-            catch (Exception ex)
+            else
             {
-                Console.ForegroundColor = ConsoleColor.DarkYellow;
-                Console.WriteLine($"[TTS: Warning] Сбой Edge-TTS: {ex.Message}. Переключение на Silero TTS...");
+                Console.ForegroundColor = ConsoleColor.DarkCyan;
+                Console.WriteLine("[TTS] Edge-TTS отключён (EnableEdgeTts=false). Первичный движок — System.Speech (Silero SAPI5 Aidar).");
                 Console.ResetColor();
             }
 
