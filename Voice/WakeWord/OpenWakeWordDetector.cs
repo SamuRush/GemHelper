@@ -27,8 +27,8 @@ public sealed class OpenWakeWordDetector : IWakeWordDetector
     private InferenceSession? _session;
     private string? _inputTensorName;
     private int[]? _inputDimensions;
-    private readonly int _frameSizeSamples; // Typically 1280 samples = 80ms at 16kHz
-    private readonly float[] _audioBuffer;
+    private int _frameSizeSamples; // Adaptive frame size (1536 for [1,16,96], typically ~80-96ms at 16kHz)
+    private float[] _audioBuffer;
     private int _bufferFill = 0;
     private bool _disposed = false;
 
@@ -188,8 +188,14 @@ public sealed class OpenWakeWordDetector : IWakeWordDetector
             _inputTensorName = firstInput.Key;
             _inputDimensions = firstInput.Value?.Dimensions;
 
+            if (_inputDimensions != null && _inputDimensions.Length == 3 && _inputDimensions[1] > 0 && _inputDimensions[2] > 0)
+            {
+                _frameSizeSamples = _inputDimensions[1] * _inputDimensions[2];
+                _audioBuffer = new float[_frameSizeSamples * 2];
+            }
+
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine($"[WakeWord: ONNX] Инициализирован инференс '{_modelPath}' (вход: {_inputTensorName ?? "input"}, задержка 50–80 мс).");
+            Console.WriteLine($"[WakeWord: ONNX] Инициализирован инференс '{_modelPath}' (вход: {_inputTensorName ?? "input"}, размер кадра: {_frameSizeSamples}, задержка 50–80 мс).");
             Console.ResetColor();
         }
         catch (Exception ex)
@@ -219,7 +225,7 @@ public sealed class OpenWakeWordDetector : IWakeWordDetector
         }
         _bufferFill += toCopy;
 
-        // Run inference once we accumulated at least _frameSizeSamples (80ms)
+        // Run inference once we accumulated at least _frameSizeSamples
         if (_bufferFill >= _frameSizeSamples)
         {
             var sw = Stopwatch.StartNew();
@@ -259,8 +265,19 @@ public sealed class OpenWakeWordDetector : IWakeWordDetector
             if (_inputDimensions != null && _inputDimensions.Length == 3)
             {
                 int dim1 = _inputDimensions[1] > 0 ? _inputDimensions[1] : 16;
-                int dim2 = _inputDimensions[2] > 0 ? _inputDimensions[2] : (sampleArray.Length / dim1);
-                inputTensor = new DenseTensor<float>(sampleArray, new[] { 1, dim1, dim2 });
+                int dim2 = _inputDimensions[2] > 0 ? _inputDimensions[2] : 96;
+                int required = dim1 * dim2;
+                float[] tensorData;
+                if (sampleArray.Length == required)
+                {
+                    tensorData = sampleArray;
+                }
+                else
+                {
+                    tensorData = new float[required];
+                    Array.Copy(sampleArray, tensorData, Math.Min(sampleArray.Length, required));
+                }
+                inputTensor = new DenseTensor<float>(tensorData, new[] { 1, dim1, dim2 });
             }
             else if (_inputDimensions != null && _inputDimensions.Length == 2)
             {
@@ -291,7 +308,9 @@ public sealed class OpenWakeWordDetector : IWakeWordDetector
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[OpenWakeWordDetector] Ошибка инференса: {ex.Message}");
+            Console.ForegroundColor = ConsoleColor.DarkYellow;
+            Console.WriteLine($"[OpenWakeWordDetector Warning] Ошибка инференса: {ex.Message}");
+            Console.ResetColor();
         }
 
         return false;

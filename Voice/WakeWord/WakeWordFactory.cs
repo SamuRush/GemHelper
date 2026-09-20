@@ -25,7 +25,8 @@ public static class WakeWordFactory
     public static IWakeWordDetector Create(
         string? wakeWord = null,
         string? onnxModelPath = null,
-        string? smallModelPath = null)
+        string? smallModelPath = null,
+        float threshold = 0.5f)
     {
         string target = string.IsNullOrWhiteSpace(wakeWord) ? "джарвис" : wakeWord.Trim().ToLowerInvariant();
 
@@ -35,7 +36,7 @@ public static class WakeWordFactory
             Console.WriteLine($"[WakeWordFactory] Выбран OpenWakeWord ONNX детектор для имени '{target}' (<80 мс задержка).");
             Console.ResetColor();
 
-            return new OpenWakeWordDetector(target, onnxModelPath);
+            return new OpenWakeWordDetector(target, onnxModelPath, threshold);
         }
         else
         {

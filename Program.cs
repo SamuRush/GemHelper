@@ -1570,9 +1570,8 @@ public static class Program
         // 17.1 Silero download mirror URLs check
         string[] expectedMirrors =
         [
-            "https://huggingface.co/snakers4/silero-models/resolve/main/models/tts/ru/ru_v3.onnx?download=true",
-            "https://models.silero.ai/models/tts/ru/v3_1_ru.onnx",
-            "https://huggingface.co/scotty-c/silero-models/resolve/main/ru_v3.onnx"
+            "https://models.silero.ai/models/tts/ru/v3_ru.onnx",
+            "https://github.com/snakers4/silero-models/raw/master/models/tts/ru/v3_ru.onnx"
         ];
         var mirrorsField = typeof(SileroTtsEngine).GetField("DownloadMirrors", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         if (mirrorsField?.GetValue(null) is not string[] actualMirrors)
@@ -1629,8 +1628,93 @@ public static class Program
         }
         Console.WriteLine("    [TTS Engine: Edge-TTS (...)] benchmark log verified.");
 
+        // Test 18: OpenWakeWord Pipeline, Tensor Shape & Instant 0 ms Transition (TASK: 55_Fix_Silero_Url_And_Wire_OpenWakeWord_Pipeline)
+        Console.WriteLine("\n[18] Testing OpenWakeWord Pipeline, Adaptive Tensor Shape & Instant Transition...");
+
+        // 18.1 OpenWakeWord adaptive buffer and ProcessFrame execution
+        using (var owd = new Gem.Voice.OpenWakeWordDetector("джарвис", threshold: 0.5f))
+        {
+            if (!owd.IsAvailable)
+                throw new Exception("OpenWakeWordDetector failed to initialize or download jarvis.onnx!");
+
+            // Feed 2 full frames (1536 samples * 2 bytes = 3072 bytes per frame -> 6144 bytes of silence)
+            byte[] pcmData = new byte[6144];
+            bool triggered = owd.ProcessFrame(pcmData);
+            if (triggered)
+                throw new Exception("OpenWakeWordDetector unexpectedly triggered on silence!");
+
+            if (owd.LastDetectionLatencyMs < 0)
+                throw new Exception("OpenWakeWordDetector.LastDetectionLatencyMs is negative after frame processing!");
+        }
+        Console.WriteLine("    OpenWakeWordDetector adaptive tensor shape & inference verified.");
+
+        // 18.2 WakeWordFactory Threshold & Type Selection
+        var factoryDetectorJarvis = Gem.Voice.WakeWordFactory.Create("джарвис", threshold: 0.6f);
+        if (factoryDetectorJarvis is not Gem.Voice.OpenWakeWordDetector)
+            throw new Exception("WakeWordFactory did not create OpenWakeWordDetector for 'джарвис'!");
+        factoryDetectorJarvis.Dispose();
+
+        var factoryDetectorCustom = Gem.Voice.WakeWordFactory.Create("петрович");
+        if (factoryDetectorCustom is not Gem.Voice.VoskGrammarWakeWordDetector)
+            throw new Exception("WakeWordFactory did not create VoskGrammarWakeWordDetector for 'петрович'!");
+        factoryDetectorCustom.Dispose();
+        Console.WriteLine("    WakeWordFactory selection & threshold verified.");
+
+        // 18.3 VoiceListener instant 0 ms transition & audio routing priority
+        var mockWakeWordDetector = new MockWakeWordDetector("джарвис");
+        var voiceListenerInstance = new VoiceListener(
+            modelPath: "./model",
+            wakeWords: ["джарвис"],
+            wakeWordDetector: mockWakeWordDetector
+        );
+        voiceListenerInstance.TransitionToWaitingForWakeWord("Ready for test");
+        if (voiceListenerInstance.CurrentState != VoiceListenerState.WaitingForWakeWord)
+            throw new Exception($"VoiceListener state != WaitingForWakeWord, got {voiceListenerInstance.CurrentState}");
+
+        // Feed audio chunk through test helper to verify wake-word detector receives it
+        byte[] testChunk = new byte[1024];
+        voiceListenerInstance.ProcessAudioChunkForTesting(testChunk, testChunk.Length, isSpeech: false);
+        if (mockWakeWordDetector.ProcessedFrameCount != 1)
+            throw new Exception($"OpenWakeWord detector did not receive streaming PCM frame! ProcessedFrameCount={mockWakeWordDetector.ProcessedFrameCount}");
+
+        // Trigger wake-word via detector event
+        mockWakeWordDetector.Trigger();
+        if (voiceListenerInstance.CurrentState != VoiceListenerState.ListeningForCommand)
+            throw new Exception($"VoiceListener did not instantly transition to ListeningForCommand upon wake-word trigger! State={voiceListenerInstance.CurrentState}");
+
+        voiceListenerInstance.Dispose();
+        Console.WriteLine("    VoiceListener instant 0 ms transition & OpenWakeWord priority audio routing verified.");
+
         Console.WriteLine("\n>>> ALL FEATURE TESTS PASSED SUCCESSFULLY! <<<\n");
 
+    }
+
+    private sealed class MockWakeWordDetector : Gem.Voice.IWakeWordDetector
+    {
+        public string Name => "OpenWakeWord-ONNX";
+        public string WakeWord { get; }
+        public event Action? OnWakeWordDetected;
+        public long LastDetectionLatencyMs => 15;
+        public int ProcessedFrameCount { get; private set; }
+
+        public MockWakeWordDetector(string wakeWord = "джарвис")
+        {
+            WakeWord = wakeWord;
+        }
+
+        public bool ProcessFrame(ReadOnlySpan<byte> pcmData)
+        {
+            ProcessedFrameCount++;
+            return false;
+        }
+
+        public void Trigger()
+        {
+            OnWakeWordDetected?.Invoke();
+        }
+
+        public void Reset() { }
+        public void Dispose() { }
     }
 
     private sealed class MockTtsEngine : ITtsEngine

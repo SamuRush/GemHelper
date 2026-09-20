@@ -17,9 +17,8 @@ public sealed class SileroTtsEngine : ITtsEngine, IDisposable
 
     private static readonly string[] DownloadMirrors =
     [
-        "https://huggingface.co/snakers4/silero-models/resolve/main/models/tts/ru/ru_v3.onnx?download=true",
-        "https://models.silero.ai/models/tts/ru/v3_1_ru.onnx",
-        "https://huggingface.co/scotty-c/silero-models/resolve/main/ru_v3.onnx"
+        "https://models.silero.ai/models/tts/ru/v3_ru.onnx",
+        "https://github.com/snakers4/silero-models/raw/master/models/tts/ru/v3_ru.onnx"
     ];
 
     private readonly string _modelPath;
@@ -118,7 +117,7 @@ public sealed class SileroTtsEngine : ITtsEngine, IDisposable
 
         using var httpClient = new HttpClient(handler)
         {
-            Timeout = TimeSpan.FromMinutes(5)
+            Timeout = TimeSpan.FromSeconds(25)
         };
         httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
 

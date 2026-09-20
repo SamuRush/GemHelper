@@ -124,12 +124,9 @@ public sealed class VoiceListener : IDisposable
     private VoiceListenerState _state = VoiceListenerState.Stopped;
     private readonly object _lock = new();
 
-    // Hybrid wake-word tracking & silence measurement
+    // Hybrid wake-word tracking & state
     private bool _wakeWordTriggered = false;
     private string _triggeredWakeWord = string.Empty;
-    private Stopwatch _silenceTimer = new();
-    private bool _soundPlayed = false;
-    private bool _hasSpokenAfterWakeWord = false;
 
     private DateTime _stateEnteredTime = DateTime.MinValue;
     private DateTime _lastSpeechTime = DateTime.MinValue;
@@ -364,10 +361,12 @@ public sealed class VoiceListener : IDisposable
 
         // 2. Инициализация адаптивного детектора вейк-ворда через WakeWordFactory
         string primaryWord = settings.WakeWord?.Name ?? _wakeWords.FirstOrDefault() ?? "джарвис";
+        float threshold = (float)(settings.WakeWord?.Threshold ?? 0.5);
         _wakeWordDetector = wakeWordDetector ?? WakeWordFactory.Create(
             primaryWord,
             settings.WakeWord?.OnnxModelPath,
-            settings.WakeWord?.SmallModelPath);
+            settings.WakeWord?.SmallModelPath,
+            threshold);
 
         _wakeWordDetector.OnWakeWordDetected += OnAdaptiveWakeWordDetected;
     }
@@ -381,7 +380,7 @@ public sealed class VoiceListener : IDisposable
                 return;
             }
 
-            string engineName = _wakeWordDetector is OpenWakeWordDetector
+            string engineName = (_wakeWordDetector is OpenWakeWordDetector || _wakeWordDetector.Name.Contains("OpenWakeWord", StringComparison.OrdinalIgnoreCase))
                 ? "OpenWakeWord (ONNX)"
                 : $"VoskGrammar (\"{_wakeWordDetector.WakeWord}\")";
             long latencyMs = _wakeWordDetector.LastDetectionLatencyMs;
@@ -516,6 +515,21 @@ public sealed class VoiceListener : IDisposable
         }
     }
 
+    internal void ProcessAudioChunkForTesting(byte[] buffer, int bytesRecorded, bool isSpeech = true)
+    {
+        lock (_lock)
+        {
+            if (_state == VoiceListenerState.WaitingForWakeWord)
+            {
+                ProcessWakeWordListening(buffer, bytesRecorded, isSpeech);
+            }
+            else if (_state == VoiceListenerState.ListeningForCommand)
+            {
+                ProcessCommandListening(buffer, bytesRecorded, isSpeech);
+            }
+        }
+    }
+
     private bool TryFindWakeWord(string text, out string matchedWakeWord)
     {
         matchedWakeWord = string.Empty;
@@ -539,15 +553,31 @@ public sealed class VoiceListener : IDisposable
 
     private void ProcessWakeWordListening(byte[] buffer, int bytesRecorded, bool isAudioSpeech)
     {
-        // 1. Адаптивный ультра-быстрый Wake-Word детектор (<80 мс, OpenWakeWord ONNX / Vosk Grammar)
+        // 1. Приоритетный конвейер: передача входящих PCM-байт в адаптивный вейк-ворд детектор
+        // Если выбрано имя «джарвис», активен OpenWakeWordDetector (<80 мс ONNX).
+        // Если выбрано альтернативное имя («алиса», «петрович»), активен VoskGrammarWakeWordDetector.
         if (_wakeWordDetector.ProcessFrame(buffer.AsSpan(0, bytesRecorded)))
+        {
+            // Детектор сработал: OnAdaptiveWakeWordDetected уже вызван по событию
+            // и мгновенно перевел FSM в ListeningForCommand (0 мс).
+            return;
+        }
+
+        // 2. Если активен OpenWakeWordDetector (или кастомный детектор для имени «джарвис»), аудиопоток НЕ передается в VoskRecognizer.
+        // Это гарантирует строгий приоритет OpenWakeWord и исключает паразитное срабатывание Vosk с задержками.
+        if (_wakeWordDetector is OpenWakeWordDetector || _wakeWordDetector is not VoskGrammarWakeWordDetector)
         {
             return;
         }
 
-        // 2. Fallback сквозного распознавания Vosk для длинных слитных фраз
+        if (_recognizer == null)
+        {
+            return;
+        }
+
+        // 3. Fallback сквозного распознавания Vosk для кастомных имен с МГНОВЕННЫМ переходом (0 мс)
         var voskSw = Stopwatch.StartNew();
-        bool isFinal = _recognizer!.AcceptWaveform(buffer, bytesRecorded);
+        bool isFinal = _recognizer.AcceptWaveform(buffer, bytesRecorded);
         string json = isFinal ? _recognizer.Result() : _recognizer.PartialResult();
         string rawText = ExtractTextFromJson(json, isFinal).Trim();
         voskSw.Stop();
@@ -562,10 +592,6 @@ public sealed class VoiceListener : IDisposable
         // Processing PartialResult
         if (string.IsNullOrWhiteSpace(rawText))
         {
-            if (_wakeWordTriggered)
-            {
-                CheckSilenceSoundTrigger(isAudioSpeech);
-            }
             return;
         }
 
@@ -578,118 +604,46 @@ public sealed class VoiceListener : IDisposable
             Console.ResetColor();
         }
 
-        // 2. В PartialResult проверяй вхождение ЛЮБОГО слова из списка WakeWords.
         if (!_wakeWordTriggered)
         {
             if (TryFindWakeWord(text, out string matchedName))
             {
-                // НЕ вызывай recognizer.Reset()!
-                // Запомни, какое именно имя сработало.
-                // Установи _wakeWordTriggered = true, запусти Stopwatch _silenceTimer = Stopwatch.StartNew().
-                // Флаг _soundPlayed = false.
                 _wakeWordTriggered = true;
                 _triggeredWakeWord = matchedName;
-                _silenceTimer = Stopwatch.StartNew();
-                _soundPlayed = false;
-                _hasSpokenAfterWakeWord = false;
 
                 Console.ForegroundColor = ConsoleColor.Magenta;
                 Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [WakeWord: VoskGrammar (\"{_triggeredWakeWord}\")] [Detection Latency: {voskLatencyMs} ms]");
                 Console.ResetColor();
 
                 OnWakeWordDetected?.Invoke(_triggeredWakeWord);
-            }
-        }
 
-        if (_wakeWordTriggered)
-        {
-            // Проверяем, говорит ли пользователь дальше после имени
-            string cleaned = Regex.Replace(text, _wakeWordsRegexPattern, "", RegexOptions.IgnoreCase).Trim();
-
-            // Если имя стояло не в начале, отсекаем его
-            if (cleaned.Equals(text, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(_triggeredWakeWord))
-            {
-                int idx = cleaned.IndexOf(_triggeredWakeWord, StringComparison.OrdinalIgnoreCase);
-                if (idx >= 0)
+                // Мгновенный переход (0 мс) без ожидания тишины 550 мс!
+                string cleaned = Regex.Replace(text, _wakeWordsRegexPattern, "", RegexOptions.IgnoreCase).Trim();
+                if (cleaned.Equals(text, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(_triggeredWakeWord))
                 {
-                    cleaned = cleaned[(idx + _triggeredWakeWord.Length)..].Trim();
-                }
-            }
-
-            // FAST PATH: Если во фразе уже распознана быстрая команда, реагируем мгновенно
-            if (!string.IsNullOrWhiteSpace(cleaned) && IsFastCommand(cleaned))
-            {
-                Console.ForegroundColor = ConsoleColor.Magenta;
-                Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [VoiceListener] FAST PATH команда зафиксирована (мгновенно): '{cleaned}'");
-                Console.ResetColor();
-
-                _recognizer.Reset();
-                ResetWakeWordState();
-
-                OnCommandSpoken?.Invoke(cleaned);
-                TransitionToWaitingForWakeWord("Ready. Listening for wake-word...");
-                return;
-            }
-
-            // Проверяем, появились ли после вейк-ворда любые другие символы/слова
-            if (!string.IsNullOrWhiteSpace(cleaned))
-            {
-                _hasSpokenAfterWakeWord = true;
-            }
-            else if (!string.IsNullOrWhiteSpace(_triggeredWakeWord))
-            {
-                int idx = text.IndexOf(_triggeredWakeWord, StringComparison.OrdinalIgnoreCase);
-                if (idx >= 0)
-                {
-                    string afterWakeWord = text[(idx + _triggeredWakeWord.Length)..].Trim();
-                    if (!string.IsNullOrWhiteSpace(afterWakeWord))
+                    int idx = cleaned.IndexOf(_triggeredWakeWord, StringComparison.OrdinalIgnoreCase);
+                    if (idx >= 0)
                     {
-                        _hasSpokenAfterWakeWord = true;
+                        cleaned = cleaned[(idx + _triggeredWakeWord.Length)..].Trim();
                     }
                 }
+
+                if (!string.IsNullOrWhiteSpace(cleaned) && IsFastCommand(cleaned))
+                {
+                    Console.ForegroundColor = ConsoleColor.Magenta;
+                    Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [VoiceListener] FAST PATH команда зафиксирована (мгновенно): '{cleaned}'");
+                    Console.ResetColor();
+
+                    _recognizer.Reset();
+                    ResetWakeWordState();
+
+                    OnCommandSpoken?.Invoke(cleaned);
+                    TransitionToWaitingForWakeWord("Ready. Listening for wake-word...");
+                    return;
+                }
+
+                TransitionToListeningForCommand(_triggeredWakeWord, string.IsNullOrWhiteSpace(cleaned) ? null : cleaned);
             }
-
-            // 3. Логика звукового сигнала (без перебивания слитной речи)
-            CheckSilenceSoundTrigger(isAudioSpeech);
-
-            // Silence fallback: если после имени тишина длится долго (>= 1100 мс) и пользователь молчит
-            if (!_hasSpokenAfterWakeWord && _silenceTimer.ElapsedMilliseconds >= 1100)
-            {
-                string finalJson = _recognizer.FinalResult();
-                string finalText = ExtractTextFromJson(finalJson, isFinal: true).Trim();
-                ProcessWakeWordFinalResult(finalText);
-            }
-        }
-    }
-
-    private void CheckSilenceSoundTrigger(bool isAudioSpeech)
-    {
-        if (!_wakeWordTriggered || _soundPlayed)
-        {
-            return;
-        }
-
-        // Если в PartialResult после вейк-ворда уже появились любые другие символы/слова (пользователь начал говорить команду), звуковой сигнал воспроизводить ЗАПРЕЩЕНО.
-        if (_hasSpokenAfterWakeWord)
-        {
-            return;
-        }
-
-        if (isAudioSpeech)
-        {
-            // Пользователь всё ещё говорит (завершает произносить имя или продолжает речь) -> обновляем таймер тишины
-            _silenceTimer.Restart();
-            return;
-        }
-
-        // Порог тишины для воспроизведения сигнала готовности: 550 мс
-        if (_silenceTimer.ElapsedMilliseconds >= 550)
-        {
-            Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [VoiceListener] Пауза после имени ({_silenceTimer.ElapsedMilliseconds} мс >= 550 мс) — сигнал готовности (бесшумный режим).");
-            Console.ResetColor();
-
-            _soundPlayed = true;
         }
     }
 
@@ -699,10 +653,6 @@ public sealed class VoiceListener : IDisposable
         {
             if (_wakeWordTriggered)
             {
-                if (!_soundPlayed && !_hasSpokenAfterWakeWord)
-                {
-                    _soundPlayed = true;
-                }
                 TransitionToListeningForCommand(_triggeredWakeWord, null);
             }
             return;
@@ -718,6 +668,8 @@ public sealed class VoiceListener : IDisposable
                 Console.ForegroundColor = ConsoleColor.Magenta;
                 Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [WakeWord: VoskGrammar (\"{_triggeredWakeWord}\")] [Detection Latency: {latencyMs} ms]");
                 Console.ResetColor();
+
+                OnWakeWordDetected?.Invoke(_triggeredWakeWord);
             }
             else
             {
@@ -758,15 +710,10 @@ public sealed class VoiceListener : IDisposable
         else
         {
             // Если cleaned пустой (пользователь сказал только имя и молчит):
-            // Переходи в режим явного ожидания команды, сыграй бип (если еще не играл) и слушай дальше.
+            // Мгновенный переход в режим явного ожидания команды (0 мс)
             Console.ForegroundColor = ConsoleColor.Magenta;
-            Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [VoiceListener] Произнесено только имя '{_triggeredWakeWord}'. Переход в режим явного ожидания команды...");
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [VoiceListener] Произнесено только имя '{_triggeredWakeWord}'. Мгновенный переход (0 мс) в режим явного ожидания команды...");
             Console.ResetColor();
-
-            if (!_soundPlayed && !_hasSpokenAfterWakeWord)
-            {
-                _soundPlayed = true;
-            }
 
             TransitionToListeningForCommand(_triggeredWakeWord, null);
         }
@@ -776,9 +723,6 @@ public sealed class VoiceListener : IDisposable
     {
         _wakeWordTriggered = false;
         _triggeredWakeWord = string.Empty;
-        _soundPlayed = false;
-        _hasSpokenAfterWakeWord = false;
-        _silenceTimer.Reset();
         _wakeWordDetector?.Reset();
     }
 
