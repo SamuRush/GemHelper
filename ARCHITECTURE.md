@@ -105,7 +105,8 @@ flowchart TD
 - [`Services/VoiceListener.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/VoiceListener.cs):
   - Потоковый захват микрофона (`NAudio.Wave.WaveInEvent`, 16 кГц, 1 канал, 16 бит).
   - Потокобезопасный синглтон акустической модели Vosk (`_sharedModel`), исключающий утечки неуправляемой памяти.
-  - Оптимизация каталога модели (`rescore` / `rnnlm` изоляция) для удержания RAM < 1.5 ГБ.
+  - Использует полноразмерную акустическую модель `vosk-model-ru-0.42` (~1.5 ГБ, каталог `./model`).
+  - Оптимизация каталога модели (`rescore` / `rnnlm` изоляция) для удержания RAM < 2 ГБ.
   - FSM состояний распознавания: `WaitingForWakeWord` $\leftrightarrow$ `ListeningForCommand` с сессионной буферизацией фраз (накопление слов через `isFinal`/`PartialResult` до таймаута естественной тишины 700 мс без промежуточного `recognizer.Reset()`).
   - Метод `EnterConfirmationListening()` для захвата ответа без произнесения вейк-ворда.
 - [`Services/LlmIntentService.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/LlmIntentService.cs):
@@ -261,8 +262,8 @@ stateDiagram-v2
 - Все параметры добавляются в `appsettings.json`, маппятся в классы DTO в `AppSettingsService.cs` и инжектируются через `IConfiguration`.
 
 ### Правило 4. Запрет на коммит тяжелых бинарников и моделей в Git
-- Каталоги `model/` (Vosk), `Models/TTS/` (Silero ONNX), кэши, временные аудиофайлы (`*.wav`, `*.mp3`) и сборки (`bin/`, `obj/`) строго занесены в `.gitignore`.
-- Для развертывания моделей используются скрипты автоматической загрузки (например, `dotnet run -- --download-model`).
+- Каталоги `model/` (Vosk: `vosk-model-ru-0.42`, ~1.5 ГБ), `Models/TTS/` (Silero ONNX), кэши, временные аудиофайлы (`*.wav`, `*.mp3`) и сборки (`bin/`, `obj/`) строго занесены в `.gitignore`.
+- Для развёртывания моделей используется `dotnet run -- --download-model` (скачивает `vosk-model-ru-0.42` ~1.5 ГБ с alphacephei.com и распаковывает в `./model`).
 
 ### Правило 5. Координация TTS, единый контракт `IVoiceFeedbackService` и инвариант однократного озвучивания
 - Любой голосовой вывод ассистента обязан проходить через `IVoiceFeedbackService.SpeakAsync()` (реализованный в `CompositeVoiceFeedbackService`).

@@ -118,7 +118,7 @@ public static class Program
         {
             Console.ForegroundColor = ConsoleColor.DarkYellow;
             Console.WriteLine($"[i] Папка модели Vosk '{voskModelPath}' не найдена. Фоновый микрофон ожидает загрузки модели.");
-            Console.WriteLine("    Чтобы загрузить русскую модель Vosk (~45MB), выполните: dotnet run -- --download-model");
+            Console.WriteLine("    Чтобы загрузить полноразмерную русскую модель Vosk vosk-model-ru-0.42 (~1.5 ГБ), выполните: dotnet run -- --download-model");
             Console.ResetColor();
         }
 
@@ -480,18 +480,31 @@ public static class Program
     private static async Task HandleDownloadModelAsync()
     {
         Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.WriteLine("[+] Загрузка русской модели Vosk (~45 МБ)...");
+        Console.WriteLine("[+] Загрузка полноразмерной русской модели Vosk vosk-model-ru-0.42 (~1.5 ГБ)...");
+        Console.WriteLine("    Это займёт несколько минут. Пожалуйста, не прерывайте процесс.");
         Console.ResetColor();
 
+        var startTime = DateTime.UtcNow;
         var progress = new Progress<int>(percent =>
         {
-            Console.Write($"\rСкачивание модели: {percent}%");
+            var elapsed = (DateTime.UtcNow - startTime).TotalSeconds;
+            // Оценка скачанных МБ: 1500 МБ * percent / 100
+            double mbRead = 1500.0 * percent / 100.0;
+            string speedHint = elapsed > 3 && percent > 0
+                ? $"  ~{mbRead / elapsed:F1} МБ/с"
+                : "";
+            Console.Write($"\r  Скачивание: [{percent,3}%] {mbRead:F0} МБ / ~1500 МБ{speedHint}   ");
         });
 
         try
         {
-            await VoskModelHelper.DownloadModelAsync(targetDirectory: VoskModelHelper.DefaultModelFolder, progress: progress);
-            Console.WriteLine("\n[+] Модель успешно скачана и распакована в './model'!");
+            await VoskModelHelper.DownloadModelAsync(
+                targetDirectory: VoskModelHelper.DefaultModelFolder,
+                progress: progress);
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine("\n[+] Модель vosk-model-ru-0.42 успешно скачана и распакована в './model'!");
+            Console.WriteLine("    Можно запускать: dotnet run");
+            Console.ResetColor();
         }
         catch (Exception ex)
         {

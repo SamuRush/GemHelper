@@ -4,7 +4,7 @@ namespace Gem.Voice;
 
 public static class VoskModelHelper
 {
-    public const string DefaultModelUrl = "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip";
+    public const string DefaultModelUrl = "https://alphacephei.com/vosk/models/vosk-model-ru-0.42.zip";
     public const string DefaultModelFolder = "model";
 
     /// <summary>
@@ -26,7 +26,7 @@ public static class VoskModelHelper
     }
 
     /// <summary>
-    /// Downloads and extracts the lightweight Russian Vosk model (~45MB) to the specified folder.
+    /// Downloads and extracts the full-size Russian Vosk model vosk-model-ru-0.42 (~1.5 GB) to the specified folder.
     /// </summary>
     public static async Task DownloadModelAsync(
         string targetDirectory = DefaultModelFolder,
@@ -39,7 +39,7 @@ public static class VoskModelHelper
 
         try
         {
-            using var httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+            using var httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
 
             using var response = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             response.EnsureSuccessStatusCode();
@@ -49,7 +49,7 @@ public static class VoskModelHelper
             await using (var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken))
             await using (var fileStream = new FileStream(tempZipPath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true))
             {
-                var buffer = new byte[16384];
+                var buffer = new byte[65536];
                 long totalRead = 0;
                 int bytesRead;
 
@@ -70,7 +70,7 @@ public static class VoskModelHelper
             string tempExtractDir = Path.Combine(Path.GetTempPath(), $"vosk_extract_{Guid.NewGuid():N}");
             ZipFile.ExtractToDirectory(tempZipPath, tempExtractDir, true);
 
-            // Vosk zip usually has a root folder like "vosk-model-small-ru-0.22"
+            // Vosk zip usually has a root folder like "vosk-model-ru-0.42"
             var subDirs = Directory.GetDirectories(tempExtractDir);
             string sourceFolder = subDirs.Length == 1 ? subDirs[0] : tempExtractDir;
 
