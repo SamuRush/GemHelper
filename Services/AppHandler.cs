@@ -358,16 +358,14 @@ public sealed class AppHandler
         Console.WriteLine($"[AppHandler] Завершение работы JARVIS: \"{phrase}\"");
         Console.ResetColor();
 
-        // 1. Озвучка прощания: строго БЛОКИРУЮЩАЯ перед выходом
+        // 1. Озвучка прощания: с таймаутом 5 секунд для защиты от зависания семафора
         try
         {
-            if (voiceFeedback != null)
+            using var shutdownCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var tts = voiceFeedback ?? CompositeVoiceFeedbackService.Instance;
+            if (tts != null)
             {
-                voiceFeedback.Speak(phrase);
-            }
-            else if (CompositeVoiceFeedbackService.Instance != null)
-            {
-                CompositeVoiceFeedbackService.Instance.Speak(phrase);
+                tts.SpeakAsync(phrase, shutdownCts.Token).GetAwaiter().GetResult();
             }
             else
             {

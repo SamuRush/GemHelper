@@ -404,10 +404,11 @@ public sealed class JarvisOrchestrator
 
             try
             {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
                 var tts = feedbackService ?? CompositeVoiceFeedbackService.Instance;
                 if (tts != null)
                 {
-                    await tts.SpeakAsync("Завершаю работу, сэр.");
+                    await tts.SpeakAsync("Завершаю работу, сэр.", cts.Token);
                 }
                 else
                 {
@@ -417,6 +418,31 @@ public sealed class JarvisOrchestrator
             catch (Exception ex)
             {
                 Console.WriteLine($"[JARVIS Error] Ошибка воспроизведения прощания: {ex.Message}");
+            }
+
+            try
+            {
+                if (System.Windows.Application.Current != null)
+                {
+                    Action closeApp = () =>
+                    {
+                        try { System.Windows.Application.Current.Shutdown(); }
+                        catch (Exception ex) { Console.WriteLine($"[JARVIS Warning] Ошибка Application.Current.Shutdown: {ex.Message}"); }
+                    };
+
+                    if (System.Windows.Application.Current.Dispatcher != null && !System.Windows.Application.Current.Dispatcher.CheckAccess())
+                    {
+                        System.Windows.Application.Current.Dispatcher.Invoke(closeApp);
+                    }
+                    else
+                    {
+                        closeApp();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[JARVIS Warning] Ошибка закрытия окон/приложения: {ex.Message}");
             }
 
             await Task.Delay(300);

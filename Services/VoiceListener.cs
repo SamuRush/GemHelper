@@ -138,6 +138,7 @@ public sealed class VoiceListener : IDisposable
     private string _lastPartialText = string.Empty;
     private bool _disposed = false;
     private volatile bool _isPaused = false;
+    private volatile bool _isSpeaking = false;  // Строгая блокировка PCM-фреймов во время TTS (Acoustic Echo Suppression)
 
     /// <summary>
     /// Appends a speech chunk to the current session accumulated command text,
@@ -257,6 +258,37 @@ public sealed class VoiceListener : IDisposable
             _lastSpeechTime = DateTime.UtcNow;
             _stateEnteredTime = DateTime.UtcNow;
         }
+    }
+
+    /// <summary>
+    /// Вызывается CompositeVoiceFeedbackService в начале TTS-воспроизведения.
+    /// Выставляет флаг <c>_isSpeaking</c> — все входящие PCM-фреймы с микрофона
+    /// полностью отбрасываются (Acoustic Echo Suppression Level 2).
+    /// Также немедленно сбрасывает буферы KWS/STT, чтобы исключить «хвосты» распознавания.
+    /// </summary>
+    public void NotifySpeakingStarted()
+    {
+        _isSpeaking = true;
+        lock (_lock)
+        {
+            _recognizer?.Reset();
+            ResetWakeWordState();
+        }
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [VoiceListener] TTS начат — микрофон заблокирован (Acoustic Echo Suppression).");
+        Console.ResetColor();
+    }
+
+    /// <summary>
+    /// Вызывается CompositeVoiceFeedbackService строго ПОСЛЕ cooldown (300 мс) — когда акустическое
+    /// эхо колонок гарантированно затухло. Только после этого снимается блокировка PCM-фреймов.
+    /// </summary>
+    public void NotifySpeakingFinished()
+    {
+        _isSpeaking = false;
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [VoiceListener] TTS завершён + cooldown истёк — микрофон разблокирован.");
+        Console.ResetColor();
     }
 
     /// <summary>
@@ -489,14 +521,14 @@ public sealed class VoiceListener : IDisposable
     /// </summary>
     private void OnAudioDataAvailable(object? sender, WaveInEventArgs e)
     {
-        if (e.BytesRecorded == 0 || _isPaused)
+        if (e.BytesRecorded == 0 || _isPaused || _isSpeaking)
         {
             return;
         }
 
         lock (_lock)
         {
-            if (_state == VoiceListenerState.Stopped || _isPaused || _recognizer == null)
+            if (_state == VoiceListenerState.Stopped || _isPaused || _isSpeaking || _recognizer == null)
             {
                 return;
             }

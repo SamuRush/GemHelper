@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Vosk;
 
 namespace Gem.Voice;
@@ -21,6 +22,7 @@ public sealed class VoskGrammarWakeWordDetector : IWakeWordDetector
 
     private readonly string _modelPath;
     private readonly string _customName;
+    private readonly Regex _wakeWordRegex;  // Скомпилированный кэш: строгий матчинг по границам слов (\b...\b)
     private VoskRecognizer? _recognizer;
     private bool _disposed = false;
 
@@ -34,6 +36,12 @@ public sealed class VoskGrammarWakeWordDetector : IWakeWordDetector
     {
         _customName = string.IsNullOrWhiteSpace(customName) ? "петрович" : customName.Trim().ToLowerInvariant();
         _modelPath = string.IsNullOrWhiteSpace(modelPath) ? ResolveModelPath(DefaultSmallModelFolder) : ResolveModelPath(modelPath);
+
+        // Компилируем строгий Regex с границами слов один раз: \bджарвис\b
+        // Это предотвращает ложные срабатывания на обрывки «рис», «вис», «джа», «сюрприз» и т.д.
+        _wakeWordRegex = new Regex(
+            $@"\b{Regex.Escape(_customName)}\b",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         EnsureSmallModelAvailable();
         InitializeRecognizer();
@@ -241,7 +249,9 @@ public sealed class VoskGrammarWakeWordDetector : IWakeWordDetector
         sw.Stop();
         LastDetectionLatencyMs = sw.ElapsedMilliseconds;
 
-        if (!string.IsNullOrWhiteSpace(text) && text.Contains(_customName, StringComparison.OrdinalIgnoreCase))
+        // СТРОГИЙ ТОКЕН-МАТЧИНГ: проверяем наличие полного изолированного слова с границами \b...\b.
+        // text.Contains() запрещён — он срабатывает на обрывки «рис», «вис», «джа», «сюрприз».
+        if (!string.IsNullOrWhiteSpace(text) && _wakeWordRegex.IsMatch(text))
         {
             Reset();
             OnWakeWordDetected?.Invoke();

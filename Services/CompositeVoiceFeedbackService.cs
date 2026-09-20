@@ -101,6 +101,8 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
             // 1. Pause microphone capture before speaking across all engines
             var listener = _voiceListener ?? VoiceListener.Instance;
             listener?.PauseListening();
+            // Acoustic Echo Suppression: выставляем _isSpeaking и сбрасываем KWS/STT буферы мгновенно
+            listener?.NotifySpeakingStarted();
             OnSpeakingStarted?.Invoke();
 
             bool spoken = false;
@@ -206,8 +208,7 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
                 }
             }
 
-            // 2. Cooldown delay to allow speaker acoustic reverberation to dissipate
-            await Task.Delay(300, cancellationToken);
+            // Cooldown перенесён в finally для гарантированного выполнения (см. ниже)
         }
         catch (OperationCanceledException)
         {
@@ -223,8 +224,15 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
         {
             try
             {
-                // 3. Strict coordination with Vosk (STT): resume listening or enter confirmation listening
+                // 2. Cooldown: ждём затухания акустического эха колонок (строго в finally — не прерывается cancellation)
+                // Используем независимый CancellationToken, чтобы cooldown не прерывался вместе с основным speech-токеном
+                await Task.Delay(300).ConfigureAwait(false);
+
+                // 3. Снять флаг _isSpeaking строго ПОСЛЕ cooldown (Acoustic Echo Suppression Level 2)
                 var listener = _voiceListener ?? VoiceListener.Instance;
+                listener?.NotifySpeakingFinished();
+
+                // 4. Strict coordination with Vosk (STT): resume listening or enter confirmation listening
                 if (JarvisOrchestrator.Instance.HasPendingAction)
                 {
                     listener?.EnterConfirmationListening("Awaiting confirmation reply (bypassing wake-word)...");
