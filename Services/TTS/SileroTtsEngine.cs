@@ -17,10 +17,9 @@ public sealed class SileroTtsEngine : ITtsEngine, IDisposable
 
     private static readonly string[] DownloadMirrors =
     [
-        "https://models.silero.ai/models/tts/ru/ru_v3.onnx",
-        "https://huggingface.co/Derur/silero-models/resolve/main/ru_v3.onnx",
-        "https://huggingface.co/onnx-community/silero-models/resolve/main/ru_v3.onnx",
-        "https://raw.githubusercontent.com/snakers4/silero-models/master/models/ru/ru_v3.onnx"
+        "https://huggingface.co/snakers4/silero-models/resolve/main/models/tts/ru/ru_v3.onnx?download=true",
+        "https://models.silero.ai/models/tts/ru/v3_1_ru.onnx",
+        "https://huggingface.co/scotty-c/silero-models/resolve/main/ru_v3.onnx"
     ];
 
     private readonly string _modelPath;
@@ -88,7 +87,16 @@ public sealed class SileroTtsEngine : ITtsEngine, IDisposable
         string fullPath = ResolveModelPath(_modelPath);
         if (File.Exists(fullPath))
         {
-            return;
+            var existingFi = new FileInfo(fullPath);
+            if (existingFi.Length >= 1024 * 1024)
+            {
+                return;
+            }
+
+            Console.ForegroundColor = ConsoleColor.DarkYellow;
+            Console.WriteLine($"[TTS: Silero Warning] Локальный файл модели '{fullPath}' поврежден или имеет размер < 1 МБ ({existingFi.Length} байт). Удаление...");
+            Console.ResetColor();
+            try { File.Delete(fullPath); } catch { }
         }
 
         string? dir = Path.GetDirectoryName(fullPath);
@@ -102,10 +110,21 @@ public sealed class SileroTtsEngine : ITtsEngine, IDisposable
         Console.ResetColor();
 
         bool downloaded = false;
-        using var httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+        var handler = new SocketsHttpHandler
+        {
+            AllowAutoRedirect = true,
+            MaxAutomaticRedirections = 5
+        };
+
+        using var httpClient = new HttpClient(handler)
+        {
+            Timeout = TimeSpan.FromMinutes(5)
+        };
+        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
 
         foreach (var url in DownloadMirrors)
         {
+            string tempPath = fullPath + ".download";
             try
             {
                 Console.ForegroundColor = ConsoleColor.DarkGray;
@@ -115,11 +134,13 @@ public sealed class SileroTtsEngine : ITtsEngine, IDisposable
                 using var response = httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult();
                 if (!response.IsSuccessStatusCode)
                 {
+                    Console.ForegroundColor = ConsoleColor.DarkYellow;
+                    Console.WriteLine($"[TTS Warning] HTTP {(int)response.StatusCode} ({response.ReasonPhrase}) от {url}");
+                    Console.ResetColor();
                     continue;
                 }
 
                 long? totalBytes = response.Content.Headers.ContentLength;
-                string tempPath = fullPath + ".download";
 
                 using (var src = response.Content.ReadAsStream())
                 using (var dst = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
@@ -146,6 +167,17 @@ public sealed class SileroTtsEngine : ITtsEngine, IDisposable
                     }
                 }
 
+                // Проверка размера скачанного файла: если файл меньше 1 МБ (ошибка/HTML-страница), удаляем и переходим к следующему зеркалу
+                var downloadedInfo = new FileInfo(tempPath);
+                if (downloadedInfo.Length < 1024 * 1024)
+                {
+                    Console.ForegroundColor = ConsoleColor.DarkYellow;
+                    Console.WriteLine($"\n[TTS Warning] Скачанный файл из {url} имеет размер {downloadedInfo.Length} байт (< 1 МБ). Удаление невалидного файла...");
+                    Console.ResetColor();
+                    try { File.Delete(tempPath); } catch { }
+                    continue;
+                }
+
                 if (File.Exists(fullPath)) File.Delete(fullPath);
                 File.Move(tempPath, fullPath);
                 downloaded = true;
@@ -157,6 +189,7 @@ public sealed class SileroTtsEngine : ITtsEngine, IDisposable
             }
             catch (Exception ex)
             {
+                try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
                 Console.ForegroundColor = ConsoleColor.DarkYellow;
                 Console.WriteLine($"[TTS Warning] Ошибка загрузки с {url}: {ex.Message}");
                 Console.ResetColor();

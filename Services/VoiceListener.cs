@@ -381,8 +381,13 @@ public sealed class VoiceListener : IDisposable
                 return;
             }
 
+            string engineName = _wakeWordDetector is OpenWakeWordDetector
+                ? "OpenWakeWord (ONNX)"
+                : $"VoskGrammar (\"{_wakeWordDetector.WakeWord}\")";
+            long latencyMs = _wakeWordDetector.LastDetectionLatencyMs;
+
             Console.ForegroundColor = ConsoleColor.Magenta;
-            Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [VoiceListener] Адаптивный детектор: зафиксировано имя '{_wakeWordDetector.WakeWord}' (задержка <80 мс, бесшумный режим).");
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [WakeWord: {engineName}] [Detection Latency: {latencyMs} ms]");
             Console.ResetColor();
 
             _wakeWordDetector.Reset();
@@ -541,13 +546,16 @@ public sealed class VoiceListener : IDisposable
         }
 
         // 2. Fallback сквозного распознавания Vosk для длинных слитных фраз
+        var voskSw = Stopwatch.StartNew();
         bool isFinal = _recognizer!.AcceptWaveform(buffer, bytesRecorded);
         string json = isFinal ? _recognizer.Result() : _recognizer.PartialResult();
         string rawText = ExtractTextFromJson(json, isFinal).Trim();
+        voskSw.Stop();
+        long voskLatencyMs = voskSw.ElapsedMilliseconds;
 
         if (isFinal)
         {
-            ProcessWakeWordFinalResult(rawText);
+            ProcessWakeWordFinalResult(rawText, voskLatencyMs);
             return;
         }
 
@@ -586,7 +594,7 @@ public sealed class VoiceListener : IDisposable
                 _hasSpokenAfterWakeWord = false;
 
                 Console.ForegroundColor = ConsoleColor.Magenta;
-                Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [VoiceListener] Сквозное распознавание: зафиксировано имя '{_triggeredWakeWord}' в PartialResult.");
+                Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [WakeWord: VoskGrammar (\"{_triggeredWakeWord}\")] [Detection Latency: {voskLatencyMs} ms]");
                 Console.ResetColor();
 
                 OnWakeWordDetected?.Invoke(_triggeredWakeWord);
@@ -685,7 +693,7 @@ public sealed class VoiceListener : IDisposable
         }
     }
 
-    private void ProcessWakeWordFinalResult(string input)
+    private void ProcessWakeWordFinalResult(string input, long latencyMs = 0)
     {
         if (string.IsNullOrWhiteSpace(input))
         {
@@ -706,6 +714,10 @@ public sealed class VoiceListener : IDisposable
             {
                 _wakeWordTriggered = true;
                 _triggeredWakeWord = matchedName;
+
+                Console.ForegroundColor = ConsoleColor.Magenta;
+                Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [WakeWord: VoskGrammar (\"{_triggeredWakeWord}\")] [Detection Latency: {latencyMs} ms]");
+                Console.ResetColor();
             }
             else
             {

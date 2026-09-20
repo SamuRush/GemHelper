@@ -24,8 +24,9 @@ Models/
 *.mp3
 *.wav
 
-# --- Локальные настройки разработки ---
+# --- Локальные настройки разработки и временный трекинг ---
 appsettings.Development.json
+TASK.md
 
 # --- OS artifacts ---
 .DS_Store

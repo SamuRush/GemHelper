@@ -22,6 +22,11 @@ public interface IWakeWordDetector : IDisposable
     event Action OnWakeWordDetected;
 
     /// <summary>
+    /// Frame processing / inference latency in milliseconds for the last frame.
+    /// </summary>
+    long LastDetectionLatencyMs { get; }
+
+    /// <summary>
     /// Processes a streaming 16kHz 16-bit mono PCM audio chunk.
     /// Returns true if the wake-word was detected in this frame.
     /// </summary>

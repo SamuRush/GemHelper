@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Text.Json;
 using Vosk;
@@ -23,6 +24,7 @@ public sealed class VoskGrammarWakeWordDetector : IWakeWordDetector
 
     public string Name => "Vosk-Grammar";
     public string WakeWord => _customName;
+    public long LastDetectionLatencyMs { get; private set; }
 
     public event Action? OnWakeWordDetected;
 
@@ -186,11 +188,14 @@ public sealed class VoskGrammarWakeWordDetector : IWakeWordDetector
             return false;
         }
 
+        var sw = Stopwatch.StartNew();
         byte[] buffer = pcmData.ToArray();
         bool isFinal = _recognizer.AcceptWaveform(buffer, buffer.Length);
         string json = isFinal ? _recognizer.Result() : _recognizer.PartialResult();
-
         string text = ExtractText(json, isFinal);
+        sw.Stop();
+        LastDetectionLatencyMs = sw.ElapsedMilliseconds;
+
         if (!string.IsNullOrWhiteSpace(text) && text.Contains(_customName, StringComparison.OrdinalIgnoreCase))
         {
             Reset();

@@ -16,9 +16,9 @@ public sealed class OpenWakeWordDetector : IWakeWordDetector
 
     private static readonly string[] DownloadMirrors =
     [
+        "https://raw.githubusercontent.com/dscripka/openWakeWord/v0.5.1/openwakeword/resources/models/hey_jarvis_v0.1.onnx",
+        "https://github.com/dscripka/openWakeWord/raw/v0.5.1/openwakeword/resources/models/hey_jarvis_v0.1.onnx",
         "https://raw.githubusercontent.com/dscripka/openWakeWord/main/openwakeword/resources/models/hey_jarvis_v0.1.onnx",
-        "https://github.com/dscripka/openWakeWord/raw/main/openwakeword/resources/models/hey_jarvis_v0.1.onnx",
-        "https://huggingface.co/dscripka/openwakeword/resolve/main/hey_jarvis_v0.1.onnx",
         "https://huggingface.co/Soulcreek2/speechkit-wakeword-models/resolve/main/hey_jarvis.onnx"
     ];
 
@@ -34,6 +34,7 @@ public sealed class OpenWakeWordDetector : IWakeWordDetector
 
     public string Name => "OpenWakeWord-ONNX";
     public string WakeWord { get; }
+    public long LastDetectionLatencyMs { get; private set; }
 
     public event Action? OnWakeWordDetected;
 
@@ -83,7 +84,13 @@ public sealed class OpenWakeWordDetector : IWakeWordDetector
         Console.ResetColor();
 
         bool downloaded = false;
-        using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+        var handler = new SocketsHttpHandler
+        {
+            AllowAutoRedirect = true,
+            MaxAutomaticRedirections = 5
+        };
+        using var httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(60) };
+        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
 
         foreach (var url in DownloadMirrors)
         {
@@ -215,7 +222,10 @@ public sealed class OpenWakeWordDetector : IWakeWordDetector
         // Run inference once we accumulated at least _frameSizeSamples (80ms)
         if (_bufferFill >= _frameSizeSamples)
         {
+            var sw = Stopwatch.StartNew();
             bool triggered = RunInference(_audioBuffer.AsSpan(0, _frameSizeSamples));
+            sw.Stop();
+            LastDetectionLatencyMs = sw.ElapsedMilliseconds;
 
             // Shift buffer by half-frame or full-frame for smooth overlapping detection
             int shift = _frameSizeSamples / 2;

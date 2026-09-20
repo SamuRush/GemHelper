@@ -88,7 +88,10 @@ Gem/
 - **Полная бесшумность**: фиксация имени происходит мгновенно и **строго без звуковых сигналов (никаких Console.Beep, джинглов или проигрывания аудио)**.
 - **Прием команд**: сразу после фиксации имени поток PCM бесшовно переключается на полноразмерную акустическую модель **`vosk-model-ru-0.42`** (~1.5 ГБ) с сессионной буферизацией и таймаутом естественной паузы 700 мс.
 - **Синглтон модели Vosk**: `_sharedModel` исключает утечки неуправляемой памяти и гарантирует RAM < 2 ГБ.
-- **Трейс в консоли**: `[WakeWord: ONNX]`, `[STT: Vosk Partial]` и `[STT: Vosk Final]` в реальном времени.
+- **Диагностический бенчмарк-трейс в консоли**:
+  - `[WakeWord: OpenWakeWord (ONNX)] [Detection Latency: XX ms]` или `[WakeWord: VoskGrammar ("имя")] [Detection Latency: XX ms]` в момент срабатывания вейк-ворда.
+  - `[STT: Vosk Partial]` и `[STT: Vosk Final]` — промежуточное и итоговое распознавание речи в реальном времени.
+  - `[TTS Engine: Edge-TTS (...)]`, `[TTS Engine: Silero (...)]`, `[TTS Engine: System.Speech Fallback]` — активный движок синтеза при каждом вызове.
  
 ### FSM состояний VoiceListener
  
@@ -152,7 +155,7 @@ dotnet run -- --download-model
 | Движок | Тип | Голос | Особенности |
 |---|---|---|---|
 | **EdgeTtsEngine** | Онлайн, WebSocket | `ru-RU-DmitryNeural` | Нейросетевое качество; строгий таймаут 2500 мс; 1 быстрый Reconnect (400 мс) при сбоях; WebSocket Keep-Alive пинг (15 с) |
-| **SileroTtsEngine** | Офлайн, ONNX | `aidar` (или `baya`) | Быстрый локальный синтез ONNX (`Models/Silero/ru_v3.onnx`); автоматическая фоновая загрузка модели с прогресс-баром при первом запуске |
+| **SileroTtsEngine** | Офлайн, ONNX | `aidar` (или `baya`) | Быстрый локальный синтез ONNX (`Models/Silero/ru_v3.onnx`); автоматическая фоновая загрузка модели (SocketsHttpHandler, авто-редиректы, User-Agent, валидация размера > 1 МБ с удалением поврежденных файлов) |
 | **SystemSpeechTtsEngine** | Офлайн, SAPI | `Microsoft Pavel` / Male Modulation | Исключает женский голос `Microsoft Irina Desktop`; выбирает мужские голоса системы или принудительно занижает питч до мужского тембра |
 
 **Защита от самоперехвата (Acoustic Feedback Prevention):**  

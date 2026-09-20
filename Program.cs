@@ -1281,7 +1281,7 @@ public static class Program
             throw new Exception("AppSettingsService.Load().Tts is null!");
         if (ttsSettings.Tts.PreferredEngine != "Edge" ||
             ttsSettings.Tts.EdgeVoice != "ru-RU-DmitryNeural" ||
-            ttsSettings.Tts.SileroModelPath != "Models/TTS/silero_ru.onnx" ||
+            ttsSettings.Tts.SileroModelPath != "Models/Silero/ru_v3.onnx" ||
             ttsSettings.Tts.SileroSpeaker != "aidar")
         {
             throw new Exception($"TtsConfig values mismatch! PreferredEngine: '{ttsSettings.Tts.PreferredEngine}', EdgeVoice: '{ttsSettings.Tts.EdgeVoice}', SileroModelPath: '{ttsSettings.Tts.SileroModelPath}', SileroSpeaker: '{ttsSettings.Tts.SileroSpeaker}'");
@@ -1563,6 +1563,71 @@ public static class Program
         if (launchedFake)
             throw new Exception("SteamService.LaunchGame unexpectedly returned true for non-existent game!");
         Console.WriteLine("    SteamService.LaunchGame verified: safe execution without unexpected speech.");
+
+        // Test 17: Silero Download Mirrors & HttpClient and KWS/TTS Benchmark Logs (TASK: 54_Fix_Silero_Download_Urls_And_Http_Client)
+        Console.WriteLine("\n[17] Testing Silero mirrors, size validation & KWS/TTS benchmark logs...");
+
+        // 17.1 Silero download mirror URLs check
+        string[] expectedMirrors =
+        [
+            "https://huggingface.co/snakers4/silero-models/resolve/main/models/tts/ru/ru_v3.onnx?download=true",
+            "https://models.silero.ai/models/tts/ru/v3_1_ru.onnx",
+            "https://huggingface.co/scotty-c/silero-models/resolve/main/ru_v3.onnx"
+        ];
+        var mirrorsField = typeof(SileroTtsEngine).GetField("DownloadMirrors", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        if (mirrorsField?.GetValue(null) is not string[] actualMirrors)
+            throw new Exception("SileroTtsEngine.DownloadMirrors field not found!");
+        foreach (var em in expectedMirrors)
+        {
+            if (!actualMirrors.Contains(em))
+                throw new Exception($"SileroTtsEngine mirror '{em}' missing!");
+        }
+        Console.WriteLine("    SileroTtsEngine mirrors verified.");
+
+        // 17.2 Size validation check: dummy file < 1MB deleted on check
+        string testSmallModelPath = Path.Combine(Path.GetTempPath(), $"silero_test_{Guid.NewGuid():N}.onnx");
+        File.WriteAllBytes(testSmallModelPath, new byte[500]); // 500 bytes < 1MB
+        var testSileroInstance = new SileroTtsEngine(modelPath: testSmallModelPath);
+        if (File.Exists(testSmallModelPath))
+        {
+            File.Delete(testSmallModelPath);
+            throw new Exception("SileroTtsEngine did not delete corrupted/small (<1MB) model file!");
+        }
+        testSileroInstance.Dispose();
+        Console.WriteLine("    SileroTtsEngine < 1MB file deletion validation verified.");
+
+        // 17.3 KWS Latency properties
+        var dummyOpenWw = new Gem.Voice.OpenWakeWordDetector();
+        if (dummyOpenWw.LastDetectionLatencyMs < 0)
+            throw new Exception("OpenWakeWordDetector.LastDetectionLatencyMs is negative!");
+        dummyOpenWw.Dispose();
+
+        var dummyVoskGrammar = new Gem.Voice.VoskGrammarWakeWordDetector("тест");
+        if (dummyVoskGrammar.LastDetectionLatencyMs < 0)
+            throw new Exception("VoskGrammarWakeWordDetector.LastDetectionLatencyMs is negative!");
+        dummyVoskGrammar.Dispose();
+        Console.WriteLine("    KWS LastDetectionLatencyMs properties verified.");
+
+        // 17.4 Composite TTS Engine logging verification
+        var stringWriter = new StringWriter();
+        var oldOut = Console.Out;
+        try
+        {
+            Console.SetOut(stringWriter);
+            var mockEdgeLog = new MockTtsEngine("Edge", isAvailable: true, shouldThrow: false);
+            var mockSileroLog = new MockTtsEngine("Silero", isAvailable: true, shouldThrow: false);
+            var mockSystemLog = new MockTtsEngine("System.Speech", isAvailable: true, shouldThrow: false);
+            var testLogComposite = new CompositeVoiceFeedbackService(null, mockEdgeLog, mockSileroLog, mockSystemLog);
+            await testLogComposite.SpeakAsync("Тест логов.");
+            string logged = stringWriter.ToString();
+            if (!logged.Contains("[TTS Engine: Edge-TTS"))
+                throw new Exception($"CompositeVoiceFeedbackService did not log [TTS Engine: Edge-TTS ...]. Got: {logged}");
+        }
+        finally
+        {
+            Console.SetOut(oldOut);
+        }
+        Console.WriteLine("    [TTS Engine: Edge-TTS (...)] benchmark log verified.");
 
         Console.WriteLine("\n>>> ALL FEATURE TESTS PASSED SUCCESSFULLY! <<<\n");
 

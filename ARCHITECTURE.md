@@ -173,7 +173,7 @@ flowchart TD
   - Детальное логирование каждого шага: `[TTS] Попытка синтеза...`, `[TTS: Edge] Воспроизведение завершено.`, `[TTS: Warning] Сбой...`, `[TTS: Error]`.
   - Координация с Vosk: пауза микрофона перед речью, 300 мс кулдаун для затухания акустического эха, активация `EnterConfirmationListening` при наличии активного `PendingAction`.
 - [`Services/TTS/EdgeTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/EdgeTtsEngine.cs): WebSocket-клиент Edge Speech (`ru-RU-DmitryNeural`), генерация DRM-токена `Sec-MS-GEC`, настраиваемый таймаут подключения, 1 быстрый Reconnect с таймаутом 400 мс при сбое связи и фоновый Keep-Alive WebSocket пинг каждые 15 сек.
-- [`Services/TTS/SileroTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/SileroTtsEngine.cs): Локальный ONNX Runtime движок (`Models/Silero/ru_v3.onnx`), автоматическая фоновая загрузка модели при отсутствии, фиксация мужского голоса (`aidar`/`baya`).
+- [`Services/TTS/SileroTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/SileroTtsEngine.cs): Локальный ONNX Runtime движок (`Models/Silero/ru_v3.onnx`), автоматическая фоновая загрузка модели при отсутствии через `SocketsHttpHandler` (поддержка HTTP 302/307 редиректов `AllowAutoRedirect = true`, `MaxAutomaticRedirections = 5`, браузерный User-Agent, зеркала HuggingFace и silero.ai, валидация размера > 1 МБ с удалением поврежденных файлов), фиксация мужского голоса (`aidar`/`baya`).
 - [`Services/TTS/SystemSpeechTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/SystemSpeechTtsEngine.cs): Надежный системный fallback. Исключает женский голос `Microsoft Irina Desktop`, выбирает установленные мужские голоса (`Microsoft Pavel`, `David`) или применяет занижение тона/питча (SSML `-40% prosody`) для сохранения мужского тембра.
 
 ### 3.4 Обработчики команд (`Handlers/`)
@@ -196,9 +196,11 @@ flowchart TD
 - **Кодировка UTF-8**: В `Program.cs` при старте принудительно задаются `Console.OutputEncoding = Encoding.UTF8` и `Console.InputEncoding = Encoding.UTF8` до создания потоков вывода, исключая искажение кириллицы.
 - **Microsoft.Extensions.Logging**: Интеграция консольного провайдера `AddConsole()` с привязкой уровней из секции `Logging` файла `appsettings.json` (`Logging:LogLevel:Gem = Debug`).
 - **Сквозные маркеры трейсинга**:
+  - `[WakeWord: OpenWakeWord (ONNX)] [Detection Latency: XX ms]` / `[WakeWord: VoskGrammar ("имя")] [Detection Latency: XX ms]` — детекция вейк-ворда активным KWS-движком с фиксацией времени кадра.
   - `[STT: Vosk Partial]` / `[STT: Vosk Final]` — распознавание речи микрофоном в реальном времени.
   - `[Router: FastMatch]` — трейсинг детерминированного роутинга (`HIT` с именем команды или `MISS` с отправкой в LLM).
   - `[Router: Dispatch]` / `[Router: Result]` — исполнение команд в `CommandRouter`.
+  - `[TTS Engine: Edge-TTS (...)]`, `[TTS Engine: Silero (...)]`, `[TTS Engine: System.Speech Fallback]` — точный маркер активного движка синтеза при вызове речи.
   - `[TTS]`, `[TTS: Edge]`, `[TTS: Silero]`, `[TTS: System.Speech]`, `[TTS: Warning]`, `[TTS: Error]` — каждый этап синтеза и отказоустойчивого переключения.
 
 ---

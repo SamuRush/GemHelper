@@ -108,7 +108,7 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
                 if (_edgeTts.IsAvailable)
                 {
                     Console.ForegroundColor = ConsoleColor.Cyan;
-                    Console.WriteLine($"[TTS] Попытка синтеза через Edge-TTS ({edgeVoice})...");
+                    Console.WriteLine($"[TTS Engine: Edge-TTS ({edgeVoice})]");
                     Console.ResetColor();
 
                     await _edgeTts.SpeakAsync(text, cancellationToken);
@@ -141,7 +141,7 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
                     if (_sileroTts.IsAvailable)
                     {
                         Console.ForegroundColor = ConsoleColor.Cyan;
-                        Console.WriteLine($"[TTS] Попытка синтеза через Silero ONNX ({sileroSpeaker})...");
+                        Console.WriteLine($"[TTS Engine: Silero ({sileroSpeaker})]");
                         Console.ResetColor();
 
                         await _sileroTts.SpeakAsync(text, cancellationToken);
@@ -173,7 +173,7 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
                 try
                 {
                     Console.ForegroundColor = ConsoleColor.Cyan;
-                    Console.WriteLine($"[TTS] Синтез через аварийный System.Speech ({systemVoice})...");
+                    Console.WriteLine("[TTS Engine: System.Speech Fallback]");
                     Console.ResetColor();
 
                     await _systemSpeech.SpeakAsync(text, cancellationToken);
