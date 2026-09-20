@@ -4,6 +4,14 @@ using System.Text.Json.Nodes;
 
 namespace Gem.Services;
 
+public sealed class WakeWordConfig
+{
+    public string Name { get; set; } = "джарвис";
+    public string OnnxModelPath { get; set; } = "Models/WakeWord/jarvis.onnx";
+    public string SmallModelPath { get; set; } = "Models/VoskSmall/vosk-model-small-ru";
+    public float Threshold { get; set; } = 0.5f;
+}
+
 public sealed class AppSettingsData
 {
     public string LlmBaseUrl { get; set; } = "http://127.0.0.1:1234/v1";
@@ -13,6 +21,7 @@ public sealed class AppSettingsData
     public string CityName { get; set; } = "Санкт-Петербург";
     public double Latitude { get; set; } = 59.9386;
     public double Longitude { get; set; } = 30.3141;
+    public WakeWordConfig WakeWord { get; set; } = new();
     public List<string> WakeWords { get; set; } =
     [
         "джарвис", "jarvis", "рис", "вис",
@@ -33,11 +42,10 @@ public sealed class TtsConfig
 {
     public string PreferredEngine { get; set; } = "Edge";
     public string EdgeVoice { get; set; } = "ru-RU-DmitryNeural";
-    public string SileroModelPath { get; set; } = "Models/TTS/silero_ru.onnx";
+    public string SileroModelPath { get; set; } = "Models/Silero/ru_v3.onnx";
     public string SileroSpeaker { get; set; } = "aidar";
     public int ConnectionTimeoutMs { get; set; } = 2500;
 }
-
 
 public static class AppSettingsService
 {
@@ -49,7 +57,6 @@ public static class AppSettingsService
 
     public static string GetConfigFilePath()
     {
-        // Check current directory first (developer project dir), then BaseDirectory
         string localAppsettings = Path.Combine(Directory.GetCurrentDirectory(), "appsettings.json");
         if (File.Exists(localAppsettings)) return localAppsettings;
 
@@ -91,6 +98,18 @@ public static class AppSettingsService
                 if (tts["SileroModelPath"]?.GetValue<string>() is string smp) data.Tts.SileroModelPath = smp;
                 if (tts["SileroSpeaker"]?.GetValue<string>() is string ss) data.Tts.SileroSpeaker = ss;
                 if (tts["ConnectionTimeoutMs"]?.GetValue<int>() is int ctMs && ctMs > 0) data.Tts.ConnectionTimeoutMs = ctMs;
+            }
+
+            if (node["WakeWord"] is JsonObject ww)
+            {
+                if (ww["Name"]?.GetValue<string>() is string name && !string.IsNullOrWhiteSpace(name))
+                    data.WakeWord.Name = name.Trim().ToLowerInvariant();
+                if (ww["OnnxModelPath"]?.GetValue<string>() is string onnxPath)
+                    data.WakeWord.OnnxModelPath = onnxPath;
+                if (ww["SmallModelPath"]?.GetValue<string>() is string smallPath)
+                    data.WakeWord.SmallModelPath = smallPath;
+                if (ww["Threshold"]?.GetValue<float>() is float th)
+                    data.WakeWord.Threshold = th;
             }
 
             if (node["WakeWords"] is JsonArray wakeWordsArr)
@@ -138,6 +157,13 @@ public static class AppSettingsService
                 ["CityName"] = data.CityName,
                 ["Latitude"] = data.Latitude,
                 ["Longitude"] = data.Longitude,
+                ["WakeWord"] = new JsonObject
+                {
+                    ["Name"] = data.WakeWord.Name,
+                    ["OnnxModelPath"] = data.WakeWord.OnnxModelPath,
+                    ["SmallModelPath"] = data.WakeWord.SmallModelPath,
+                    ["Threshold"] = data.WakeWord.Threshold
+                },
                 ["Llm"] = new JsonObject
                 {
                     ["BaseUrl"] = data.LlmBaseUrl,
@@ -176,8 +202,6 @@ public static class AppSettingsService
 
             string json = root.ToJsonString(JsonOptions);
 
-
-            // Write appsettings.json in base and working directories
             string fileName = "appsettings.json";
             string[] dirs = [AppContext.BaseDirectory, Directory.GetCurrentDirectory()];
 

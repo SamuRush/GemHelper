@@ -7,10 +7,22 @@ namespace Gem.Services;
 /// <summary>
 /// Secondary / Offline TTS engine based on Silero TTS executed via Microsoft.ML.OnnxRuntime.
 /// Generates 24/48 kHz PCM audio and outputs via NAudio.
-/// If the model file is not found or ONNX runtime fails to initialize, IsAvailable evaluates to false.
+/// Guarantees strictly male voice (aidar by default) and automatic background download of ru_v3.onnx.
 /// </summary>
 public sealed class SileroTtsEngine : ITtsEngine, IDisposable
 {
+    public const string DefaultModelFolder = "Models/Silero";
+    public const string DefaultModelFileName = "ru_v3.onnx";
+    public static readonly string DefaultModelPath = Path.Combine(DefaultModelFolder, DefaultModelFileName);
+
+    private static readonly string[] DownloadMirrors =
+    [
+        "https://models.silero.ai/models/tts/ru/ru_v3.onnx",
+        "https://huggingface.co/Derur/silero-models/resolve/main/ru_v3.onnx",
+        "https://huggingface.co/onnx-community/silero-models/resolve/main/ru_v3.onnx",
+        "https://raw.githubusercontent.com/snakers4/silero-models/master/models/ru/ru_v3.onnx"
+    ];
+
     private readonly string _modelPath;
     private readonly string _speaker;
     private readonly int _sampleRate;
@@ -28,10 +40,17 @@ public sealed class SileroTtsEngine : ITtsEngine, IDisposable
 
     public SileroTtsEngine(string? modelPath = null, string? speaker = null, int sampleRate = 48000)
     {
-        _modelPath = string.IsNullOrWhiteSpace(modelPath) ? "Models/TTS/silero_ru.onnx" : modelPath;
-        _speaker = string.IsNullOrWhiteSpace(speaker) ? "aidar" : speaker;
+        // 1. По умолчанию зафиксировать мужской голос: спикер aidar (или baya)
+        _speaker = string.IsNullOrWhiteSpace(speaker) ? "aidar" : speaker.Trim().ToLowerInvariant();
+        if (_speaker is not ("aidar" or "baya"))
+        {
+            _speaker = "aidar"; // строгая фиксация мужского голоса
+        }
+
+        _modelPath = string.IsNullOrWhiteSpace(modelPath) ? DefaultModelPath : modelPath;
         _sampleRate = sampleRate > 0 ? sampleRate : 48000;
 
+        EnsureModelAvailable();
         InitializeSession();
     }
 
@@ -54,7 +73,110 @@ public sealed class SileroTtsEngine : ITtsEngine, IDisposable
             return currentDirPath;
         }
 
+        // Check fallback legacy path Models/TTS/silero_ru.onnx
+        string legacyPath = Path.Combine(AppContext.BaseDirectory, "Models", "TTS", "silero_ru.onnx");
+        if (File.Exists(legacyPath))
+        {
+            return legacyPath;
+        }
+
         return directPath;
+    }
+
+    private void EnsureModelAvailable()
+    {
+        string fullPath = ResolveModelPath(_modelPath);
+        if (File.Exists(fullPath))
+        {
+            return;
+        }
+
+        string? dir = Path.GetDirectoryName(fullPath);
+        if (!string.IsNullOrEmpty(dir))
+        {
+            Directory.CreateDirectory(dir);
+        }
+
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine($"[TTS: Silero] Модель '{fullPath}' отсутствует. Начинается автоматическая загрузка Silero v3 ONNX...");
+        Console.ResetColor();
+
+        bool downloaded = false;
+        using var httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+
+        foreach (var url in DownloadMirrors)
+        {
+            try
+            {
+                Console.ForegroundColor = ConsoleColor.DarkGray;
+                Console.WriteLine($"[TTS: Silero] Попытка загрузки из: {url}");
+                Console.ResetColor();
+
+                using var response = httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult();
+                if (!response.IsSuccessStatusCode)
+                {
+                    continue;
+                }
+
+                long? totalBytes = response.Content.Headers.ContentLength;
+                string tempPath = fullPath + ".download";
+
+                using (var src = response.Content.ReadAsStream())
+                using (var dst = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                {
+                    byte[] buffer = new byte[16384];
+                    long totalRead = 0;
+                    int read;
+                    int lastPercent = -1;
+
+                    while ((read = src.Read(buffer, 0, buffer.Length)) > 0)
+                    {
+                        dst.Write(buffer, 0, read);
+                        totalRead += read;
+
+                        if (totalBytes.HasValue && totalBytes.Value > 0)
+                        {
+                            int percent = (int)(totalRead * 100 / totalBytes.Value);
+                            if (percent != lastPercent && percent % 10 == 0)
+                            {
+                                lastPercent = percent;
+                                DrawProgressBar(percent, totalRead, totalBytes.Value);
+                            }
+                        }
+                    }
+                }
+
+                if (File.Exists(fullPath)) File.Delete(fullPath);
+                File.Move(tempPath, fullPath);
+                downloaded = true;
+
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"\n[TTS: Silero] Модель Silero v3 ONNX успешно загружена ({new FileInfo(fullPath).Length / 1024} КБ).");
+                Console.ResetColor();
+                break;
+            }
+            catch (Exception ex)
+            {
+                Console.ForegroundColor = ConsoleColor.DarkYellow;
+                Console.WriteLine($"[TTS Warning] Ошибка загрузки с {url}: {ex.Message}");
+                Console.ResetColor();
+            }
+        }
+
+        if (!downloaded && !File.Exists(fullPath))
+        {
+            Console.ForegroundColor = ConsoleColor.DarkYellow;
+            Console.WriteLine($"[TTS: Silero Warning] Автозагрузка модели Silero не удалась. При отсутствии файла будет задействован мужской System.Speech fallback.");
+            Console.ResetColor();
+        }
+    }
+
+    private static void DrawProgressBar(int percent, long currentBytes, long totalBytes)
+    {
+        const int barWidth = 30;
+        int filled = (percent * barWidth) / 100;
+        string bar = new string('=', filled) + (filled < barWidth ? ">" : "") + new string(' ', Math.Max(0, barWidth - filled - 1));
+        Console.Write($"\r[TTS: Silero Download] [{bar}] {percent}% ({currentBytes / 1024} KB / {totalBytes / 1024} KB)");
     }
 
     private void InitializeSession()
@@ -75,7 +197,7 @@ public sealed class SileroTtsEngine : ITtsEngine, IDisposable
             _isAvailable = true;
 
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine($"[TTS] Модель Silero ONNX успешно инициализирована: {fullPath} (голос: {_speaker})");
+            Console.WriteLine($"[TTS] Модель Silero ONNX успешно инициализирована: {fullPath} (мужской голос: {_speaker})");
             Console.ResetColor();
         }
         catch (Exception ex)

@@ -1,0 +1,239 @@
+using System.IO.Compression;
+using System.Text.Json;
+using Vosk;
+
+namespace Gem.Voice;
+
+/// <summary>
+/// Fast wake-word detector using a lightweight Vosk model (vosk-model-small-ru)
+/// with a strictly constrained grammar [ "{customName}", "[unk]" ] for any arbitrary wake-words (e.g. "петрович", "гена").
+/// </summary>
+public sealed class VoskGrammarWakeWordDetector : IWakeWordDetector
+{
+    public const string DefaultSmallModelFolder = "Models/VoskSmall/vosk-model-small-ru";
+    public const string SmallModelDownloadUrl = "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip";
+
+    private static Model? _smallModelSingleton;
+    private static readonly object _modelLock = new();
+
+    private readonly string _modelPath;
+    private readonly string _customName;
+    private VoskRecognizer? _recognizer;
+    private bool _disposed = false;
+
+    public string Name => "Vosk-Grammar";
+    public string WakeWord => _customName;
+
+    public event Action? OnWakeWordDetected;
+
+    public VoskGrammarWakeWordDetector(string customName, string? modelPath = null)
+    {
+        _customName = string.IsNullOrWhiteSpace(customName) ? "петрович" : customName.Trim().ToLowerInvariant();
+        _modelPath = string.IsNullOrWhiteSpace(modelPath) ? ResolveModelPath(DefaultSmallModelFolder) : ResolveModelPath(modelPath);
+
+        EnsureSmallModelAvailable();
+        InitializeRecognizer();
+    }
+
+    private static string ResolveModelPath(string path)
+    {
+        if (Path.IsPathRooted(path)) return path;
+        string direct = Path.Combine(AppContext.BaseDirectory, path);
+        if (Directory.Exists(direct)) return direct;
+        string cwd = Path.Combine(Directory.GetCurrentDirectory(), path);
+        if (Directory.Exists(cwd)) return cwd;
+        return direct;
+    }
+
+    private void EnsureSmallModelAvailable()
+    {
+        if (Directory.Exists(_modelPath) &&
+            (Directory.Exists(Path.Combine(_modelPath, "am")) || File.Exists(Path.Combine(_modelPath, "am", "final.mdl")) || Directory.Exists(Path.Combine(_modelPath, "conf"))))
+        {
+            return;
+        }
+
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine($"[WakeWord: Vosk Grammar] Малая модель Vosk не найдена в '{_modelPath}'. Начинается автозагрузка (~45 МБ)...");
+        Console.ResetColor();
+
+        try
+        {
+            Directory.CreateDirectory(_modelPath);
+            string tempZip = Path.Combine(Path.GetTempPath(), $"vosk_small_{Guid.NewGuid():N}.zip");
+
+            using (var httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(5) })
+            using (var response = httpClient.GetAsync(SmallModelDownloadUrl, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult())
+            {
+                response.EnsureSuccessStatusCode();
+                long? totalBytes = response.Content.Headers.ContentLength;
+
+                using (var src = response.Content.ReadAsStream())
+                using (var dst = new FileStream(tempZip, FileMode.Create, FileAccess.Write, FileShare.None))
+                {
+                    byte[] buffer = new byte[16384];
+                    long totalRead = 0;
+                    int read;
+                    int lastPercent = -1;
+
+                    while ((read = src.Read(buffer, 0, buffer.Length)) > 0)
+                    {
+                        dst.Write(buffer, 0, read);
+                        totalRead += read;
+
+                        if (totalBytes.HasValue && totalBytes.Value > 0)
+                        {
+                            int percent = (int)(totalRead * 100 / totalBytes.Value);
+                            if (percent != lastPercent && percent % 10 == 0)
+                            {
+                                lastPercent = percent;
+                                DrawProgressBar(percent, totalRead, totalBytes.Value);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Extract archive
+            string tempExtract = Path.Combine(Path.GetTempPath(), $"vosk_small_extract_{Guid.NewGuid():N}");
+            ZipFile.ExtractToDirectory(tempZip, tempExtract, true);
+
+            var subDirs = Directory.GetDirectories(tempExtract);
+            string sourceFolder = subDirs.Length == 1 ? subDirs[0] : tempExtract;
+
+            foreach (var file in Directory.GetFiles(sourceFolder, "*", SearchOption.AllDirectories))
+            {
+                string rel = Path.GetRelativePath(sourceFolder, file);
+                string dest = Path.Combine(_modelPath, rel);
+                string? destDir = Path.GetDirectoryName(dest);
+                if (!string.IsNullOrEmpty(destDir)) Directory.CreateDirectory(destDir);
+                File.Copy(file, dest, true);
+            }
+
+            try { Directory.Delete(tempExtract, true); } catch { }
+            try { File.Delete(tempZip); } catch { }
+
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($"\n[WakeWord: Vosk Grammar] Малая модель Vosk успешно установлена в '{_modelPath}'.");
+            Console.ResetColor();
+        }
+        catch (Exception ex)
+        {
+            Console.ForegroundColor = ConsoleColor.DarkYellow;
+            Console.WriteLine($"[WakeWord Warning] Не удалось скачать малую модель Vosk: {ex.Message}. " +
+                              $"Попытка fallback на основную модель Vosk...");
+            Console.ResetColor();
+        }
+    }
+
+    private static void DrawProgressBar(int percent, long currentBytes, long totalBytes)
+    {
+        const int barWidth = 30;
+        int filled = (percent * barWidth) / 100;
+        string bar = new string('=', filled) + (filled < barWidth ? ">" : "") + new string(' ', Math.Max(0, barWidth - filled - 1));
+        Console.Write($"\r[WakeWord: Vosk Small] [{bar}] {percent}% ({currentBytes / 1024} KB / {totalBytes / 1024} KB)");
+    }
+
+    private static Model GetOrInitSmallModel(string path)
+    {
+        if (_smallModelSingleton != null) return _smallModelSingleton;
+
+        lock (_modelLock)
+        {
+            if (_smallModelSingleton == null)
+            {
+                string modelToUse = Directory.Exists(path) ? path : VoskModelHelper.DefaultModelFolder;
+                if (!Directory.Exists(modelToUse))
+                {
+                    throw new DirectoryNotFoundException($"Каталог модели Vosk '{modelToUse}' не найден.");
+                }
+
+                Vosk.Vosk.SetLogLevel(-1);
+                _smallModelSingleton = new Model(modelToUse);
+            }
+            return _smallModelSingleton;
+        }
+    }
+
+    private void InitializeRecognizer()
+    {
+        try
+        {
+            var model = GetOrInitSmallModel(_modelPath);
+
+            // Set strictly constrained grammar: [ "{customName}", "[unk]" ]
+            string grammarJson = JsonSerializer.Serialize(new[] { _customName, "[unk]" });
+            _recognizer = new VoskRecognizer(model, 16000.0f, grammarJson);
+            _recognizer.SetMaxAlternatives(0);
+
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine($"[WakeWord: Vosk Grammar] Настроен строгий грамматический детектор для имени '{_customName}'.");
+            Console.ResetColor();
+        }
+        catch (Exception ex)
+        {
+            _recognizer = null;
+            Console.ForegroundColor = ConsoleColor.DarkYellow;
+            Console.WriteLine($"[WakeWord Warning] Ошибка инициализации Vosk Grammar recognizer: {ex.Message}");
+            Console.ResetColor();
+        }
+    }
+
+    public bool ProcessFrame(ReadOnlySpan<byte> pcmData)
+    {
+        if (_recognizer == null || pcmData.Length == 0)
+        {
+            return false;
+        }
+
+        byte[] buffer = pcmData.ToArray();
+        bool isFinal = _recognizer.AcceptWaveform(buffer, buffer.Length);
+        string json = isFinal ? _recognizer.Result() : _recognizer.PartialResult();
+
+        string text = ExtractText(json, isFinal);
+        if (!string.IsNullOrWhiteSpace(text) && text.Contains(_customName, StringComparison.OrdinalIgnoreCase))
+        {
+            Reset();
+            OnWakeWordDetected?.Invoke();
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string ExtractText(string json, bool isFinal)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            string prop = isFinal ? "text" : "partial";
+            if (root.TryGetProperty(prop, out var elem))
+            {
+                return elem.GetString() ?? string.Empty;
+            }
+        }
+        catch { }
+        return string.Empty;
+    }
+
+    public void Reset()
+    {
+        try
+        {
+            _recognizer?.Reset();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[VoskGrammarWakeWordDetector] Ошибка Reset: {ex.Message}");
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _recognizer?.Dispose();
+        _recognizer = null;
+    }
+}

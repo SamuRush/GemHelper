@@ -13,10 +13,12 @@ obj/
 
 # --- Vosk STT model (тяжёлые файлы нейросетей, ~3 ГБ) ---
 model/
+model-small/
 
-# --- ONNX модели (Silero TTS и другие весовые файлы) ---
+# --- ONNX модели (Silero TTS, openWakeWord и другие весовые файлы) ---
 Models/
 *.onnx
+*.zip
 
 # --- Временные аудиофайлы ---
 *.mp3

@@ -1,27 +1,23 @@
-# TASK: [52] Актуализация README.md и пуш на GitHub
+# TASK: [53_Adaptive_WakeWord_Silero_Autodownload_And_Tts_Stabilization]
 
-## Статус: 🔄 В работе
+## Статус: ✅ Выполнено
 
 ---
 
 ## Подзадачи
 
-- [x] Аудит `ARCHITECTURE.md` — проверка актуальности (актуален, изменений не требует)
-- [x] Аудит `README.md` — выявление расхождений с реальной кодовой базой
-- [x] Составление Implementation Plan и получение подтверждения
-- [x] Полная перезапись `README.md` под текущую архитектуру:
-  - [x] Заголовок, описание, бейджи
-  - [x] Дерево файлов проекта (актуальное)
-  - [x] Раздел STT (Vosk ru-0.42, FSM, бесшовный захват)
-  - [x] Раздел Dual-Path Routing (7 приоритетов, < 5 мс)
-  - [x] Раздел TTS (Edge → Silero → System.Speech)
-  - [x] Раздел Steam-автоматизация (Fuzzy, VDF/ACF, Pixel Scan)
-  - [x] Раздел FSM-подтверждения (PendingActionState)
-  - [x] Раздел WPF HUD Overlay (состояния Idle/Listening/Thinking/Action)
-  - [x] Таблица команд JSON-интерфейса
-  - [x] Установка, сборка, запуск
-- [ ] Проверка `git status` (нет лишних файлов)
-- [ ] `git add README.md ARCHITECTURE.md TASK.md`
-- [ ] `git commit -m "docs: synchronize README project structure and core features with latest architecture"`
-- [ ] `git push origin main`
-- [ ] Верификация: `git log --oneline -1` и `working tree clean`
+- [x] 1. Инициализация `TASK.md` и аудит зависимостей
+- [x] 2. Создание интерфейса `IWakeWordDetector` в `Voice/WakeWord/`
+- [x] 3. Реализация `OpenWakeWordDetector` (ONNX Runtime, `jarvis.onnx`, автозагрузка, 50–80 мс)
+- [x] 4. Реализация `VoskGrammarWakeWordDetector` (малая модель Vosk, грамматика `["{customName}", "[unk]"]`)
+- [x] 5. Создание фабрики `WakeWordFactory`
+- [x] 6. Рефакторинг `VoiceListener.cs` (интеграция `IWakeWordDetector`, полное устранение звуковых сигналов/бипов)
+- [x] 7. Доработка `SileroTtsEngine.cs` (автозагрузка `Models/Silero/ru_v3.onnx` с консольным прогресс-баром, мужской голос `aidar`)
+- [x] 8. Доработка `SystemSpeechTtsEngine.cs` (полный запрет женского голоса Ирины, мужской голос / занижение питча)
+- [x] 9. Стабилизация `EdgeTtsEngine.cs` (быстрый Reconnect 400 мс, Keep-Alive пинг WebSocket)
+- [x] 10. Актуализация конфигурации: `appsettings.json`, `AppSettingsService.cs`, `Program.cs`
+- [x] 11. Обновление `.gitignore` (модели, архивы, ONNX)
+- [x] 12. Верификация сборки: `dotnet build`
+- [x] 13. Синхронизация документации: `ARCHITECTURE.md` и `README.md`
+- [x] 14. Формирование аккуратного локального коммита в Git (БЕЗ `git push`)
+- [x] 15. Финальный отчёт и Walkthrough

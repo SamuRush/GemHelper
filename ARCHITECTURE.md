@@ -10,14 +10,17 @@
 
 ```mermaid
 flowchart TD
-    MIC([Микрофон / NAudio WaveIn]) -->|16kHz 16-bit PCM| VOSK[Vosk STT Engine]
-    VOSK -->|Partial / Final Result| VL[VoiceListener]
+    MIC([Микрофон / NAudio WaveIn]) -->|16kHz 16-bit PCM| VL[VoiceListener]
     
     subgraph VoiceListener_FSM [VoiceListener State Machine]
-        VL -->|WaitingForWakeWord| WW{Wake-Word Детектор}
-        WW -->|Обнаружен 'джарвис'| ACL[ListeningForCommand]
-        WW -->|Тишина / Шум| VL
-        ACL -->|Silence Timeout 700ms| CMD_READY[Команда сформирована]
+        VL -->|WaitingForWakeWord| WWF{WakeWordFactory}
+        WWF -->|'джарвис' / 'jarvis'| ONNX_WW[OpenWakeWordDetector / ONNX jarvis.onnx < 80ms]
+        WWF -->|Кастомное имя: 'петрович' и др.| VOSK_WW[VoskGrammarWakeWordDetector / vosk-model-small-ru]
+        
+        ONNX_WW -->|Детекция: БЕСШУМНО без бипов| ACL[ListeningForCommand]
+        VOSK_WW -->|Детекция: БЕСШУМНО без бипов| ACL
+        ACL -->|Поток на vosk-model-ru-0.42| VOSK[Vosk STT Engine]
+        VOSK -->|Silence Timeout 700ms| CMD_READY[Команда сформирована]
     end
 
     CMD_READY --> DUAL_PATH[LlmIntentService: Dual-Path Router]
@@ -44,20 +47,22 @@ flowchart TD
     DIRECT_RESP -->|reply: text| VFS[IVoiceFeedbackService]
     VFS --> TTS[CompositeVoiceFeedbackService]
 
-    subgraph TTS_Pipeline [Resilient TTS Pipeline]
-        TTS -->|1. Primary| EDGE[EdgeTtsEngine / Online WebSocket 2500ms]
-        EDGE -.->|Failover on Error/Timeout| SILERO[SileroTtsEngine / Local ONNX]
-        SILERO -.->|Failover on Missing Model| SAPI[SystemSpeechTtsEngine / Windows SAPI]
+    subgraph TTS_Pipeline [Resilient TTS Pipeline - Strictly Male Voices]
+        TTS -->|1. Primary| EDGE[EdgeTtsEngine / ru-RU-DmitryNeural + 400ms Reconnect + Keep-Alive]
+        EDGE -.->|Failover on Error/Timeout| SILERO[SileroTtsEngine / Local ONNX ru_v3.onnx: aidar]
+        SILERO -.->|Failover on Missing Model| SAPI[SystemSpeechTtsEngine / Windows SAPI: Pavel or Pitch-Shift -40%]
         TTS -->|Pause / Resume & Confirmation| VL
     end
 ```
 
 ### Пошаговое прохождение запроса:
-1. **Захват звука (`VoiceListener.cs`)**: Поток PCM 16 кГц передается в `Vosk.Model` (синглтон).
-   - В консоль выводятся реальные трейсы распознавания: `[STT: Vosk Partial]` и `[STT: Vosk Final]`.
-2. **Детекция активации**:
-   - В состоянии `WaitingForWakeWord` сканируются вейк-ворды (`джарвис`, `алиса`, `компьютер` и др.).
-   - При обнаружении вейк-ворда слушатель переходит в `ListeningForCommand` (HUD переключается в `Listening`).
+1. **Захват звука (`VoiceListener.cs`)**: Поток PCM 16 кГц передается в адаптивный вейк-ворд детектор `IWakeWordDetector`.
+2. **Адаптивная детекция активации (БЕЗ ЗВУКОВЫХ СИГНАЛОВ)**:
+   - В состоянии `WaitingForWakeWord` фабрика `WakeWordFactory` направляет поток:
+     - В `OpenWakeWordDetector` (OnnxRuntime `jarvis.onnx` с задержкой 50–80 мс) для имени «Джарвис». При отсутствии модель скачивается автоматически в `Models/WakeWord/`.
+     - В `VoskGrammarWakeWordDetector` (малая модель `vosk-model-small-ru` с жесткой грамматикой `["{customName}", "[unk]"]`) для кастомных имен («петрович», «гена» и др.).
+   - При обнаружении имени **НЕ ПРОИЗВОДИТСЯ никаких звуковых сигналов (никаких Console.Beep, джинглов или проигрывания звуков)**.
+   - Происходит мгновенный бесшумный переход в `ListeningForCommand` (HUD переключается в `Listening`), и поток PCM переключается на полноразмерную акустическую модель `vosk-model-ru-0.42` (~1.5 ГБ) для приема команды.
    - При истечении тишины (700 мс после окончания речи) формируется итоговая строка фразы без дробления слов на паузах.
 3. **Dual-Path Диспетчеризация (`LlmIntentService.cs`)**:
    - Сначала вызывается `TryFastMatch(spokenText)` (выполняется строго `< 5 мс`, без сетевых запросов).
@@ -69,8 +74,9 @@ flowchart TD
    - Если в ответе присутствует `CommandRequest`, роутер логирует `[Router: Dispatch] Маршрутизация команды...`, находит зарегистрированный `ICommandHandler` и вызывает `ExecuteAsync()`, после чего логирует `[Router: Result]`.
 5. **Голосовой синтез (`IVoiceFeedbackService` / `CompositeVoiceFeedbackService.cs`)**:
    - Все обработчики и пайплайн вызывают единую абстракцию `IVoiceFeedbackService.SpeakAsync(text)`.
-   - Оркестратор пытается синтезировать речь через первичный `EdgeTtsEngine` (`ru-RU-DmitryNeural`, строгий таймаут 2500 мс на подключение и первый пакет аудио).
-   - При сбое сети или таймауте логируется `[TTS: Warning]` и управление передается `SileroTtsEngine` (локальный ONNX). Если модель отсутствует, происходит прозрачный переход на аварийный `SystemSpeechTtsEngine`.
+   - **Primary**: `EdgeTtsEngine` (`ru-RU-DmitryNeural`, строгий таймаут подключения 2500 мс, механизм быстрого Reconnect за 400 мс и Keep-Alive пинг WebSocket).
+   - **Secondary**: `SileroTtsEngine` (локальный ONNX `Models/Silero/ru_v3.onnx` с автозагрузкой при отсутствии, зафиксирован строго мужской голос `aidar`).
+   - **Safety Fallback**: `SystemSpeechTtsEngine` (Windows SAPI: строго мужские голоса `Microsoft Pavel` или принудительная модуляция тона `-40% prosody` при отсутствии мужских голосов; женский голос `Microsoft Irina Desktop` категорически заблокирован).
    - На время речи микрофон `VoiceListener` глушится во избежание самоперехвата (Acoustic Feedback Prevention).
    - Если действие требует подтверждения пользователя (`HasPendingAction`), вопрос подтверждения озвучивается ровно один раз, дублирующий `response.Reply` блокируется, а микрофон переводится в режим прямого ожидания ответа без вейк-ворда (`EnterConfirmationListening`).
 
@@ -101,14 +107,26 @@ flowchart TD
 - [`Core/CommandRouter.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Core/CommandRouter.cs): Диспетчер команд. Регистрация через fluent API `.Register()`, валидация JSON и асинхронная маршрутизация.
 - [`Core/JarvisState.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Core/JarvisState.cs): Enum состояний HUD: `Idle`, `Listening`, `Thinking`, `Action`.
 
-### 3.2 Сервисы (`Services/`)
+#### 3.2 Сервисы захвата речи и адаптивного Wake-Word (`Voice/`, `Voice/WakeWord/`)
+- [`Voice/WakeWord/IWakeWordDetector.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Voice/WakeWord/IWakeWordDetector.cs):
+  - Базовый контракт потокового детектора активации (`Name`, `WakeWord`, `ProcessFrame(ReadOnlySpan<byte> pcmData)`, `event Action OnWakeWordDetected`, `Reset()`).
+- [`Voice/WakeWord/OpenWakeWordDetector.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Voice/WakeWord/OpenWakeWordDetector.cs):
+  - Высокоскоростной детектор на базе `Microsoft.ML.OnnxRuntime` для целевого слова «Джарвис».
+  - Легковесная модель `Models/WakeWord/jarvis.onnx` со сверхнизкой задержкой кадра (50–80 мс).
+  - Автоматическая фоновая загрузка модели при её отсутствии в локальной файловой системе.
+- [`Voice/WakeWord/VoskGrammarWakeWordDetector.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Voice/WakeWord/VoskGrammarWakeWordDetector.cs):
+  - Адаптивный детектор для любых произвольных пользовательских имен («петрович», «гена», «цицерон» и др.).
+  - Использует малую акустическую модель `vosk-model-small-ru` (~45 МБ, автозагрузка при отсутствии) с жестко ограниченной грамматикой: `["{customName}", "[unk]"]`.
+- [`Voice/WakeWord/WakeWordFactory.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Voice/WakeWord/WakeWordFactory.cs):
+  - Фабрика: выбирает `OpenWakeWordDetector`, если имя совпадает с «джарвис» / «jarvis», иначе инициализирует `VoskGrammarWakeWordDetector`.
 - [`Services/VoiceListener.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/VoiceListener.cs):
   - Потоковый захват микрофона (`NAudio.Wave.WaveInEvent`, 16 кГц, 1 канал, 16 бит).
-  - Потокобезопасный синглтон акустической модели Vosk (`_sharedModel`), исключающий утечки неуправляемой памяти.
-  - Использует полноразмерную акустическую модель `vosk-model-ru-0.42` (~1.5 ГБ, каталог `./model`).
-  - Оптимизация каталога модели (`rescore` / `rnnlm` изоляция) для удержания RAM < 2 ГБ.
-  - FSM состояний распознавания: `WaitingForWakeWord` $\leftrightarrow$ `ListeningForCommand` с сессионной буферизацией фраз (накопление слов через `isFinal`/`PartialResult` до таймаута естественной тишины 700 мс без промежуточного `recognizer.Reset()`).
-  - Метод `EnterConfirmationListening()` для захвата ответа без произнесения вейк-ворда.
+  - Интеграция с `IWakeWordDetector` в состоянии `WaitingForWakeWord`.
+  - **Полная бесшумность**: фиксация имени происходит мгновенно и без звуковых сигналов (никаких Console.Beep, джинглов или проигрывания аудио).
+  - Мгновенный переброс в `ListeningForCommand` с передачей аудиопотока в полноразмерную модель `vosk-model-ru-0.42` (~1.5 ГБ, каталог `./model`).
+  - Потокобезопасный синглтон модели Vosk (`_sharedModel`) с оптимизацией каталога (`rescore`/`rnnlm` изоляция) для удержания RAM < 2 ГБ.
+  - Сессионная буферизация фраз с таймаутом естественной тишины 700 мс.
+  - Метод `EnterConfirmationListening()` для прямого захвата ответа без вейк-ворда.
 - [`Services/LlmIntentService.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/LlmIntentService.cs):
   - Метод `TryFastMatch()`: 0 мс роутинг команд без обращения к LLM.
   - Интеграция с локальной LLM по стандарту OpenAI Chat Completions API (`POST /v1/chat/completions`).
@@ -138,7 +156,7 @@ flowchart TD
 - [`Services/WeatherService.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/WeatherService.cs):
   - Асинхронный клиент прогноза погоды Open-Meteo API с геокодингом городов.
 - [`Services/AppSettingsService.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/AppSettingsService.cs):
-  - Загрузка, сохранение и валидация конфигурации из `appsettings.json`.
+  - Загрузка, сохранение и валидация конфигурации из `appsettings.json` (включая параметры `WakeWord` и `Tts`).
 
 ### 3.3 Синтез речи (`Services/TTS/`)
 - [`Services/TTS/IVoiceFeedbackService.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/IVoiceFeedbackService.cs):
@@ -147,17 +165,16 @@ flowchart TD
 - [`Services/TTS/ITtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/ITtsEngine.cs): Базовый контракт движка (`Name`, `IsAvailable`, `SpeakAsync`).
 - [`Services/CompositeVoiceFeedbackService.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/CompositeVoiceFeedbackService.cs):
   - Реализует `IVoiceFeedbackService`.
-  - Гибридный оркестратор с цепочкой отказоустойчивости:
-    1. **Primary**: `EdgeTtsEngine` (высокое качество нейросети, онлайн, строгий таймаут 2500 мс на соединение и первый пакет аудио).
-    2. **Secondary**: `SileroTtsEngine` (быстрый локальный оффлайн-синтез ONNX).
-    3. **Safety Fallback**: `SystemSpeechTtsEngine` (Windows SAPI, доступен всегда).
-  - Быстрое переключение при сетевом сбое (< 1.5 с) благодаря прерыванию соединения и отсутствию блокировок.
+  - Гибридный оркестратор со строго мужским тембром речи и цепочкой отказоустойчивости:
+    1. **Primary**: `EdgeTtsEngine` (`ru-RU-DmitryNeural`, онлайн, таймаут 2500 мс, быстрый Reconnect 400 мс, Keep-Alive).
+    2. **Secondary**: `SileroTtsEngine` (локальный ONNX `Models/Silero/ru_v3.onnx`, мужской голос `aidar`, автозагрузка).
+    3. **Safety Fallback**: `SystemSpeechTtsEngine` (Windows SAPI, мужской голос `Microsoft Pavel` или модуляция ExtraLow pitch prosody; запрет голоса Ирины).
   - Потокобезопасный `SemaphoreSlim(1, 1)` для сериализации речи.
   - Детальное логирование каждого шага: `[TTS] Попытка синтеза...`, `[TTS: Edge] Воспроизведение завершено.`, `[TTS: Warning] Сбой...`, `[TTS: Error]`.
   - Координация с Vosk: пауза микрофона перед речью, 300 мс кулдаун для затухания акустического эха, активация `EnterConfirmationListening` при наличии активного `PendingAction`.
-- [`Services/TTS/EdgeTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/EdgeTtsEngine.cs): WebSocket-клиент Edge Speech, генерация DRM-токена `Sec-MS-GEC`, настраиваемый таймаут подключения и ожидания первого пакета аудио (по умолчанию 2500 мс из `TtsConfig.ConnectionTimeoutMs`), автоматический сброс сокета (`ResetClient()`) при разрыве/зависании и мгновенный проброс `WebSocketException`.
-- [`Services/TTS/SileroTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/SileroTtsEngine.cs): Локальный ONNX Runtime движок, генерация PCM 24/48 кГц.
-- [`Services/TTS/SystemSpeechTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/SystemSpeechTtsEngine.cs): Надежный fallback на системный `System.Speech.Synthesis.SpeechSynthesizer`.
+- [`Services/TTS/EdgeTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/EdgeTtsEngine.cs): WebSocket-клиент Edge Speech (`ru-RU-DmitryNeural`), генерация DRM-токена `Sec-MS-GEC`, настраиваемый таймаут подключения, 1 быстрый Reconnect с таймаутом 400 мс при сбое связи и фоновый Keep-Alive WebSocket пинг каждые 15 сек.
+- [`Services/TTS/SileroTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/SileroTtsEngine.cs): Локальный ONNX Runtime движок (`Models/Silero/ru_v3.onnx`), автоматическая фоновая загрузка модели при отсутствии, фиксация мужского голоса (`aidar`/`baya`).
+- [`Services/TTS/SystemSpeechTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/SystemSpeechTtsEngine.cs): Надежный системный fallback. Исключает женский голос `Microsoft Irina Desktop`, выбирает установленные мужские голоса (`Microsoft Pavel`, `David`) или применяет занижение тона/питча (SSML `-40% prosody`) для сохранения мужского тембра.
 
 ### 3.4 Обработчики команд (`Handlers/`)
 Все обработчики получают экземпляр `IVoiceFeedbackService` через внедрение зависимостей (DI) в конструкторе, что устраняет обход синтеза и гарантирует прохождение через первичный Edge-TTS с безопасным откатом:

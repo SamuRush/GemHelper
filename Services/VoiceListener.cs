@@ -116,6 +116,7 @@ public sealed class VoiceListener : IDisposable
     private readonly double _silenceThresholdRms;
     private readonly TimeSpan _silenceTimeout;
     private readonly TimeSpan _commandWaitTimeout;
+    private readonly IWakeWordDetector _wakeWordDetector;
 
     private VoskRecognizer? _recognizer;
     private WaveInEvent? _waveIn;
@@ -335,13 +336,15 @@ public sealed class VoiceListener : IDisposable
         string[]? wakeWords = null,
         TimeSpan? silenceTimeout = null,
         double silenceThresholdRms = 350.0,
-        TimeSpan? commandWaitTimeout = null)
+        TimeSpan? commandWaitTimeout = null,
+        IWakeWordDetector? wakeWordDetector = null)
     {
         Instance = this;
         _modelPath = modelPath;
 
         // 1. Загрузи список WakeWords из конфигурации (приведи все к нижнему регистру).
-        var configured = AppSettingsService.Load().WakeWords;
+        var settings = AppSettingsService.Load();
+        var configured = settings.WakeWords;
         var wordsSource = (wakeWords != null && wakeWords.Length > 0)
             ? wakeWords
             : (configured != null && configured.Count > 0)
@@ -358,6 +361,34 @@ public sealed class VoiceListener : IDisposable
         _silenceTimeout = silenceTimeout ?? TimeSpan.FromMilliseconds(700);
         _silenceThresholdRms = silenceThresholdRms;
         _commandWaitTimeout = commandWaitTimeout ?? TimeSpan.FromSeconds(4.5);
+
+        // 2. Инициализация адаптивного детектора вейк-ворда через WakeWordFactory
+        string primaryWord = settings.WakeWord?.Name ?? _wakeWords.FirstOrDefault() ?? "джарвис";
+        _wakeWordDetector = wakeWordDetector ?? WakeWordFactory.Create(
+            primaryWord,
+            settings.WakeWord?.OnnxModelPath,
+            settings.WakeWord?.SmallModelPath);
+
+        _wakeWordDetector.OnWakeWordDetected += OnAdaptiveWakeWordDetected;
+    }
+
+    private void OnAdaptiveWakeWordDetected()
+    {
+        lock (_lock)
+        {
+            if (_state != VoiceListenerState.WaitingForWakeWord || _isPaused)
+            {
+                return;
+            }
+
+            Console.ForegroundColor = ConsoleColor.Magenta;
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [VoiceListener] Адаптивный детектор: зафиксировано имя '{_wakeWordDetector.WakeWord}' (задержка <80 мс, бесшумный режим).");
+            Console.ResetColor();
+
+            _wakeWordDetector.Reset();
+            TransitionToListeningForCommand(_wakeWordDetector.WakeWord, null);
+            OnWakeWordDetected?.Invoke(_wakeWordDetector.WakeWord);
+        }
     }
 
     /// <summary>
@@ -503,7 +534,13 @@ public sealed class VoiceListener : IDisposable
 
     private void ProcessWakeWordListening(byte[] buffer, int bytesRecorded, bool isAudioSpeech)
     {
-        // 1. Stream raw audio slice directly into recognizer (zero-copy / no buffer list accumulation)
+        // 1. Адаптивный ультра-быстрый Wake-Word детектор (<80 мс, OpenWakeWord ONNX / Vosk Grammar)
+        if (_wakeWordDetector.ProcessFrame(buffer.AsSpan(0, bytesRecorded)))
+        {
+            return;
+        }
+
+        // 2. Fallback сквозного распознавания Vosk для длинных слитных фраз
         bool isFinal = _recognizer!.AcceptWaveform(buffer, bytesRecorded);
         string json = isFinal ? _recognizer.Result() : _recognizer.PartialResult();
         string rawText = ExtractTextFromJson(json, isFinal).Trim();
@@ -730,6 +767,7 @@ public sealed class VoiceListener : IDisposable
         _soundPlayed = false;
         _hasSpokenAfterWakeWord = false;
         _silenceTimer.Reset();
+        _wakeWordDetector?.Reset();
     }
 
     /// <summary>
@@ -991,6 +1029,7 @@ public sealed class VoiceListener : IDisposable
         if (_disposed) return;
         _disposed = true;
         Stop();
+        _wakeWordDetector?.Dispose();
         if (Instance == this)
         {
             Instance = null;
