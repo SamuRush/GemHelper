@@ -1,0 +1,30 @@
+# ==============================================
+# .gitignore — JARVIS (GemHelper)
+# ==============================================
+
+# --- Build output ---
+bin/
+obj/
+
+# --- IDE & editor directories ---
+.vs/
+.idea/
+.vscode/
+
+# --- Vosk STT model (тяжёлые файлы нейросетей, ~3 ГБ) ---
+model/
+
+# --- ONNX модели (Silero TTS и другие весовые файлы) ---
+Models/
+*.onnx
+
+# --- Временные аудиофайлы ---
+*.mp3
+*.wav
+
+# --- Локальные настройки разработки ---
+appsettings.Development.json
+
+# --- OS artifacts ---
+.DS_Store
+Thumbs.db
