@@ -1293,8 +1293,8 @@ public static class Program
         var edgeEngine = new EdgeTtsEngine(ttsSettings.Tts.EdgeVoice);
         if (edgeEngine.Name != "Edge")
             throw new Exception($"EdgeTtsEngine.Name != 'Edge', got '{edgeEngine.Name}'");
-        if (edgeEngine.ConnectionTimeoutMs != 3000)
-            throw new Exception($"edgeEngine.ConnectionTimeoutMs != 3000, got {edgeEngine.ConnectionTimeoutMs}");
+        if (edgeEngine.ConnectionTimeoutMs != 5000)
+            throw new Exception($"edgeEngine.ConnectionTimeoutMs != 5000, got {edgeEngine.ConnectionTimeoutMs}");
 
         string secMsGec = EdgeTtsEngine.GenerateSecMsGec();
         if (string.IsNullOrEmpty(secMsGec) || secMsGec.Length != 64)
@@ -1502,18 +1502,18 @@ public static class Program
             throw new Exception("GetDefaultBrowserStartInfo returned empty FileName!");
         Console.WriteLine($"    Default browser start info resolved: FileName='{browserStartInfo.FileName}', Args='{browserStartInfo.Arguments}'");
 
-        // 16.3 Edge-TTS 3000ms Timeout Verification
-        Console.WriteLine("  [16.3] Testing Edge-TTS 3000ms connection timeout configuration...");
-        if (EdgeTtsEngine.DefaultConnectionTimeoutMs != 3000)
-            throw new Exception($"EdgeTtsEngine.DefaultConnectionTimeoutMs expected 3000, got: {EdgeTtsEngine.DefaultConnectionTimeoutMs}");
+        // 16.3 Edge-TTS 5000ms Timeout Verification
+        Console.WriteLine("  [16.3] Testing Edge-TTS 5000ms connection timeout configuration...");
+        if (EdgeTtsEngine.DefaultConnectionTimeoutMs != 5000)
+            throw new Exception($"EdgeTtsEngine.DefaultConnectionTimeoutMs expected 5000, got: {EdgeTtsEngine.DefaultConnectionTimeoutMs}");
 
         var loadedTtsSettings = AppSettingsService.Load();
-        if (loadedTtsSettings.Tts.ConnectionTimeoutMs != 3000)
-            throw new Exception($"AppSettings.Tts.ConnectionTimeoutMs expected 3000, got: {loadedTtsSettings.Tts.ConnectionTimeoutMs}");
+        if (loadedTtsSettings.Tts.ConnectionTimeoutMs != 5000)
+            throw new Exception($"AppSettings.Tts.ConnectionTimeoutMs expected 5000, got: {loadedTtsSettings.Tts.ConnectionTimeoutMs}");
 
         var testEdgeEngine = new EdgeTtsEngine();
-        if (testEdgeEngine.ConnectionTimeoutMs != 3000)
-            throw new Exception($"EdgeTtsEngine instance ConnectionTimeoutMs expected 3000, got: {testEdgeEngine.ConnectionTimeoutMs}");
+        if (testEdgeEngine.ConnectionTimeoutMs != 5000)
+            throw new Exception($"EdgeTtsEngine instance ConnectionTimeoutMs expected 5000, got: {testEdgeEngine.ConnectionTimeoutMs}");
         Console.WriteLine($"    Edge-TTS timeout verified: DefaultConnectionTimeoutMs={EdgeTtsEngine.DefaultConnectionTimeoutMs}, Config={loadedTtsSettings.Tts.ConnectionTimeoutMs}");
 
         // 16.4 Single Speech Invariant & Pending Confirmation Speech Isolation
@@ -1564,36 +1564,34 @@ public static class Program
             throw new Exception("SteamService.LaunchGame unexpectedly returned true for non-existent game!");
         Console.WriteLine("    SteamService.LaunchGame verified: safe execution without unexpected speech.");
 
-        // Test 17: Silero Download Mirrors & HttpClient and KWS/TTS Benchmark Logs (TASK: 54_Fix_Silero_Download_Urls_And_Http_Client)
-        Console.WriteLine("\n[17] Testing Silero mirrors, size validation & KWS/TTS benchmark logs...");
+        // Test 17: Silero Guided Setup & KWS/TTS Benchmark Logs (TASK: 58_Stabilize_EdgeTts_Guided_Silero_And_Vosk_Utf8)
+        Console.WriteLine("\n[17] Testing Silero Guided Setup, instant initialization & KWS/TTS benchmark logs...");
 
-        // 17.1 Silero download mirror URLs check
-        string[] expectedMirrors =
-        [
-            "https://huggingface.co/snakers4/silero-models/resolve/main/models/tts/ru/v4_ru.onnx",
-            "https://raw.githubusercontent.com/snakers4/silero-models/master/models/tts/ru/v3_ru.onnx"
-        ];
+        // 17.1 Silero Guided Setup configuration check (no auto-downloader mirrors)
+        if (SileroTtsEngine.DefaultModelFileName != "v4_ru.onnx")
+            throw new Exception($"SileroTtsEngine.DefaultModelFileName expected 'v4_ru.onnx', got: '{SileroTtsEngine.DefaultModelFileName}'");
+        if (SileroTtsEngine.DefaultModelFolder != "Models/Silero")
+            throw new Exception($"SileroTtsEngine.DefaultModelFolder expected 'Models/Silero', got: '{SileroTtsEngine.DefaultModelFolder}'");
+
         var mirrorsField = typeof(SileroTtsEngine).GetField("DownloadMirrors", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        if (mirrorsField?.GetValue(null) is not string[] actualMirrors)
-            throw new Exception("SileroTtsEngine.DownloadMirrors field not found!");
-        foreach (var em in expectedMirrors)
-        {
-            if (!actualMirrors.Contains(em))
-                throw new Exception($"SileroTtsEngine mirror '{em}' missing!");
-        }
-        Console.WriteLine("    SileroTtsEngine mirrors verified.");
+        if (mirrorsField != null)
+            throw new Exception("SileroTtsEngine.DownloadMirrors field must be removed in Guided Setup mode!");
 
-        // 17.2 Size validation check: dummy file < 1MB deleted on check
-        string testSmallModelPath = Path.Combine(Path.GetTempPath(), $"silero_test_{Guid.NewGuid():N}.onnx");
-        File.WriteAllBytes(testSmallModelPath, new byte[500]); // 500 bytes < 1MB
-        var testSileroInstance = new SileroTtsEngine(modelPath: testSmallModelPath);
-        if (File.Exists(testSmallModelPath))
-        {
-            File.Delete(testSmallModelPath);
-            throw new Exception("SileroTtsEngine did not delete corrupted/small (<1MB) model file!");
-        }
-        testSileroInstance.Dispose();
-        Console.WriteLine("    SileroTtsEngine < 1MB file deletion validation verified.");
+        Console.WriteLine("    SileroTtsEngine Guided Setup configuration verified (no auto-downloader mirrors).");
+
+        // 17.2 Instant initialization verification (no network delays when model is missing)
+        string testMissingModelPath = Path.Combine(Path.GetTempPath(), $"silero_missing_{Guid.NewGuid():N}.onnx");
+        var swSetup = System.Diagnostics.Stopwatch.StartNew();
+        var testSileroMissing = new SileroTtsEngine(modelPath: testMissingModelPath);
+        swSetup.Stop();
+
+        if (testSileroMissing.IsAvailable)
+            throw new Exception("SileroTtsEngine must NOT be available when model file is missing!");
+        if (swSetup.ElapsedMilliseconds > 200)
+            throw new Exception($"SileroTtsEngine took {swSetup.ElapsedMilliseconds} ms to initialize missing model (expected instant < 200 ms without network hanging)!");
+
+        testSileroMissing.Dispose();
+        Console.WriteLine($"    SileroTtsEngine Guided Setup instant initialization verified ({swSetup.ElapsedMilliseconds} ms, IsAvailable=False).");
 
         // 17.3 KWS Latency properties
         var dummyOpenWw = new Gem.Voice.OpenWakeWordDetector();
@@ -1697,12 +1695,14 @@ public static class Program
         kwsDefaultJarvis.Dispose();
         Console.WriteLine("    [19.1] VoskGrammarWakeWordDetector default selection verified.");
 
-        // 19.2 Edge-TTS timeouts: 3000ms connect, 2000ms fast reconnect
-        if (EdgeTtsEngine.DefaultConnectionTimeoutMs != 3000)
-            throw new Exception($"EdgeTtsEngine.DefaultConnectionTimeoutMs expected 3000, got: {EdgeTtsEngine.DefaultConnectionTimeoutMs}");
-        if (EdgeTtsEngine.FastReconnectTimeoutMs != 2000)
-            throw new Exception($"EdgeTtsEngine.FastReconnectTimeoutMs expected 2000, got: {EdgeTtsEngine.FastReconnectTimeoutMs}");
-        Console.WriteLine("    [19.2] Edge-TTS 3000ms connect / 2000ms reconnect timeouts verified.");
+        // 19.2 Edge-TTS timeouts & Retry Policy: 5000ms connect, 2 retries
+        if (EdgeTtsEngine.DefaultConnectionTimeoutMs != 5000)
+            throw new Exception($"EdgeTtsEngine.DefaultConnectionTimeoutMs expected 5000, got: {EdgeTtsEngine.DefaultConnectionTimeoutMs}");
+        if (EdgeTtsEngine.MaxRetryAttempts != 2)
+            throw new Exception($"EdgeTtsEngine.MaxRetryAttempts expected 2, got: {EdgeTtsEngine.MaxRetryAttempts}");
+        if (EdgeTtsEngine.FastReconnectTimeoutMs != 3000)
+            throw new Exception($"EdgeTtsEngine.FastReconnectTimeoutMs expected 3000, got: {EdgeTtsEngine.FastReconnectTimeoutMs}");
+        Console.WriteLine("    [19.2] Edge-TTS 5000ms connect / 2 retry attempts verified.");
 
         // 19.3 Silero v4/v3 mirrors, v4_ru.onnx default and speakers aidar/baya
         if (SileroTtsEngine.DefaultModelFileName != "v4_ru.onnx")

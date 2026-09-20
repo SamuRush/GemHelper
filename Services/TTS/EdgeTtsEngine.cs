@@ -20,8 +20,9 @@ public sealed class EdgeTtsEngine : ITtsEngine, IDisposable
     private const string ChromiumUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0";
     private const string EdgeExtensionOrigin = "chrome-extension://jdiccldimpdaibmpdkgikmbggipbghpp";
 
-    public const int DefaultConnectionTimeoutMs = 3000;
-    public const int FastReconnectTimeoutMs = 2000;
+    public const int DefaultConnectionTimeoutMs = 5000;
+    public const int FastReconnectTimeoutMs = 3000;
+    public const int MaxRetryAttempts = 2;
 
     public int ConnectionTimeoutMs { get; set; } = DefaultConnectionTimeoutMs;
 
@@ -29,10 +30,12 @@ public sealed class EdgeTtsEngine : ITtsEngine, IDisposable
     private ClientWebSocket? _ws;
     private readonly SemaphoreSlim _wsLock = new(1, 1);
     private readonly CancellationTokenSource _keepAliveCts = new();
+    private int _consecutiveErrorCount = 0;
     private bool _disposed = false;
 
     public string Name => "Edge";
     public string Voice => _voice;
+    public int ConsecutiveErrorCount => _consecutiveErrorCount;
 
     public bool IsAvailable => NetworkInterface.GetIsNetworkAvailable();
 
@@ -183,33 +186,48 @@ public sealed class EdgeTtsEngine : ITtsEngine, IDisposable
         try
         {
             int baseTimeout = ConnectionTimeoutMs > 0 ? ConnectionTimeoutMs : DefaultConnectionTimeoutMs;
+            int maxRetries = MaxRetryAttempts;
+            Exception? lastException = null;
 
-            // 1 попытка стандартная (3000 мс) + 1 быстрый Reconnect (2000 мс) перед сбросом на Silero
-            for (int attempt = 0; attempt < 2; attempt++)
+            // Начальная попытка + до 2 повторных попыток переподключения (всего до 3 попыток)
+            for (int attempt = 0; attempt <= maxRetries; attempt++)
             {
-                int currentTimeout = (attempt == 0) ? baseTimeout : FastReconnectTimeoutMs;
+                int currentTimeout = baseTimeout;
 
                 try
                 {
                     using var mp3Stream = await SynthesizeToMp3StreamAsync(text, currentTimeout, ct);
                     mp3Stream.Position = 0;
                     await PlayMp3StreamAsync(mp3Stream, ct);
+
+                    // При успешном синтезе сразу сбрасываем счетчик ошибок
+                    _consecutiveErrorCount = 0;
                     return;
                 }
-                catch (Exception ex) when (attempt == 0 && !ct.IsCancellationRequested)
+                catch (Exception ex) when (attempt < maxRetries && !ct.IsCancellationRequested)
                 {
+                    lastException = ex;
+                    _consecutiveErrorCount++;
+
                     Console.ForegroundColor = ConsoleColor.DarkYellow;
-                    Console.WriteLine($"[TTS: Edge] Быстрый Reconnect (таймаут {FastReconnectTimeoutMs} мс) перед сбросом на Silero... Причина: {ex.Message}");
+                    Console.WriteLine($"[TTS: Edge] Повторная попытка переподключения {attempt + 1}/{maxRetries} (таймаут {currentTimeout} мс)... Причина: {ex.Message}");
                     Console.ResetColor();
 
                     ResetClient();
-                    // loop continues to attempt = 1 (Fast Reconnect)
+                    await Task.Delay(300, ct);
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
+                    lastException = ex;
+                    _consecutiveErrorCount++;
                     ResetClient();
                     throw;
                 }
+            }
+
+            if (lastException != null)
+            {
+                throw lastException;
             }
         }
         finally

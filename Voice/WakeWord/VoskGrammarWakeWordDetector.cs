@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.IO.Compression;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Vosk;
 
@@ -159,6 +161,19 @@ public sealed class VoskGrammarWakeWordDetector : IWakeWordDetector
         }
     }
 
+    private static class NativeMethods
+    {
+        [DllImport("libvosk", EntryPoint = "vosk_recognizer_new_grm", CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr VoskRecognizerNewGrm(HandleRef model, float sampleRate, [MarshalAs(UnmanagedType.LPUTF8Str)] string grammar);
+    }
+
+    private static readonly MethodInfo? ModelGetCPtrMethod = typeof(Model).GetMethod("getCPtr", BindingFlags.Static | BindingFlags.NonPublic);
+    private static readonly ConstructorInfo? RecognizerIntPtrCtor = typeof(VoskRecognizer).GetConstructor(
+        BindingFlags.Instance | BindingFlags.NonPublic,
+        null,
+        new[] { typeof(IntPtr) },
+        null);
+
     private void InitializeRecognizer()
     {
         try
@@ -170,7 +185,9 @@ public sealed class VoskGrammarWakeWordDetector : IWakeWordDetector
             {
                 Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
             });
-            _recognizer = new VoskRecognizer(model, 16000.0f, grammarJson);
+
+            // Marshals grammar string strictly as UTF-8 via native P/Invoke to prevent Kaldi "Ignoring word missing in vocabulary"
+            _recognizer = CreateGrammarRecognizer(model, 16000.0f, grammarJson);
             _recognizer.SetMaxAlternatives(0);
 
             Console.ForegroundColor = ConsoleColor.Cyan;
@@ -184,6 +201,22 @@ public sealed class VoskGrammarWakeWordDetector : IWakeWordDetector
             Console.WriteLine($"[WakeWord Warning] Ошибка инициализации Vosk Grammar recognizer: {ex.Message}");
             Console.ResetColor();
         }
+    }
+
+    private static VoskRecognizer CreateGrammarRecognizer(Model model, float sampleRate, string grammarJson)
+    {
+        if (ModelGetCPtrMethod != null && RecognizerIntPtrCtor != null)
+        {
+            var modelHandle = (HandleRef)ModelGetCPtrMethod.Invoke(null, new object[] { model })!;
+            IntPtr recognizerPtr = NativeMethods.VoskRecognizerNewGrm(modelHandle, sampleRate, grammarJson);
+            if (recognizerPtr != IntPtr.Zero)
+            {
+                return (VoskRecognizer)RecognizerIntPtrCtor.Invoke(new object[] { recognizerPtr });
+            }
+        }
+
+        // Fallback to standard constructor if reflection fails
+        return new VoskRecognizer(model, sampleRate, grammarJson);
     }
 
     public bool ProcessFrame(ReadOnlySpan<byte> pcmData)
