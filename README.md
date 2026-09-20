@@ -1,6 +1,6 @@
 # JARVIS / GemHelper — Голосовой ассистент на C# / .NET 8 + WPF
 
-> Локальный голосовой ассистент для Windows с WPF HUD, гибридным отказоустойчивым TTS, Dual-Path роутингом команд, автоматизацией Steam и FSM-диалогами подтверждений. Полностью офлайн-способен: LLM запускается локально через LM Studio, STT работает через Vosk, TTS — через Edge Neural (с фоллбэком на Silero ONNX и Windows SAPI).
+> Локальный голосовой ассистент для Windows с WPF HUD, гибридным отказоустойчивым TTS, Dual-Path роутингом команд, автоматизацией Steam и FSM-диалогами подтверждений. Полностью офлайн-способен: LLM запускается локально через LM Studio, STT работает через Vosk, TTS — через Edge Neural (Primary, онлайн) с Offline/Fallback на нативный Windows SAPI5 (голос `Aidar (Russian)`).
 
 ![Platform](https://img.shields.io/badge/Platform-Windows-blue)
 ![.NET](https://img.shields.io/badge/.NET-8.0-purple)
@@ -144,40 +144,41 @@ dotnet run -- --download-model
 
 ## 🗣️ TTS: Отказоустойчивый синтез речи (СТРОГО мужские голоса)
 
-`CompositeVoiceFeedbackService` реализует трёхуровневую цепочку отказоустойчивости с гарантией строго мужского тембра. Режим работы определяется флагом `EnableEdgeTts` в `appsettings.json`:
+`CompositeVoiceFeedbackService` реализует двухуровневую цепочку отказоустойчивости с гарантией строго мужского тембра. Режим работы определяется флагом `EnableEdgeTts` в `appsettings.json`:
 
 **Режим `EnableEdgeTts: true` (по умолчанию, онлайн):**
 ```
+[+] [TTS] Инициализирована гибридная архитектура озвучки:
+    - EnableEdgeTts:       True
+    - Primary (Online):    Edge-TTS (ru-RU-DmitryNeural)
+    - Offline / Fallback:  SAPI5 (Aidar (Russian))
+
 1. EdgeTtsEngine        ──(таймаут 5000 мс, Retry Policy: 2 повтора: 1я—5000мс, повторы—3000мс)──>
-2. SileroTtsEngine      ──(локальный ONNX v4_ru.onnx / aidar / Guided Setup)──>
-3. SystemSpeechTtsEngine (SAPI5: Silero Aidar > Silero Baya > Pavel > pitch-shift -40%)
+2. SystemSpeechTtsEngine (SAPI5: Aidar (Russian) > Baya > Pavel > pitch-shift -40%)
 ```
 
-**Режим `EnableEdgeTts: false` (полностью офлайн, Silero SAPI5 как первичный):**
+**Режим `EnableEdgeTts: false` (полностью офлайн, SAPI5 Aidar как первичный):**
 ```
+[+] [TTS] Инициализирована гибридная архитектура озвучки:
+    - EnableEdgeTts:       False
+    - Primary (Online):    Edge-TTS (ru-RU-DmitryNeural) [ОТКЛЮЧЁН]
+    - Offline / Fallback:  SAPI5 (Aidar (Russian))
+
 1. (Edge-TTS пропускается — сетевые запросы не выполняются)
-2. SileroTtsEngine      ──(локальный ONNX, если доступен)──>
-3. SystemSpeechTtsEngine (SAPI5: Silero Aidar > Silero Baya > Pavel — первичный голос)
+2. SystemSpeechTtsEngine (SAPI5: Aidar (Russian) > Baya > Pavel — первичный голос)
 ```
 
 | Движок | Тип | Голос | Особенности |
 |---|---|---|---|
 | **EdgeTtsEngine** | Онлайн, WebSocket | `ru-RU-DmitryNeural` | Нейросетевое качество; таймаут 5000 мс; Retry Policy до 2 повторных попыток (повторы — 3000 мс FastReconnect); Keep-Alive пинг (15 с); **управляется флагом `EnableEdgeTts`** |
-| **SileroTtsEngine** | Офлайн, ONNX | `aidar` / `baya` | Локальный ONNX `Models/Silero/v4_ru.onnx`; Guided Setup — без HTTP; при отсутствии файла — инструкция для ручной установки |
-| **SystemSpeechTtsEngine** | Офлайн, SAPI5 | **Silero Aidar > Silero Baya > Pavel** | При старте выводит все найденные SAPI5 голоса; Silero Aidar (установлен через `SileroTTS_Ru_Setup`) — наивысший приоритет; запрет Ирины |
-
-### Инструкция по ручной установке модели Silero TTS
-Для использования офлайн-синтеза речи Silero (голос `aidar`):
-1. Скачайте файл модели вручную по прямой ссылке:
-   **[https://models.silero.ai/models/tts/ru/v4_ru.onnx](https://models.silero.ai/models/tts/ru/v4_ru.onnx)**
-2. Поместите скачанный файл в папку проекта:
-   `./Models/Silero/v4_ru.onnx`
-3. При следующем запуске ассистент автоматически подключит локальный ONNX инференс. Если файл отсутствует, ассистент мгновенно активирует системный мужской голос `Microsoft Pavel`.
+| **SystemSpeechTtsEngine** | Офлайн, SAPI5 | **Aidar (Russian) > Baya > Pavel** | При старте выводит все найденные SAPI5 голоса; `SelectVoice` обёрнут в `try/catch`, передаётся точное системное имя (`"Aidar (Russian)"`); при успехе: `[TTS: SAPI5] Успешно активирован голос: 'Aidar (Russian)'.`; запрет Ирины |
 
 **Защита от самоперехвата (Acoustic Feedback Prevention):**  
 На время речи микрофон `VoiceListener` автоматически глушится. После завершения — 300 мс кулдаун перед возобновлением захвата.
 
 **Все компоненты системы** обязаны вызывать голосовой вывод **исключительно через `IVoiceFeedbackService.SpeakAsync()`** — прямые вызовы движков запрещены (нарушает echo cancellation и FSM-машину подтверждений).
+
+
 
 ---
 
@@ -307,8 +308,8 @@ Processing ──(conf ∈ [0.60, 0.82))──> AwaitingConfirmation
 }
 ```
 
-> **💡 `EnableEdgeTts: false`** — полностью отключает Edge-TTS (Дмитрий, онлайн). Ассистент работает строго офлайн: первичным голосом становится **Silero SAPI5 Aidar** (установленный через `SileroTTS_Ru_Setup`), без сетевых запросов.
-> **💡 `EnableEdgeTts: true`** (по умолчанию) — Edge-TTS Дмитрий работает как Primary с Retry Policy (до 2 попыток) и автоматическим сбросом на Silero / SAPI5 при сбоях.
+> **💡 `EnableEdgeTts: false`** — полностью отключает Edge-TTS (Дмитрий, онлайн). Ассистент работает строго офлайн: первичным голосом становится **нативный SAPI5 `Aidar (Russian)`**, без сетевых запросов.
+> **💡 `EnableEdgeTts: true`** (по умолчанию) — Edge-TTS Дмитрий работает как Primary с Retry Policy (до 2 попыток) и автоматическим сбросом на SAPI5 (`Aidar (Russian)`) при сбоях.
 
 ---
 
@@ -350,9 +351,10 @@ dotnet run
 | `[Router: FastMatch] HIT -> ...` | FastMatch нашёл совпадение, команда выполняется |
 | `[Router: FastMatch] MISS -> ...` | FastMatch не сработал, запрос идёт в LLM |
 | `[Router: Dispatch]` / `[Router: Result]` | Исполнение команды в `CommandRouter` |
+| `[TTS: SAPI5] Обнаружен голос: ...` | Перечень всех установленных SAPI5 голосов при старте |
+| `[TTS: SAPI5] Успешно активирован голос: '...'` | Подтверждение успешного выбора голоса через `SelectVoice` |
 | `[TTS: Edge]` | Edge Neural TTS воспроизводит речь |
-| `[TTS: Silero]` | Переключение на локальный Silero ONNX (голос: aidar) |
-| `[TTS: System.Speech]` | Переключение на Windows SAPI (строго мужской тембр) |
+| `[TTS: System.Speech]` | Переключение на Windows SAPI5 (строго мужской тембр) |
 | `[TTS: Warning]` | Сбой движка, инициирован откат к следующему |
 
 ---

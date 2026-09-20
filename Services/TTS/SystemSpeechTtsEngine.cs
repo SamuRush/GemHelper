@@ -33,8 +33,8 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
 
     /// <summary>
     /// Configures strictly male voice, excluding Irina and female voices completely.
-    /// Priority order: Silero Aidar (SAPI5) > Silero Baya (SAPI5) > Microsoft Pavel > Any Russian male > Any male > pitch-shift fallback.
-    /// Logs all discovered SAPI5 voices at startup.
+    /// Priority order: Aidar (SAPI5) > Baya (SAPI5) > Microsoft Pavel > Any Russian male > Any male > pitch-shift fallback.
+    /// Logs all discovered SAPI5 voices at startup. Each SelectVoice call is individually guarded by try/catch.
     /// </summary>
     public static (string? voiceName, bool needPitchShift) ConfigureMaleRussianVoice(SpeechSynthesizer synthesizer)
     {
@@ -69,47 +69,59 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
                        name.Contains("Female", StringComparison.OrdinalIgnoreCase);
             }
 
-            // Priority 0: Установленный Silero SAPI5 — голос Aidar (мужской)
+            // Priority 0: Aidar — любое SAPI5-имя, содержащее "Aidar" (напр. "Aidar (Russian)")
             var sileroAidar = installedVoices.FirstOrDefault(v =>
                 v.Enabled &&
-                (v.VoiceInfo.Name.Equals("Aidar", StringComparison.OrdinalIgnoreCase) ||
-                 v.VoiceInfo.Name.Contains("Silero Aidar", StringComparison.OrdinalIgnoreCase) ||
-                 v.VoiceInfo.Name.Contains("Silero - Aidar", StringComparison.OrdinalIgnoreCase) ||
-                 v.VoiceInfo.Name.Contains("Aidar", StringComparison.OrdinalIgnoreCase)));
+                v.VoiceInfo.Name.Contains("Aidar", StringComparison.OrdinalIgnoreCase));
 
             if (sileroAidar != null)
             {
-                synthesizer.SelectVoice(sileroAidar.VoiceInfo.Name);
-                synthesizer.Rate = 1;
-                synthesizer.Volume = 100;
+                try
+                {
+                    synthesizer.SelectVoice(sileroAidar.VoiceInfo.Name);
+                    synthesizer.Rate = 1;
+                    synthesizer.Volume = 100;
 
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine($"[TTS: System.Speech] Выбран Silero SAPI5 голос: '{sileroAidar.VoiceInfo.Name}' (Aidar, мужской, приоритет 0).");
-                Console.ResetColor();
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine($"[TTS: SAPI5] Успешно активирован голос: '{sileroAidar.VoiceInfo.Name}'.");
+                    Console.ResetColor();
 
-                return (sileroAidar.VoiceInfo.Name, false);
+                    return (sileroAidar.VoiceInfo.Name, false);
+                }
+                catch (Exception ex)
+                {
+                    Console.ForegroundColor = ConsoleColor.DarkYellow;
+                    Console.WriteLine($"[TTS: SAPI5] Не удалось активировать голос '{sileroAidar.VoiceInfo.Name}': {ex.Message}. Переход к следующему варианту.");
+                    Console.ResetColor();
+                }
             }
 
-            // Priority 0.5: Установленный Silero SAPI5 — голос Baya (мужской баритон)
+            // Priority 0.5: Baya — любое SAPI5-имя, содержащее "Baya" (мужской баритон)
             var sileroBaya = installedVoices.FirstOrDefault(v =>
                 v.Enabled &&
                 !IsFemale(v) &&
-                (v.VoiceInfo.Name.Equals("Baya", StringComparison.OrdinalIgnoreCase) ||
-                 v.VoiceInfo.Name.Contains("Silero Baya", StringComparison.OrdinalIgnoreCase) ||
-                 v.VoiceInfo.Name.Contains("Silero - Baya", StringComparison.OrdinalIgnoreCase) ||
-                 v.VoiceInfo.Name.Contains("Baya", StringComparison.OrdinalIgnoreCase)));
+                v.VoiceInfo.Name.Contains("Baya", StringComparison.OrdinalIgnoreCase));
 
             if (sileroBaya != null)
             {
-                synthesizer.SelectVoice(sileroBaya.VoiceInfo.Name);
-                synthesizer.Rate = 1;
-                synthesizer.Volume = 100;
+                try
+                {
+                    synthesizer.SelectVoice(sileroBaya.VoiceInfo.Name);
+                    synthesizer.Rate = 1;
+                    synthesizer.Volume = 100;
 
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine($"[TTS: System.Speech] Выбран Silero SAPI5 голос: '{sileroBaya.VoiceInfo.Name}' (Baya, мужской, приоритет 0.5).");
-                Console.ResetColor();
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine($"[TTS: SAPI5] Успешно активирован голос: '{sileroBaya.VoiceInfo.Name}'.");
+                    Console.ResetColor();
 
-                return (sileroBaya.VoiceInfo.Name, false);
+                    return (sileroBaya.VoiceInfo.Name, false);
+                }
+                catch (Exception ex)
+                {
+                    Console.ForegroundColor = ConsoleColor.DarkYellow;
+                    Console.WriteLine($"[TTS: SAPI5] Не удалось активировать голос '{sileroBaya.VoiceInfo.Name}': {ex.Message}. Переход к следующему варианту.");
+                    Console.ResetColor();
+                }
             }
 
             // Priority 1: Russian male voice (e.g. Microsoft Pavel)
@@ -143,30 +155,36 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
 
             if (ruMaleVoice != null)
             {
-                synthesizer.SelectVoice(ruMaleVoice.VoiceInfo.Name);
-                synthesizer.Rate = 1;
-                synthesizer.Volume = 100;
+                try
+                {
+                    synthesizer.SelectVoice(ruMaleVoice.VoiceInfo.Name);
+                    synthesizer.Rate = 1;
+                    synthesizer.Volume = 100;
 
-                Console.ForegroundColor = ConsoleColor.Cyan;
-                Console.WriteLine($"[TTS: System.Speech] Выбран системный мужской голос: '{ruMaleVoice.VoiceInfo.Name}'.");
-                Console.ResetColor();
+                    Console.ForegroundColor = ConsoleColor.Cyan;
+                    Console.WriteLine($"[TTS: SAPI5] Успешно активирован голос: '{ruMaleVoice.VoiceInfo.Name}'.");
+                    Console.ResetColor();
 
-                return (ruMaleVoice.VoiceInfo.Name, false);
+                    return (ruMaleVoice.VoiceInfo.Name, false);
+                }
+                catch (Exception ex)
+                {
+                    Console.ForegroundColor = ConsoleColor.DarkYellow;
+                    Console.WriteLine($"[TTS: SAPI5] Не удалось активировать голос '{ruMaleVoice.VoiceInfo.Name}': {ex.Message}. Переход к pitch-shift fallback.");
+                    Console.ResetColor();
+                }
             }
-            else
-            {
-                // No male voice found on this Windows installation (only Irina exists by default)
-                // Force pitch shift to low/extra-low so female voice sounds like a deep male/robotic voice!
-                synthesizer.Rate = 0;
-                synthesizer.Volume = 100;
 
-                Console.ForegroundColor = ConsoleColor.DarkYellow;
-                Console.WriteLine($"[TTS: System.Speech Warning] В системе не найден установленный мужской голос SAPI5 (Silero Aidar, Baya, Pavel). " +
-                                  $"Включена модуляция питча (ExtraLow Pitch): женский голос Ирины заблокирован, тембр занижен до мужского.");
-                Console.ResetColor();
+            // No male voice found or all SelectVoice calls failed — force pitch shift
+            synthesizer.Rate = 0;
+            synthesizer.Volume = 100;
 
-                return (synthesizer.Voice.Name, true);
-            }
+            Console.ForegroundColor = ConsoleColor.DarkYellow;
+            Console.WriteLine($"[TTS: System.Speech Warning] В системе не найден установленный мужской голос SAPI5 (Aidar, Baya, Pavel). " +
+                              $"Включена модуляция питча (ExtraLow Pitch): женский голос Ирины заблокирован, тембр занижен до мужского.");
+            Console.ResetColor();
+
+            return (synthesizer.Voice.Name, true);
         }
         catch (Exception ex)
         {

@@ -80,11 +80,11 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
 
         Console.ForegroundColor = ConsoleColor.Green;
         Console.WriteLine($"[+] [TTS] Инициализирована гибридная архитектура озвучки:");
-        Console.WriteLine($"    - EnableEdgeTts:     {_enableEdgeTts}");
-        Console.WriteLine($"    - Primary (Online):  {_edgeTts.Name} ({edgeVoice}, Доступен: {_edgeTts.IsAvailable}{(!_enableEdgeTts ? ", ОТКЛЮЧЁН" : "")})");
-        Console.WriteLine($"    - Secondary (Local): {_sileroTts.Name} (ONNX: {sileroSpeaker}, Доступен: {_sileroTts.IsAvailable})");
-        Console.WriteLine($"    - Fallback (SAPI5):  {_systemSpeech.Name} ({systemVoice}, Доступен: {_systemSpeech.IsAvailable})");
+        Console.WriteLine($"    - EnableEdgeTts:       {_enableEdgeTts}");
+        Console.WriteLine($"    - Primary (Online):    {_edgeTts.Name} ({edgeVoice}){(!_enableEdgeTts ? " [ОТКЛЮЧЁН]" : "")}");
+        Console.WriteLine($"    - Offline / Fallback:  SAPI5 ({systemVoice})");
         Console.ResetColor();
+
     }
 
     /// <summary>
