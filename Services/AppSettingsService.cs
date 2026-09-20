@@ -42,9 +42,9 @@ public sealed class TtsConfig
 {
     public string PreferredEngine { get; set; } = "Edge";
     public string EdgeVoice { get; set; } = "ru-RU-DmitryNeural";
-    public string SileroModelPath { get; set; } = "Models/Silero/ru_v3.onnx";
+    public string SileroModelPath { get; set; } = "Models/Silero/v4_ru.onnx";
     public string SileroSpeaker { get; set; } = "aidar";
-    public int ConnectionTimeoutMs { get; set; } = 2500;
+    public int ConnectionTimeoutMs { get; set; } = 3000;
 }
 
 public static class AppSettingsService

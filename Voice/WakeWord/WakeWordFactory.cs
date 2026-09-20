@@ -30,21 +30,10 @@ public static class WakeWordFactory
     {
         string target = string.IsNullOrWhiteSpace(wakeWord) ? "джарвис" : wakeWord.Trim().ToLowerInvariant();
 
-        if (JarvisAliases.Contains(target))
-        {
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"[WakeWordFactory] Выбран OpenWakeWord ONNX детектор для имени '{target}' (<80 мс задержка).");
-            Console.ResetColor();
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine($"[WakeWordFactory] Выбран Vosk Grammar KWS детектор по умолчанию для имени '{target}' (малая модель vosk-model-small-ru).");
+        Console.ResetColor();
 
-            return new OpenWakeWordDetector(target, onnxModelPath, threshold);
-        }
-        else
-        {
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"[WakeWordFactory] Выбран Vosk Grammar детектор для кастомного имени '{target}' (малая модель).");
-            Console.ResetColor();
-
-            return new VoskGrammarWakeWordDetector(target, smallModelPath);
-        }
+        return new VoskGrammarWakeWordDetector(target, smallModelPath);
     }
 }

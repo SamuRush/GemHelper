@@ -9,8 +9,8 @@ namespace Gem.Services;
 
 /// <summary>
 /// Primary TTS engine utilizing Microsoft Edge Neural Text-to-Speech protocol (ru-RU-DmitryNeural).
-/// Streams audio over WebSocket and plays via NAudio with a 2500ms timeout.
-/// Includes fast reconnect mechanism (1 quick retry with 400ms timeout) before falling back to Silero,
+/// Streams audio over WebSocket and plays via NAudio with a 3000ms timeout.
+/// Includes fast reconnect mechanism (1 quick retry with 2000ms timeout) before falling back to Silero,
 /// and WebSocket Keep-Alive ping maintenance.
 /// </summary>
 public sealed class EdgeTtsEngine : ITtsEngine, IDisposable
@@ -20,8 +20,8 @@ public sealed class EdgeTtsEngine : ITtsEngine, IDisposable
     private const string ChromiumUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0";
     private const string EdgeExtensionOrigin = "chrome-extension://jdiccldimpdaibmpdkgikmbggipbghpp";
 
-    public const int DefaultConnectionTimeoutMs = 2500;
-    public const int FastReconnectTimeoutMs = 400;
+    public const int DefaultConnectionTimeoutMs = 3000;
+    public const int FastReconnectTimeoutMs = 2000;
 
     public int ConnectionTimeoutMs { get; set; } = DefaultConnectionTimeoutMs;
 
@@ -184,7 +184,7 @@ public sealed class EdgeTtsEngine : ITtsEngine, IDisposable
         {
             int baseTimeout = ConnectionTimeoutMs > 0 ? ConnectionTimeoutMs : DefaultConnectionTimeoutMs;
 
-            // 1 попытка стандартная + 1 быстрый Reconnect (400 мс) перед сбросом на Silero
+            // 1 попытка стандартная (3000 мс) + 1 быстрый Reconnect (2000 мс) перед сбросом на Silero
             for (int attempt = 0; attempt < 2; attempt++)
             {
                 int currentTimeout = (attempt == 0) ? baseTimeout : FastReconnectTimeoutMs;

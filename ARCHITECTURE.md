@@ -14,11 +14,11 @@ flowchart TD
     
     subgraph VoiceListener_FSM [VoiceListener State Machine]
         VL -->|WaitingForWakeWord| WWF{WakeWordFactory}
-        WWF -->|'джарвис' / 'jarvis'| ONNX_WW[OpenWakeWordDetector / ONNX jarvis.onnx < 80ms]
-        WWF -->|Кастомное имя: 'петрович' и др.| VOSK_WW[VoskGrammarWakeWordDetector / vosk-model-small-ru]
+        WWF -->|По умолчанию: все имена, включая 'джарвис'| VOSK_WW[VoskGrammarWakeWordDetector / vosk-model-small-ru]
+        WWF -.->|Опционально: ONNX KWS| ONNX_WW[OpenWakeWordDetector / ONNX jarvis.onnx]
         
-        ONNX_WW -->|Детекция: БЕСШУМНО без бипов| ACL[ListeningForCommand]
-        VOSK_WW -->|Детекция: БЕСШУМНО без бипов| ACL
+        VOSK_WW -->|Детекция: БЕСШУМНО без бипов| ACL[ListeningForCommand]
+        ONNX_WW -->|Детекция: БЕСШУМНО без бипов| ACL
         ACL -->|Поток на vosk-model-ru-0.42| VOSK[Vosk STT Engine]
         VOSK -->|Silence Timeout 700ms| CMD_READY[Команда сформирована]
     end
@@ -48,8 +48,8 @@ flowchart TD
     VFS --> TTS[CompositeVoiceFeedbackService]
 
     subgraph TTS_Pipeline [Resilient TTS Pipeline - Strictly Male Voices]
-        TTS -->|1. Primary| EDGE[EdgeTtsEngine / ru-RU-DmitryNeural + 400ms Reconnect + Keep-Alive]
-        EDGE -.->|Failover on Error/Timeout| SILERO[SileroTtsEngine / Local ONNX ru_v3.onnx: aidar]
+        TTS -->|1. Primary| EDGE[EdgeTtsEngine / ru-RU-DmitryNeural + 3000ms Connect + 2000ms Reconnect + Keep-Alive]
+        EDGE -.->|Failover on Error/Timeout| SILERO[SileroTtsEngine / Local ONNX v4_ru.onnx / v3_ru.onnx: aidar / baya]
         SILERO -.->|Failover on Missing Model| SAPI[SystemSpeechTtsEngine / Windows SAPI: Pavel or Pitch-Shift -40%]
         TTS -->|Pause / Resume & Confirmation| VL
     end
@@ -59,8 +59,8 @@ flowchart TD
 1. **Захват звука (`VoiceListener.cs`)**: Поток PCM 16 кГц передается в адаптивный вейк-ворд детектор `IWakeWordDetector`.
 2. **Адаптивная детекция активации (БЕЗ ЗВУКОВЫХ СИГНАЛОВ)**:
    - В состоянии `WaitingForWakeWord` фабрика `WakeWordFactory` направляет поток:
-     - В `OpenWakeWordDetector` (OnnxRuntime `jarvis.onnx` с задержкой 50–80 мс) для имени «Джарвис». При отсутствии модель скачивается автоматически в `Models/WakeWord/`.
-     - В `VoskGrammarWakeWordDetector` (малая модель `vosk-model-small-ru` с жесткой грамматикой `["{customName}", "[unk]"]`) для кастомных имен («петрович», «гена» и др.).
+     - В `VoskGrammarWakeWordDetector` (малая модель `vosk-model-small-ru` с жесткой грамматикой `["{targetName}", "[unk]"]`) по умолчанию для целевого слова «джарвис» и любых кастомных имен.
+     - Опционально в `OpenWakeWordDetector` (OnnxRuntime `jarvis.onnx`).
    - При обнаружении имени **НЕ ПРОИЗВОДИТСЯ никаких звуковых сигналов (никаких Console.Beep, джинглов или проигрывания звуков)**.
    - Происходит мгновенный бесшумный переход в `ListeningForCommand` (HUD переключается в `Listening`), и поток PCM переключается на полноразмерную акустическую модель `vosk-model-ru-0.42` (~1.5 ГБ) для приема команды.
    - При истечении тишины (700 мс после окончания речи) формируется итоговая строка фразы без дробления слов на паузах.
@@ -74,8 +74,8 @@ flowchart TD
    - Если в ответе присутствует `CommandRequest`, роутер логирует `[Router: Dispatch] Маршрутизация команды...`, находит зарегистрированный `ICommandHandler` и вызывает `ExecuteAsync()`, после чего логирует `[Router: Result]`.
 5. **Голосовой синтез (`IVoiceFeedbackService` / `CompositeVoiceFeedbackService.cs`)**:
    - Все обработчики и пайплайн вызывают единую абстракцию `IVoiceFeedbackService.SpeakAsync(text)`.
-   - **Primary**: `EdgeTtsEngine` (`ru-RU-DmitryNeural`, строгий таймаут подключения 2500 мс, механизм быстрого Reconnect за 400 мс и Keep-Alive пинг WebSocket).
-   - **Secondary**: `SileroTtsEngine` (локальный ONNX `Models/Silero/ru_v3.onnx` с автозагрузкой при отсутствии, зафиксирован строго мужской голос `aidar`).
+   - **Primary**: `EdgeTtsEngine` (`ru-RU-DmitryNeural`, строгий таймаут подключения 3000 мс, механизм быстрого Reconnect за 2000 мс и Keep-Alive пинг WebSocket).
+   - **Secondary**: `SileroTtsEngine` (локальный ONNX `Models/Silero/v4_ru.onnx` / `v3_ru.onnx` с автозагрузкой с HuggingFace Raw LFS и GitHub Raw за 120 с, зафиксированы строго мужские голоса `aidar`/`baya`).
    - **Safety Fallback**: `SystemSpeechTtsEngine` (Windows SAPI: строго мужские голоса `Microsoft Pavel` или принудительная модуляция тона `-40% prosody` при отсутствии мужских голосов; женский голос `Microsoft Irina Desktop` категорически заблокирован).
    - На время речи микрофон `VoiceListener` глушится во избежание самоперехвата (Acoustic Feedback Prevention).
    - Если действие требует подтверждения пользователя (`HasPendingAction`), вопрос подтверждения озвучивается ровно один раз, дублирующий `response.Reply` блокируется, а микрофон переводится в режим прямого ожидания ответа без вейк-ворда (`EnterConfirmationListening`).
@@ -115,10 +115,10 @@ flowchart TD
   - Легковесная модель `Models/WakeWord/jarvis.onnx` со сверхнизкой задержкой кадра (50–80 мс).
   - Автоматическая фоновая загрузка модели при её отсутствии в локальной файловой системе.
 - [`Voice/WakeWord/VoskGrammarWakeWordDetector.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Voice/WakeWord/VoskGrammarWakeWordDetector.cs):
-  - Адаптивный детектор для любых произвольных пользовательских имен («петрович», «гена», «цицерон» и др.).
-  - Использует малую акустическую модель `vosk-model-small-ru` (~45 МБ, автозагрузка при отсутствии) с жестко ограниченной грамматикой: `["{customName}", "[unk]"]`.
+  - KWS-детектор по умолчанию для целевого слова («джарвис») и любых кастомных имен («петрович», «гена», «цицерон» и др.).
+  - Использует малую акустическую модель `vosk-model-small-ru` (~45 МБ, автозагрузка при отсутствии) с жестко ограниченной грамматикой: `["{customName}", "[unk]"]` без Unicode-экранирования.
 - [`Voice/WakeWord/WakeWordFactory.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Voice/WakeWord/WakeWordFactory.cs):
-  - Фабрика: выбирает `OpenWakeWordDetector`, если имя совпадает с «джарвис» / «jarvis», иначе инициализирует `VoskGrammarWakeWordDetector`.
+  - Фабрика: по умолчанию инициализирует `VoskGrammarWakeWordDetector` для мгновенной 0 мс детекции как для имени «джарвис», так и для кастомных имен.
 - [`Services/VoiceListener.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/VoiceListener.cs):
   - Потоковый захват микрофона (`NAudio.Wave.WaveInEvent`, 16 кГц, 1 канал, 16 бит).
   - Интеграция с `IWakeWordDetector` в состоянии `WaitingForWakeWord`.
@@ -166,14 +166,14 @@ flowchart TD
 - [`Services/CompositeVoiceFeedbackService.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/CompositeVoiceFeedbackService.cs):
   - Реализует `IVoiceFeedbackService`.
   - Гибридный оркестратор со строго мужским тембром речи и цепочкой отказоустойчивости:
-    1. **Primary**: `EdgeTtsEngine` (`ru-RU-DmitryNeural`, онлайн, таймаут 2500 мс, быстрый Reconnect 400 мс, Keep-Alive).
-    2. **Secondary**: `SileroTtsEngine` (локальный ONNX `Models/Silero/ru_v3.onnx`, мужской голос `aidar`, автозагрузка).
+    1. **Primary**: `EdgeTtsEngine` (`ru-RU-DmitryNeural`, онлайн, таймаут 3000 мс, быстрый Reconnect 2000 мс, Keep-Alive).
+    2. **Secondary**: `SileroTtsEngine` (локальный ONNX `Models/Silero/v4_ru.onnx` / `v3_ru.onnx`, мужской голос `aidar`/`baya`, автозагрузка 120 с).
     3. **Safety Fallback**: `SystemSpeechTtsEngine` (Windows SAPI, мужской голос `Microsoft Pavel` или модуляция ExtraLow pitch prosody; запрет голоса Ирины).
   - Потокобезопасный `SemaphoreSlim(1, 1)` для сериализации речи.
   - Детальное логирование каждого шага: `[TTS] Попытка синтеза...`, `[TTS: Edge] Воспроизведение завершено.`, `[TTS: Warning] Сбой...`, `[TTS: Error]`.
   - Координация с Vosk: пауза микрофона перед речью, 300 мс кулдаун для затухания акустического эха, активация `EnterConfirmationListening` при наличии активного `PendingAction`.
-- [`Services/TTS/EdgeTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/EdgeTtsEngine.cs): WebSocket-клиент Edge Speech (`ru-RU-DmitryNeural`), генерация DRM-токена `Sec-MS-GEC`, настраиваемый таймаут подключения, 1 быстрый Reconnect с таймаутом 400 мс при сбое связи и фоновый Keep-Alive WebSocket пинг каждые 15 сек.
-- [`Services/TTS/SileroTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/SileroTtsEngine.cs): Локальный ONNX Runtime движок (`Models/Silero/ru_v3.onnx`), автоматическая фоновая загрузка модели при отсутствии через `SocketsHttpHandler` (поддержка HTTP 302/307 редиректов `AllowAutoRedirect = true`, `MaxAutomaticRedirections = 5`, браузерный User-Agent, зеркала HuggingFace и silero.ai, валидация размера > 1 МБ с удалением поврежденных файлов), фиксация мужского голоса (`aidar`/`baya`).
+- [`Services/TTS/EdgeTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/EdgeTtsEngine.cs): WebSocket-клиент Edge Speech (`ru-RU-DmitryNeural`), генерация DRM-токена `Sec-MS-GEC`, настраиваемый таймаут подключения (3000 мс), 1 быстрый Reconnect с таймаутом 2000 мс при сбое связи и фоновый Keep-Alive WebSocket пинг каждые 15 сек.
+- [`Services/TTS/SileroTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/SileroTtsEngine.cs): Локальный ONNX Runtime движок (`Models/Silero/v4_ru.onnx` / `v3_ru.onnx`), автоматическая фоновая загрузка модели при отсутствии через `SocketsHttpHandler` (поддержка HTTP 302/307 редиректов `AllowAutoRedirect = true`, `MaxAutomaticRedirections = 5`, таймаут 120 с, браузерный User-Agent, зеркала HuggingFace Raw LFS и GitHub Raw, валидация размера > 1 МБ с удалением поврежденных файлов), фиксация мужских голосов (`aidar`/`baya`).
 - [`Services/TTS/SystemSpeechTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/SystemSpeechTtsEngine.cs): Надежный системный fallback. Исключает женский голос `Microsoft Irina Desktop`, выбирает установленные мужские голоса (`Microsoft Pavel`, `David`) или применяет занижение тона/питча (SSML `-40% prosody`) для сохранения мужского тембра.
 
 ### 3.4 Обработчики команд (`Handlers/`)

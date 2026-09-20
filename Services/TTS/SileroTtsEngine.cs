@@ -7,18 +7,18 @@ namespace Gem.Services;
 /// <summary>
 /// Secondary / Offline TTS engine based on Silero TTS executed via Microsoft.ML.OnnxRuntime.
 /// Generates 24/48 kHz PCM audio and outputs via NAudio.
-/// Guarantees strictly male voice (aidar by default) and automatic background download of ru_v3.onnx.
+/// Guarantees strictly male voice (aidar/baya) and automatic background download of v4_ru.onnx / v3_ru.onnx.
 /// </summary>
 public sealed class SileroTtsEngine : ITtsEngine, IDisposable
 {
     public const string DefaultModelFolder = "Models/Silero";
-    public const string DefaultModelFileName = "ru_v3.onnx";
+    public const string DefaultModelFileName = "v4_ru.onnx";
     public static readonly string DefaultModelPath = Path.Combine(DefaultModelFolder, DefaultModelFileName);
 
     private static readonly string[] DownloadMirrors =
     [
-        "https://models.silero.ai/models/tts/ru/v3_ru.onnx",
-        "https://github.com/snakers4/silero-models/raw/master/models/tts/ru/v3_ru.onnx"
+        "https://huggingface.co/snakers4/silero-models/resolve/main/models/tts/ru/v4_ru.onnx",
+        "https://raw.githubusercontent.com/snakers4/silero-models/master/models/tts/ru/v3_ru.onnx"
     ];
 
     private readonly string _modelPath;
@@ -54,7 +54,7 @@ public sealed class SileroTtsEngine : ITtsEngine, IDisposable
 
     private static string ResolveModelPath(string path)
     {
-        if (Path.IsPathRooted(path))
+        if (Path.IsPathRooted(path) && File.Exists(path))
         {
             return path;
         }
@@ -71,11 +71,29 @@ public sealed class SileroTtsEngine : ITtsEngine, IDisposable
             return currentDirPath;
         }
 
-        // Check fallback legacy path Models/TTS/silero_ru.onnx
-        string legacyPath = Path.Combine(AppContext.BaseDirectory, "Models", "TTS", "silero_ru.onnx");
-        if (File.Exists(legacyPath))
+        // Check fallback alternatives in Models/Silero and Models/TTS
+        string[] candidates =
+        [
+            "Models/Silero/v4_ru.onnx",
+            "Models/Silero/ru_v3.onnx",
+            "Models/Silero/v3_ru.onnx",
+            "Models/Silero/ru_v4.onnx",
+            "Models/TTS/silero_ru.onnx"
+        ];
+
+        foreach (var candidate in candidates)
         {
-            return legacyPath;
+            string p1 = Path.Combine(AppContext.BaseDirectory, candidate);
+            if (File.Exists(p1) && new FileInfo(p1).Length >= 1024 * 1024)
+            {
+                return p1;
+            }
+
+            string p2 = Path.Combine(Directory.GetCurrentDirectory(), candidate);
+            if (File.Exists(p2) && new FileInfo(p2).Length >= 1024 * 1024)
+            {
+                return p2;
+            }
         }
 
         return directPath;
@@ -95,7 +113,7 @@ public sealed class SileroTtsEngine : ITtsEngine, IDisposable
             Console.ForegroundColor = ConsoleColor.DarkYellow;
             Console.WriteLine($"[TTS: Silero Warning] Локальный файл модели '{fullPath}' поврежден или имеет размер < 1 МБ ({existingFi.Length} байт). Удаление...");
             Console.ResetColor();
-            try { File.Delete(fullPath); } catch { }
+            try { File.Delete(fullPath); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[SileroTtsEngine] {ex.Message}"); }
         }
 
         string? dir = Path.GetDirectoryName(fullPath);
@@ -105,7 +123,7 @@ public sealed class SileroTtsEngine : ITtsEngine, IDisposable
         }
 
         Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.WriteLine($"[TTS: Silero] Модель '{fullPath}' отсутствует. Начинается автоматическая загрузка Silero v3 ONNX...");
+        Console.WriteLine($"[TTS: Silero] Модель '{fullPath}' отсутствует. Начинается автоматическая загрузка Silero v4/v3 ONNX...");
         Console.ResetColor();
 
         bool downloaded = false;
@@ -117,7 +135,7 @@ public sealed class SileroTtsEngine : ITtsEngine, IDisposable
 
         using var httpClient = new HttpClient(handler)
         {
-            Timeout = TimeSpan.FromSeconds(25)
+            Timeout = TimeSpan.FromSeconds(120)
         };
         httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
 
@@ -173,7 +191,7 @@ public sealed class SileroTtsEngine : ITtsEngine, IDisposable
                     Console.ForegroundColor = ConsoleColor.DarkYellow;
                     Console.WriteLine($"\n[TTS Warning] Скачанный файл из {url} имеет размер {downloadedInfo.Length} байт (< 1 МБ). Удаление невалидного файла...");
                     Console.ResetColor();
-                    try { File.Delete(tempPath); } catch { }
+                    try { File.Delete(tempPath); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[SileroTtsEngine] {ex.Message}"); }
                     continue;
                 }
 
@@ -182,13 +200,13 @@ public sealed class SileroTtsEngine : ITtsEngine, IDisposable
                 downloaded = true;
 
                 Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine($"\n[TTS: Silero] Модель Silero v3 ONNX успешно загружена ({new FileInfo(fullPath).Length / 1024} КБ).");
+                Console.WriteLine($"\n[TTS: Silero] Модель Silero v4/v3 ONNX успешно загружена ({new FileInfo(fullPath).Length / 1024} КБ).");
                 Console.ResetColor();
                 break;
             }
             catch (Exception ex)
             {
-                try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+                try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch (Exception ex2) { System.Diagnostics.Debug.WriteLine($"[SileroTtsEngine] {ex2.Message}"); }
                 Console.ForegroundColor = ConsoleColor.DarkYellow;
                 Console.WriteLine($"[TTS Warning] Ошибка загрузки с {url}: {ex.Message}");
                 Console.ResetColor();
@@ -290,12 +308,35 @@ public sealed class SileroTtsEngine : ITtsEngine, IDisposable
                 }
                 else
                 {
-                    inputs.Add(NamedOnnxValue.CreateFromTensor(name, new DenseTensor<long>(new[] { 0L }, new[] { 1 })));
+                    long speakerId = _speaker.Equals("baya", StringComparison.OrdinalIgnoreCase) ? 1L : 0L;
+                    inputs.Add(NamedOnnxValue.CreateFromTensor(name, new DenseTensor<long>(new[] { speakerId }, new[] { 1 })));
                 }
             }
             else if (lowerName.Contains("sample_rate") || lowerName.Contains("sr"))
             {
                 inputs.Add(NamedOnnxValue.CreateFromTensor(name, new DenseTensor<long>(new[] { (long)_sampleRate }, new[] { 1 })));
+            }
+            else if (lowerName.Contains("put_accent"))
+            {
+                if (metadata.ElementType == typeof(bool))
+                {
+                    inputs.Add(NamedOnnxValue.CreateFromTensor(name, new DenseTensor<bool>(new[] { true }, new[] { 1 })));
+                }
+                else
+                {
+                    inputs.Add(NamedOnnxValue.CreateFromTensor(name, new DenseTensor<long>(new[] { 1L }, new[] { 1 })));
+                }
+            }
+            else if (lowerName.Contains("put_yo"))
+            {
+                if (metadata.ElementType == typeof(bool))
+                {
+                    inputs.Add(NamedOnnxValue.CreateFromTensor(name, new DenseTensor<bool>(new[] { true }, new[] { 1 })));
+                }
+                else
+                {
+                    inputs.Add(NamedOnnxValue.CreateFromTensor(name, new DenseTensor<long>(new[] { 1L }, new[] { 1 })));
+                }
             }
         }
 

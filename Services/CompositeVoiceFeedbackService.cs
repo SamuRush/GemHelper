@@ -39,7 +39,7 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
                 configuration?["Tts:EdgeVoice"] ?? "ru-RU-DmitryNeural",
                 int.TryParse(configuration?["Tts:ConnectionTimeoutMs"], out int tMs) && tMs > 0 ? tMs : EdgeTtsEngine.DefaultConnectionTimeoutMs),
             sileroTts: new SileroTtsEngine(
-                configuration?["Tts:SileroModelPath"] ?? "Models/Silero/ru_v3.onnx",
+                configuration?["Tts:SileroModelPath"] ?? SileroTtsEngine.DefaultModelPath,
                 configuration?["Tts:SileroSpeaker"] ?? "aidar"),
             systemSpeech: new SystemSpeechTtsEngine())
     {

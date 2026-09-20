@@ -1281,7 +1281,7 @@ public static class Program
             throw new Exception("AppSettingsService.Load().Tts is null!");
         if (ttsSettings.Tts.PreferredEngine != "Edge" ||
             ttsSettings.Tts.EdgeVoice != "ru-RU-DmitryNeural" ||
-            ttsSettings.Tts.SileroModelPath != "Models/Silero/ru_v3.onnx" ||
+            ttsSettings.Tts.SileroModelPath != "Models/Silero/v4_ru.onnx" ||
             ttsSettings.Tts.SileroSpeaker != "aidar")
         {
             throw new Exception($"TtsConfig values mismatch! PreferredEngine: '{ttsSettings.Tts.PreferredEngine}', EdgeVoice: '{ttsSettings.Tts.EdgeVoice}', SileroModelPath: '{ttsSettings.Tts.SileroModelPath}', SileroSpeaker: '{ttsSettings.Tts.SileroSpeaker}'");
@@ -1293,8 +1293,8 @@ public static class Program
         var edgeEngine = new EdgeTtsEngine(ttsSettings.Tts.EdgeVoice);
         if (edgeEngine.Name != "Edge")
             throw new Exception($"EdgeTtsEngine.Name != 'Edge', got '{edgeEngine.Name}'");
-        if (edgeEngine.ConnectionTimeoutMs != 2500)
-            throw new Exception($"edgeEngine.ConnectionTimeoutMs != 2500, got {edgeEngine.ConnectionTimeoutMs}");
+        if (edgeEngine.ConnectionTimeoutMs != 3000)
+            throw new Exception($"edgeEngine.ConnectionTimeoutMs != 3000, got {edgeEngine.ConnectionTimeoutMs}");
 
         string secMsGec = EdgeTtsEngine.GenerateSecMsGec();
         if (string.IsNullOrEmpty(secMsGec) || secMsGec.Length != 64)
@@ -1502,18 +1502,18 @@ public static class Program
             throw new Exception("GetDefaultBrowserStartInfo returned empty FileName!");
         Console.WriteLine($"    Default browser start info resolved: FileName='{browserStartInfo.FileName}', Args='{browserStartInfo.Arguments}'");
 
-        // 16.3 Edge-TTS 2500ms Timeout Verification
-        Console.WriteLine("  [16.3] Testing Edge-TTS 2500ms connection timeout configuration...");
-        if (EdgeTtsEngine.DefaultConnectionTimeoutMs != 2500)
-            throw new Exception($"EdgeTtsEngine.DefaultConnectionTimeoutMs expected 2500, got: {EdgeTtsEngine.DefaultConnectionTimeoutMs}");
+        // 16.3 Edge-TTS 3000ms Timeout Verification
+        Console.WriteLine("  [16.3] Testing Edge-TTS 3000ms connection timeout configuration...");
+        if (EdgeTtsEngine.DefaultConnectionTimeoutMs != 3000)
+            throw new Exception($"EdgeTtsEngine.DefaultConnectionTimeoutMs expected 3000, got: {EdgeTtsEngine.DefaultConnectionTimeoutMs}");
 
         var loadedTtsSettings = AppSettingsService.Load();
-        if (loadedTtsSettings.Tts.ConnectionTimeoutMs != 2500)
-            throw new Exception($"AppSettings.Tts.ConnectionTimeoutMs expected 2500, got: {loadedTtsSettings.Tts.ConnectionTimeoutMs}");
+        if (loadedTtsSettings.Tts.ConnectionTimeoutMs != 3000)
+            throw new Exception($"AppSettings.Tts.ConnectionTimeoutMs expected 3000, got: {loadedTtsSettings.Tts.ConnectionTimeoutMs}");
 
         var testEdgeEngine = new EdgeTtsEngine();
-        if (testEdgeEngine.ConnectionTimeoutMs != 2500)
-            throw new Exception($"EdgeTtsEngine instance ConnectionTimeoutMs expected 2500, got: {testEdgeEngine.ConnectionTimeoutMs}");
+        if (testEdgeEngine.ConnectionTimeoutMs != 3000)
+            throw new Exception($"EdgeTtsEngine instance ConnectionTimeoutMs expected 3000, got: {testEdgeEngine.ConnectionTimeoutMs}");
         Console.WriteLine($"    Edge-TTS timeout verified: DefaultConnectionTimeoutMs={EdgeTtsEngine.DefaultConnectionTimeoutMs}, Config={loadedTtsSettings.Tts.ConnectionTimeoutMs}");
 
         // 16.4 Single Speech Invariant & Pending Confirmation Speech Isolation
@@ -1570,8 +1570,8 @@ public static class Program
         // 17.1 Silero download mirror URLs check
         string[] expectedMirrors =
         [
-            "https://models.silero.ai/models/tts/ru/v3_ru.onnx",
-            "https://github.com/snakers4/silero-models/raw/master/models/tts/ru/v3_ru.onnx"
+            "https://huggingface.co/snakers4/silero-models/resolve/main/models/tts/ru/v4_ru.onnx",
+            "https://raw.githubusercontent.com/snakers4/silero-models/master/models/tts/ru/v3_ru.onnx"
         ];
         var mirrorsField = typeof(SileroTtsEngine).GetField("DownloadMirrors", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         if (mirrorsField?.GetValue(null) is not string[] actualMirrors)
@@ -1650,8 +1650,8 @@ public static class Program
 
         // 18.2 WakeWordFactory Threshold & Type Selection
         var factoryDetectorJarvis = Gem.Voice.WakeWordFactory.Create("джарвис", threshold: 0.6f);
-        if (factoryDetectorJarvis is not Gem.Voice.OpenWakeWordDetector)
-            throw new Exception("WakeWordFactory did not create OpenWakeWordDetector for 'джарвис'!");
+        if (factoryDetectorJarvis is not Gem.Voice.VoskGrammarWakeWordDetector)
+            throw new Exception("WakeWordFactory did not create VoskGrammarWakeWordDetector for 'джарвис'!");
         factoryDetectorJarvis.Dispose();
 
         var factoryDetectorCustom = Gem.Voice.WakeWordFactory.Create("петрович");
@@ -1683,7 +1683,39 @@ public static class Program
             throw new Exception($"VoiceListener did not instantly transition to ListeningForCommand upon wake-word trigger! State={voiceListenerInstance.CurrentState}");
 
         voiceListenerInstance.Dispose();
-        Console.WriteLine("    VoiceListener instant 0 ms transition & OpenWakeWord priority audio routing verified.");
+        Console.WriteLine("    VoiceListener instant 0 ms transition & wake-word audio routing verified.");
+
+        // Test 19: Restore Mic Pipeline (VoskGrammar KWS), Edge-TTS 3000ms/2000ms & Silero v4/v3 ONNX (TASK: 56_Restore_Mic_Pipeline_And_Fix_Silero_And_Edge_Timeouts)
+        Console.WriteLine("\n[19] Testing VoskGrammar KWS default, Edge-TTS 3000ms/2000ms timeouts & Silero v4/v3 ONNX...");
+
+        // 19.1 VoskGrammarWakeWordDetector default for Jarvis
+        var kwsDefaultJarvis = Gem.Voice.WakeWordFactory.Create("джарвис");
+        if (kwsDefaultJarvis is not Gem.Voice.VoskGrammarWakeWordDetector)
+            throw new Exception($"WakeWordFactory.Create('джарвис') must return VoskGrammarWakeWordDetector by default! Got: {kwsDefaultJarvis.GetType().Name}");
+        if (kwsDefaultJarvis.WakeWord != "джарвис")
+            throw new Exception($"VoskGrammarWakeWordDetector.WakeWord expected 'джарвис', got: '{kwsDefaultJarvis.WakeWord}'");
+        kwsDefaultJarvis.Dispose();
+        Console.WriteLine("    [19.1] VoskGrammarWakeWordDetector default selection verified.");
+
+        // 19.2 Edge-TTS timeouts: 3000ms connect, 2000ms fast reconnect
+        if (EdgeTtsEngine.DefaultConnectionTimeoutMs != 3000)
+            throw new Exception($"EdgeTtsEngine.DefaultConnectionTimeoutMs expected 3000, got: {EdgeTtsEngine.DefaultConnectionTimeoutMs}");
+        if (EdgeTtsEngine.FastReconnectTimeoutMs != 2000)
+            throw new Exception($"EdgeTtsEngine.FastReconnectTimeoutMs expected 2000, got: {EdgeTtsEngine.FastReconnectTimeoutMs}");
+        Console.WriteLine("    [19.2] Edge-TTS 3000ms connect / 2000ms reconnect timeouts verified.");
+
+        // 19.3 Silero v4/v3 mirrors, v4_ru.onnx default and speakers aidar/baya
+        if (SileroTtsEngine.DefaultModelFileName != "v4_ru.onnx")
+            throw new Exception($"SileroTtsEngine.DefaultModelFileName expected 'v4_ru.onnx', got: '{SileroTtsEngine.DefaultModelFileName}'");
+        var sileroAidar = new SileroTtsEngine(speaker: "aidar");
+        if (sileroAidar.Speaker != "aidar")
+            throw new Exception($"SileroTtsEngine speaker expected 'aidar', got: '{sileroAidar.Speaker}'");
+        sileroAidar.Dispose();
+        var sileroBaya = new SileroTtsEngine(speaker: "baya");
+        if (sileroBaya.Speaker != "baya")
+            throw new Exception($"SileroTtsEngine speaker expected 'baya', got: '{sileroBaya.Speaker}'");
+        sileroBaya.Dispose();
+        Console.WriteLine("    [19.3] Silero v4_ru.onnx default & male speakers aidar/baya verified.");
 
         Console.WriteLine("\n>>> ALL FEATURE TESTS PASSED SUCCESSFULLY! <<<\n");
 

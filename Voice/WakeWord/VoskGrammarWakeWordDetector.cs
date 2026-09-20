@@ -112,8 +112,8 @@ public sealed class VoskGrammarWakeWordDetector : IWakeWordDetector
                 File.Copy(file, dest, true);
             }
 
-            try { Directory.Delete(tempExtract, true); } catch { }
-            try { File.Delete(tempZip); } catch { }
+            try { Directory.Delete(tempExtract, true); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[VoskGrammarWakeWordDetector] {ex.Message}"); }
+            try { File.Delete(tempZip); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[VoskGrammarWakeWordDetector] {ex.Message}"); }
 
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine($"\n[WakeWord: Vosk Grammar] Малая модель Vosk успешно установлена в '{_modelPath}'.");
@@ -144,7 +144,9 @@ public sealed class VoskGrammarWakeWordDetector : IWakeWordDetector
         {
             if (_smallModelSingleton == null)
             {
-                string modelToUse = Directory.Exists(path) ? path : VoskModelHelper.DefaultModelFolder;
+                bool isPathValid = Directory.Exists(path) &&
+                    (Directory.Exists(Path.Combine(path, "am")) || File.Exists(Path.Combine(path, "am", "final.mdl")) || Directory.Exists(Path.Combine(path, "conf")));
+                string modelToUse = isPathValid ? path : VoskModelHelper.DefaultModelFolder;
                 if (!Directory.Exists(modelToUse))
                 {
                     throw new DirectoryNotFoundException($"Каталог модели Vosk '{modelToUse}' не найден.");
@@ -163,8 +165,11 @@ public sealed class VoskGrammarWakeWordDetector : IWakeWordDetector
         {
             var model = GetOrInitSmallModel(_modelPath);
 
-            // Set strictly constrained grammar: [ "{customName}", "[unk]" ]
-            string grammarJson = JsonSerializer.Serialize(new[] { _customName, "[unk]" });
+            // Set strictly constrained grammar: [ "{customName}", "[unk]" ] without Unicode escaping (\uXXXX)
+            string grammarJson = JsonSerializer.Serialize(new[] { _customName, "[unk]" }, new JsonSerializerOptions
+            {
+                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            });
             _recognizer = new VoskRecognizer(model, 16000.0f, grammarJson);
             _recognizer.SetMaxAlternatives(0);
 
@@ -218,7 +223,10 @@ public sealed class VoskGrammarWakeWordDetector : IWakeWordDetector
                 return elem.GetString() ?? string.Empty;
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[VoskGrammarWakeWordDetector] Ошибка парсинга JSON: {ex.Message}");
+        }
         return string.Empty;
     }
 
