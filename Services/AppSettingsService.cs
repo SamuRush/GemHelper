@@ -10,6 +10,8 @@ public sealed class WakeWordConfig
     public string OnnxModelPath { get; set; } = "Models/WakeWord/jarvis.onnx";
     public string SmallModelPath { get; set; } = "Models/VoskSmall/vosk-model-small-ru";
     public float Threshold { get; set; } = 0.5f;
+    public double NoiseGateRms { get; set; } = 450.0;
+    public int MinDurationMs { get; set; } = 150;
 }
 
 public sealed class AppSettingsData
@@ -116,6 +118,10 @@ public static class AppSettingsService
                     data.WakeWord.SmallModelPath = smallPath;
                 if (ww["Threshold"]?.GetValue<float>() is float th)
                     data.WakeWord.Threshold = th;
+                if (ww["NoiseGateRms"]?.GetValue<double>() is double ng && ng > 0)
+                    data.WakeWord.NoiseGateRms = ng;
+                if (ww["MinDurationMs"]?.GetValue<int>() is int md && md > 0)
+                    data.WakeWord.MinDurationMs = md;
             }
 
             if (node["WakeWords"] is JsonArray wakeWordsArr)
@@ -168,7 +174,9 @@ public static class AppSettingsService
                     ["Name"] = data.WakeWord.Name,
                     ["OnnxModelPath"] = data.WakeWord.OnnxModelPath,
                     ["SmallModelPath"] = data.WakeWord.SmallModelPath,
-                    ["Threshold"] = data.WakeWord.Threshold
+                    ["Threshold"] = data.WakeWord.Threshold,
+                    ["NoiseGateRms"] = data.WakeWord.NoiseGateRms,
+                    ["MinDurationMs"] = data.WakeWord.MinDurationMs
                 },
                 ["Llm"] = new JsonObject
                 {

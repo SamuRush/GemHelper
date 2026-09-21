@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Windows;
@@ -258,40 +259,55 @@ public static class Program
         OverlayWidget? overlay = null,
         WeatherService? weatherService = null)
     {
-        Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.WriteLine($"[JARVIS] Обработка запроса: \"{inputPhrase}\"");
-        Console.ResetColor();
-
-        // 1. Проверка системных команд на выход перед обращением к LLM
-        if (await JarvisOrchestrator.CheckDirectExitCommandAsync(inputPhrase, feedbackService))
+        try
         {
-            return;
-        }
+            VoiceListener.Instance?.NotifyProcessingStarted();
 
-        overlay?.SetState(JarvisState.Thinking);
-
-        var jarvisResponse = await llmService.InterpretAsync(inputPhrase);
-
-        overlay?.SetState(JarvisState.Action);
-
-        if (!string.IsNullOrWhiteSpace(jarvisResponse.Reply))
-        {
-            Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine($">>> [JARVIS]: \"{jarvisResponse.Reply}\"");
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine($"[JARVIS] Обработка запроса: \"{inputPhrase}\"");
             Console.ResetColor();
-        }
 
-        // Centralized execution in AppHandler (Weather, Exit, Dialog, Router Commands)
-        await AppHandler.HandleJarvisResponseAsync(jarvisResponse, router, feedbackService, weatherService);
+            // 1. Проверка системных команд на выход перед обращением к LLM
+            if (await JarvisOrchestrator.CheckDirectExitCommandAsync(inputPhrase, feedbackService))
+            {
+                return;
+            }
 
-        // Smooth transition to Idle or Listening depending on confirmation state
-        if (JarvisOrchestrator.Instance.HasPendingAction)
-        {
-            overlay?.SetState(JarvisState.Listening);
+            overlay?.SetState(JarvisState.Thinking);
+
+            var jarvisResponse = await llmService.InterpretAsync(inputPhrase);
+
+            overlay?.SetState(JarvisState.Action);
+
+            if (!string.IsNullOrWhiteSpace(jarvisResponse.Reply))
+            {
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.WriteLine($">>> [JARVIS]: \"{jarvisResponse.Reply}\"");
+                Console.ResetColor();
+            }
+
+            // Centralized execution in AppHandler (Weather, Exit, Dialog, Router Commands)
+            await AppHandler.HandleJarvisResponseAsync(jarvisResponse, router, feedbackService, weatherService);
+
+            // Smooth transition to Idle or Listening depending on confirmation state
+            if (JarvisOrchestrator.Instance.HasPendingAction)
+            {
+                overlay?.SetState(JarvisState.Listening);
+            }
+            else
+            {
+                overlay?.SetState(JarvisState.Idle);
+            }
         }
-        else
+        finally
         {
-            overlay?.SetState(JarvisState.Idle);
+            // Если TTS не вызывался (команда без речи, ошибка LLM или прямой экшен),
+            // гарантированно разблокируем микрофон строго после истечения 250 мс cooldown
+            if (VoiceListener.Instance?.IsProcessing == true)
+            {
+                await Task.Delay(250);
+                VoiceListener.Instance?.NotifyProcessingFinished();
+            }
         }
     }
 
@@ -1716,6 +1732,108 @@ public static class Program
             throw new Exception($"SileroTtsEngine speaker expected 'baya', got: '{sileroBaya.Speaker}'");
         sileroBaya.Dispose();
         Console.WriteLine("    [19.3] Silero v4_ru.onnx default & male speakers aidar/baya verified.");
+
+        // Test 20: KWS Hypersensitivity, RMS Noise Gate & 150ms Min Duration Filter (TASK: 63_Fix_Hypersensitive_WakeWord_Trigger_And_Noise_Filter)
+        Console.WriteLine("\n[20] Testing KWS RMS Noise Gate (450), 150ms Min Duration Filter & FSM Lock...");
+
+        // 20.1 RMS Energy Gate calculation
+        byte[] silentBuffer = new byte[1120]; // 35ms of 16kHz 16-bit mono silence
+        double silentRms = VoskGrammarWakeWordDetector.CalculateRms(silentBuffer);
+        if (silentRms != 0.0)
+            throw new Exception($"CalculateRms on silence expected 0, got {silentRms}");
+
+        byte[] quietNoise = new byte[1120];
+        for (int i = 0; i < quietNoise.Length; i += 2)
+        {
+            short val = (short)(i % 100 - 50);
+            quietNoise[i] = (byte)(val & 0xFF);
+            quietNoise[i + 1] = (byte)((val >> 8) & 0xFF);
+        }
+        double quietRms = VoskGrammarWakeWordDetector.CalculateRms(quietNoise);
+        if (quietRms >= 450.0)
+            throw new Exception($"Quiet noise RMS ({quietRms}) must be below RMS Noise Gate (450.0)!");
+
+        byte[] speechSignal = new byte[1120];
+        for (int i = 0; i < speechSignal.Length; i += 2)
+        {
+            short val = (short)(Math.Sin(i * 0.05) * 3000);
+            speechSignal[i] = (byte)(val & 0xFF);
+            speechSignal[i + 1] = (byte)((val >> 8) & 0xFF);
+        }
+        double speechRms = VoskGrammarWakeWordDetector.CalculateRms(speechSignal);
+        if (speechRms < 450.0)
+            throw new Exception($"Speech signal RMS ({speechRms}) must be above RMS Noise Gate (450.0)!");
+        Console.WriteLine($"    [20.1] RMS Gate calculation verified (Silence: {silentRms:F1}, Noise: {quietRms:F1} < 450, Speech: {speechRms:F1} >= 450).");
+
+        // 20.2 Strict Token-Matching (regex (?:\b|\s|^)джарвис(?:\b|\s|$) + word parsing)
+        var kwsDetector = new VoskGrammarWakeWordDetector("джарвис", minDurationMs: 150, noiseGateRms: 450.0);
+        if (kwsDetector.MinDurationMs != 150)
+            throw new Exception($"MinDurationMs expected 150, got {kwsDetector.MinDurationMs}");
+        if (kwsDetector.NoiseGateRms != 450.0)
+            throw new Exception($"NoiseGateRms expected 450.0, got {kwsDetector.NoiseGateRms}");
+
+        // Match cases
+        string[] validWakeWords = ["джарвис", "  джарвис  ", "джарвис [unk]", "[unk] джарвис", "эй джарвис", "джарвис слушай"];
+        foreach (var text in validWakeWords)
+        {
+            if (!kwsDetector.IsIsolatedTokenMatch(text, "джарвис"))
+                throw new Exception($"IsIsolatedTokenMatch expected true for '{text}'");
+        }
+
+        // Rejection cases: phonetic snippets and subwords MUST be rejected
+        string[] invalidWakeWords = ["джа", "да", "джар", "джарвиса", "сюрприз", "рис", "вис", "джарвису", "", "[unk]"];
+        foreach (var text in invalidWakeWords)
+        {
+            if (kwsDetector.IsIsolatedTokenMatch(text, "джарвис"))
+                throw new Exception($"IsIsolatedTokenMatch expected false for invalid snippet '{text}'!");
+        }
+        Console.WriteLine("    [20.2] Strict Token-Matching verified: 'джарвис' matched, snippets 'джа'/'да'/'джар'/'сюрприз' rejected.");
+
+        // 20.3 Minimum Duration Filter (150 ms threshold)
+        // A single 35ms frame (<150ms) with low RMS is rejected by gate
+        bool triggeredQuiet = kwsDetector.ProcessFrame(quietNoise);
+        if (triggeredQuiet)
+            throw new Exception("Quiet noise (<450 RMS) triggered KWS!");
+        if (kwsDetector.AccumulatedPhraseDurationMs != 0)
+            throw new Exception($"AccumulatedPhraseDurationMs on quiet noise expected 0, got {kwsDetector.AccumulatedPhraseDurationMs}");
+        Console.WriteLine("    [20.3] Quiet noise rejection by RMS Gate verified.");
+
+        // 20.4 FSM Processing Lock & Cooldown (250 ms)
+        var testListenerFsm = new VoiceListener(wakeWords: ["джарвис"]);
+        testListenerFsm.TransitionToWaitingForWakeWord("Start test in WaitingForWakeWord");
+        if (testListenerFsm.IsProcessing)
+            throw new Exception("VoiceListener.IsProcessing expected false initially!");
+
+        testListenerFsm.NotifyProcessingStarted();
+        if (!testListenerFsm.IsProcessing)
+            throw new Exception("VoiceListener.IsProcessing expected true after NotifyProcessingStarted()!");
+
+        // Feed speech chunk while processing - must be ignored
+        testListenerFsm.ProcessAudioChunkForTesting(speechSignal, speechSignal.Length, isSpeech: true);
+        if (testListenerFsm.CurrentState != VoiceListenerState.WaitingForWakeWord)
+            throw new Exception("VoiceListener accepted speech while _isProcessing was true!");
+
+        testListenerFsm.NotifyProcessingFinished();
+        if (testListenerFsm.IsProcessing)
+            throw new Exception("VoiceListener.IsProcessing expected false after NotifyProcessingFinished()!");
+
+        // Test TTS unblocking with cooldown 250ms
+        testListenerFsm.NotifyProcessingStarted();
+        var mockTtsFsm = new MockTtsEngine("Edge", isAvailable: true);
+        var compositeFsm = new CompositeVoiceFeedbackService(testListenerFsm, mockTtsFsm, mockSilero, mockSystem);
+
+        var ttsSw = Stopwatch.StartNew();
+        await compositeFsm.SpeakAsync("Тест разблокировки микрофона.");
+        ttsSw.Stop();
+
+        if (testListenerFsm.IsProcessing)
+            throw new Exception("VoiceListener.IsProcessing must be false after SpeakAsync finishes + cooldown!");
+        if (ttsSw.ElapsedMilliseconds < 200)
+            throw new Exception($"SpeakAsync cooldown too short: {ttsSw.ElapsedMilliseconds} ms (expected >= 250 ms)!");
+        Console.WriteLine($"    [20.4] FSM processing lock (_isProcessing) & TTS 250ms cooldown unblock verified (cooldown took {ttsSw.ElapsedMilliseconds}ms).");
+
+        testListenerFsm.Dispose();
+        kwsDetector.Dispose();
 
         Console.WriteLine("\n>>> ALL FEATURE TESTS PASSED SUCCESSFULLY! <<<\n");
 

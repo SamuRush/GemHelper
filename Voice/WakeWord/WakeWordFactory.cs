@@ -26,14 +26,17 @@ public static class WakeWordFactory
         string? wakeWord = null,
         string? onnxModelPath = null,
         string? smallModelPath = null,
-        float threshold = 0.5f)
+        float threshold = 0.5f,
+        int minDurationMs = VoskGrammarWakeWordDetector.DefaultMinDurationMs,
+        double noiseGateRms = VoskGrammarWakeWordDetector.DefaultNoiseGateRms)
     {
         string target = string.IsNullOrWhiteSpace(wakeWord) ? "джарвис" : wakeWord.Trim().ToLowerInvariant();
 
         Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine($"[WakeWordFactory] Выбран Vosk Grammar KWS детектор по умолчанию для имени '{target}' (малая модель vosk-model-small-ru).");
+        Console.WriteLine($"[WakeWordFactory] Выбран Vosk Grammar KWS детектор по умолчанию для имени '{target}' " +
+                          $"(малая модель vosk-model-small-ru, minDuration: {minDurationMs} мс, RMS Noise Gate: {noiseGateRms:0}).");
         Console.ResetColor();
 
-        return new VoskGrammarWakeWordDetector(target, smallModelPath);
+        return new VoskGrammarWakeWordDetector(target, smallModelPath, minDurationMs, noiseGateRms);
     }
 }

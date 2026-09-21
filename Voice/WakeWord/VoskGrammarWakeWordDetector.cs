@@ -17,30 +17,47 @@ public sealed class VoskGrammarWakeWordDetector : IWakeWordDetector
     public const string DefaultSmallModelFolder = "Models/VoskSmall/vosk-model-small-ru";
     public const string SmallModelDownloadUrl = "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip";
 
+    public const int DefaultMinDurationMs = 150;
+    public const double DefaultNoiseGateRms = 450.0;
+
     private static Model? _smallModelSingleton;
     private static readonly object _modelLock = new();
 
     private readonly string _modelPath;
     private readonly string _customName;
-    private readonly Regex _wakeWordRegex;  // Скомпилированный кэш: строгий матчинг по границам слов (\b...\b)
+    private readonly int _minDurationMs;
+    private readonly double _noiseGateRms;
+    private readonly Regex _wakeWordRegex;  // Скомпилированный кэш: строгий токен-матчинг (?:\b|\s|^)джарвис(?:\b|\s|$)
     private VoskRecognizer? _recognizer;
     private bool _disposed = false;
+
+    private int _accumulatedPhraseDurationMs = 0;
+    private long _lastActiveFrameTicks = 0;
 
     public string Name => "Vosk-Grammar";
     public string WakeWord => _customName;
     public long LastDetectionLatencyMs { get; private set; }
+    public int MinDurationMs => _minDurationMs;
+    public double NoiseGateRms => _noiseGateRms;
+    public int AccumulatedPhraseDurationMs => _accumulatedPhraseDurationMs;
 
     public event Action? OnWakeWordDetected;
 
-    public VoskGrammarWakeWordDetector(string customName, string? modelPath = null)
+    public VoskGrammarWakeWordDetector(
+        string customName,
+        string? modelPath = null,
+        int minDurationMs = DefaultMinDurationMs,
+        double noiseGateRms = DefaultNoiseGateRms)
     {
         _customName = string.IsNullOrWhiteSpace(customName) ? "петрович" : customName.Trim().ToLowerInvariant();
         _modelPath = string.IsNullOrWhiteSpace(modelPath) ? ResolveModelPath(DefaultSmallModelFolder) : ResolveModelPath(modelPath);
+        _minDurationMs = minDurationMs > 0 ? minDurationMs : DefaultMinDurationMs;
+        _noiseGateRms = noiseGateRms > 0 ? noiseGateRms : DefaultNoiseGateRms;
 
-        // Компилируем строгий Regex с границами слов один раз: \bджарвис\b
+        // Компилируем строгий Regex с границами слов/пробелов: (?:\b|\s|^)джарвис(?:\b|\s|$)
         // Это предотвращает ложные срабатывания на обрывки «рис», «вис», «джа», «сюрприз» и т.д.
         _wakeWordRegex = new Regex(
-            $@"\b{Regex.Escape(_customName)}\b",
+            $@"(?:\b|\s|^){Regex.Escape(_customName)}(?:\b|\s|$)",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         EnsureSmallModelAvailable();
@@ -234,6 +251,49 @@ public sealed class VoskGrammarWakeWordDetector : IWakeWordDetector
             "Убедитесь, что libvosk.dll загружена и сборка не выполнена в режиме AOT без Reflection Metadata.");
     }
 
+    /// <summary>
+    /// Computes Root Mean Square (RMS) amplitude of 16-bit PCM audio buffer.
+    /// </summary>
+    public static double CalculateRms(ReadOnlySpan<byte> pcmData)
+    {
+        int sampleCount = pcmData.Length / 2;
+        if (sampleCount == 0) return 0;
+
+        double sumSquares = 0;
+        for (int i = 0; i < pcmData.Length; i += 2)
+        {
+            short sample = (short)(pcmData[i] | (pcmData[i + 1] << 8));
+            sumSquares += (double)sample * sample;
+        }
+
+        return Math.Sqrt(sumSquares / sampleCount);
+    }
+
+    /// <summary>
+    /// Checks whether the recognized text contains the wake-word as an isolated token.
+    /// Uses regex with word/whitespace boundaries and token parsing to eliminate substrings and snippets.
+    /// </summary>
+    public bool IsIsolatedTokenMatch(string text, string targetWord)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+
+        // 1. Быстрая проверка регулярным выражением с строгими границами слов/пробелов
+        if (!_wakeWordRegex.IsMatch(text)) return false;
+
+        // 2. Десериализованная/токенная проверка изолированных слов:
+        // целевое слово должно быть строго изолированным токеном (не частью другого слова)
+        var words = text.Split(new[] { ' ', '\t', '\r', '\n', ',', '.', '!', '?' }, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var word in words)
+        {
+            if (string.Equals(word, targetWord, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public bool ProcessFrame(ReadOnlySpan<byte> pcmData)
     {
         if (_recognizer == null || pcmData.Length == 0)
@@ -241,21 +301,64 @@ public sealed class VoskGrammarWakeWordDetector : IWakeWordDetector
             return false;
         }
 
+        // 1. ШУМОВОЙ ПОРОГ (RMS Energy Gate):
+        // Если энергия кадра ниже порога фонового шума (RMS < 450 при 16-bit PCM) —
+        // считаем кадр тишиной и НЕ передаем его в Vosk, предотвращая ложные галлюцинации.
+        double rms = CalculateRms(pcmData);
+        if (rms < _noiseGateRms)
+        {
+            long nowTicks = Stopwatch.GetTimestamp();
+            if (_lastActiveFrameTicks > 0 && Stopwatch.GetElapsedTime(_lastActiveFrameTicks, nowTicks).TotalMilliseconds > 120)
+            {
+                _accumulatedPhraseDurationMs = 0;
+            }
+            return false;
+        }
+
+        // 2. РАСЧЕТ АКУСТИЧЕСКОЙ ДЛИТЕЛЬНОСТИ ФРАЗЫ (16 кГц 16-bit mono = 32 байта на 1 мс)
+        int frameDurationMs = pcmData.Length / 32;
+
+        long currentTicks = Stopwatch.GetTimestamp();
+        if (_lastActiveFrameTicks > 0 && Stopwatch.GetElapsedTime(_lastActiveFrameTicks, currentTicks).TotalMilliseconds > 200)
+        {
+            // Пауза между активными звуками более 200 мс — начало новой фразы
+            _accumulatedPhraseDurationMs = 0;
+        }
+
+        _accumulatedPhraseDurationMs += frameDurationMs;
+        _lastActiveFrameTicks = currentTicks;
+
         var sw = Stopwatch.StartNew();
         byte[] buffer = pcmData.ToArray();
         bool isFinal = _recognizer.AcceptWaveform(buffer, buffer.Length);
         string json = isFinal ? _recognizer.Result() : _recognizer.PartialResult();
-        string text = ExtractText(json, isFinal);
+        string text = ExtractText(json, isFinal).Trim();
         sw.Stop();
         LastDetectionLatencyMs = sw.ElapsedMilliseconds;
 
-        // СТРОГИЙ ТОКЕН-МАТЧИНГ: проверяем наличие полного изолированного слова с границами \b...\b.
-        // text.Contains() запрещён — он срабатывает на обрывки «рис», «вис», «джа», «сюрприз».
-        if (!string.IsNullOrWhiteSpace(text) && _wakeWordRegex.IsMatch(text))
+        // 3. СТРОГИЙ ТОКЕН-МАТЧИНГ И ПОРОГ ДЛИТЕЛЬНОСТИ (>= 150 мс):
+        // Проверяем:
+        // - Наличие строго изолированного токена целевого слова ("джарвис")
+        // - Длительность звучания фразы не менее minDurationMs (150 мс)
+        // Одиночные обрывки «джа», «да», чихи и короткие всплески < 150 мс игнорируются!
+        if (IsIsolatedTokenMatch(text, _customName))
         {
+            if (_accumulatedPhraseDurationMs < _minDurationMs)
+            {
+                // Звуковой всплеск слишком короткий (< 150 мс, например чих, вздох, обрывок "джа" или "да").
+                // Запрещаем моментальный триггер и ждем подтверждения длительности в следующих фреймах.
+                return false;
+            }
+
+            // Длительность фразы >= 150 мс И распознан строго изолированный токен вейк-ворда!
             Reset();
             OnWakeWordDetected?.Invoke();
             return true;
+        }
+
+        if (isFinal)
+        {
+            _accumulatedPhraseDurationMs = 0;
         }
 
         return false;
@@ -284,6 +387,8 @@ public sealed class VoskGrammarWakeWordDetector : IWakeWordDetector
     {
         try
         {
+            _accumulatedPhraseDurationMs = 0;
+            _lastActiveFrameTicks = 0;
             _recognizer?.Reset();
         }
         catch (Exception ex)

@@ -139,6 +139,7 @@ public sealed class VoiceListener : IDisposable
     private bool _disposed = false;
     private volatile bool _isPaused = false;
     private volatile bool _isSpeaking = false;  // Строгая блокировка PCM-фреймов во время TTS (Acoustic Echo Suppression)
+    private volatile bool _isProcessing = false; // Строгая блокировка PCM-фреймов во время работы LLM, роутинга и до завершения TTS + cooldown 250 мс
 
     /// <summary>
     /// Appends a speech chunk to the current session accumulated command text,
@@ -215,6 +216,8 @@ public sealed class VoiceListener : IDisposable
     public bool IsRunning => CurrentState != VoiceListenerState.Stopped;
 
     public bool IsPaused => _isPaused;
+    public bool IsProcessing => _isProcessing;
+    public bool IsSpeaking => _isSpeaking;
 
     public IReadOnlyList<string> WakeWords => _wakeWords;
     public string WakeWordsRegexPattern => _wakeWordsRegexPattern;
@@ -287,7 +290,55 @@ public sealed class VoiceListener : IDisposable
     {
         _isSpeaking = false;
         Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [VoiceListener] TTS завершён + cooldown истёк — микрофон разблокирован.");
+        Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [VoiceListener] TTS завершён — флаг _isSpeaking снят.");
+        Console.ResetColor();
+    }
+
+    /// <summary>
+    /// Вызывается сразу при фиксации финальной команды (перед отправкой в LLM / Router).
+    /// Немедленно блокирует захват новых команд и вейк-ворда (_isProcessing = true).
+    /// </summary>
+    public void NotifyProcessingStarted()
+    {
+        lock (_lock)
+        {
+            _isProcessing = true;
+            _recognizer?.Reset();
+            ResetWakeWordState();
+            _pendingCommandText = string.Empty;
+            _sessionAccumulatedText = string.Empty;
+            _currentPartialText = string.Empty;
+            _lastLoggedPartial = string.Empty;
+            _lastPartialText = string.Empty;
+            _voiceDetectedInCommand = false;
+        }
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [VoiceListener] Команда отправлена в обработку (LLM / Router) — микрофон заблокирован (_isProcessing = true).");
+        Console.ResetColor();
+    }
+
+    /// <summary>
+    /// Вызывается строго после завершения обработки и окончания воспроизведения TTS + cooldown (250 мс).
+    /// Снимает блокировку микрофона (_isProcessing = false).
+    /// </summary>
+    public void NotifyProcessingFinished()
+    {
+        lock (_lock)
+        {
+            _isProcessing = false;
+            _recognizer?.Reset();
+            ResetWakeWordState();
+            _pendingCommandText = string.Empty;
+            _sessionAccumulatedText = string.Empty;
+            _currentPartialText = string.Empty;
+            _lastLoggedPartial = string.Empty;
+            _lastPartialText = string.Empty;
+            _voiceDetectedInCommand = false;
+            _lastSpeechTime = DateTime.UtcNow;
+            _stateEnteredTime = DateTime.UtcNow;
+        }
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [VoiceListener] Обработка и TTS завершены + cooldown истёк — микрофон разблокирован (_isProcessing = false).");
         Console.ResetColor();
     }
 
@@ -358,13 +409,13 @@ public sealed class VoiceListener : IDisposable
     /// <param name="modelPath">Path to Vosk speech recognition model directory.</param>
     /// <param name="wakeWords">List of wake-words to trigger on (default: loaded from config / DefaultWakeWords).</param>
     /// <param name="silenceTimeout">Duration of natural silence after speaking to finish the command.</param>
-    /// <param name="silenceThresholdRms">RMS audio energy threshold to consider audio as speech.</param>
+    /// <param name="silenceThresholdRms">RMS audio energy threshold to consider audio as speech (default: 450.0).</param>
     /// <param name="commandWaitTimeout">Max duration to wait for user to start speaking after wake-word.</param>
     public VoiceListener(
         string modelPath = VoskModelHelper.DefaultModelFolder,
         string[]? wakeWords = null,
         TimeSpan? silenceTimeout = null,
-        double silenceThresholdRms = 350.0,
+        double silenceThresholdRms = 450.0,
         TimeSpan? commandWaitTimeout = null,
         IWakeWordDetector? wakeWordDetector = null)
     {
@@ -388,17 +439,24 @@ public sealed class VoiceListener : IDisposable
 
         _wakeWordsRegexPattern = @"^(" + string.Join("|", _wakeWords.Select(Regex.Escape)) + @")\s*";
         _silenceTimeout = silenceTimeout ?? TimeSpan.FromMilliseconds(700);
-        _silenceThresholdRms = silenceThresholdRms;
+
+        // Шумовой порог RMS Gate (диапазон 400-500, по умолчанию 450.0)
+        double configuredRms = settings.WakeWord?.NoiseGateRms ?? 450.0;
+        _silenceThresholdRms = (silenceThresholdRms != 450.0 && silenceThresholdRms > 0) ? silenceThresholdRms : configuredRms;
         _commandWaitTimeout = commandWaitTimeout ?? TimeSpan.FromSeconds(4.5);
 
         // 2. Инициализация адаптивного детектора вейк-ворда через WakeWordFactory
         string primaryWord = settings.WakeWord?.Name ?? _wakeWords.FirstOrDefault() ?? "джарвис";
         float threshold = (float)(settings.WakeWord?.Threshold ?? 0.5);
+        int minDurationMs = settings.WakeWord?.MinDurationMs ?? 150;
+
         _wakeWordDetector = wakeWordDetector ?? WakeWordFactory.Create(
             primaryWord,
             settings.WakeWord?.OnnxModelPath,
             settings.WakeWord?.SmallModelPath,
-            threshold);
+            threshold,
+            minDurationMs,
+            _silenceThresholdRms);
 
         _wakeWordDetector.OnWakeWordDetected += OnAdaptiveWakeWordDetected;
     }
@@ -407,7 +465,7 @@ public sealed class VoiceListener : IDisposable
     {
         lock (_lock)
         {
-            if (_state != VoiceListenerState.WaitingForWakeWord || _isPaused)
+            if (_state != VoiceListenerState.WaitingForWakeWord || _isPaused || _isSpeaking || _isProcessing)
             {
                 return;
             }
@@ -521,14 +579,14 @@ public sealed class VoiceListener : IDisposable
     /// </summary>
     private void OnAudioDataAvailable(object? sender, WaveInEventArgs e)
     {
-        if (e.BytesRecorded == 0 || _isPaused || _isSpeaking)
+        if (e.BytesRecorded == 0 || _isPaused || _isSpeaking || _isProcessing)
         {
             return;
         }
 
         lock (_lock)
         {
-            if (_state == VoiceListenerState.Stopped || _isPaused || _isSpeaking || _recognizer == null)
+            if (_state == VoiceListenerState.Stopped || _isPaused || _isSpeaking || _isProcessing || _recognizer == null)
             {
                 return;
             }
@@ -538,6 +596,15 @@ public sealed class VoiceListener : IDisposable
 
             if (_state == VoiceListenerState.WaitingForWakeWord)
             {
+                // ШУМОВОЙ ПОРОГ (RMS Energy Gate):
+                // Если энергия кадра ниже порога фонового шума (RMS < 400–500, по умолчанию 450) —
+                // считать кадр тишиной и НЕ передавать его в распознаватель,
+                // предотвращая ложные галлюцинации модели на тихом сопении и шуме комнаты.
+                if (!isAudioSpeech)
+                {
+                    return;
+                }
+
                 ProcessWakeWordListening(e.Buffer, e.BytesRecorded, isAudioSpeech);
             }
             else if (_state == VoiceListenerState.ListeningForCommand)
@@ -551,6 +618,11 @@ public sealed class VoiceListener : IDisposable
     {
         lock (_lock)
         {
+            if (_isPaused || _isSpeaking || _isProcessing)
+            {
+                return;
+            }
+
             if (_state == VoiceListenerState.WaitingForWakeWord)
             {
                 ProcessWakeWordListening(buffer, bytesRecorded, isSpeech);
@@ -669,6 +741,7 @@ public sealed class VoiceListener : IDisposable
                     _recognizer.Reset();
                     ResetWakeWordState();
 
+                    NotifyProcessingStarted();
                     OnCommandSpoken?.Invoke(cleaned);
                     TransitionToWaitingForWakeWord("Ready. Listening for wake-word...");
                     return;
@@ -736,6 +809,7 @@ public sealed class VoiceListener : IDisposable
             _recognizer?.Reset();
             ResetWakeWordState();
 
+            NotifyProcessingStarted();
             OnCommandSpoken?.Invoke(cleaned);
             TransitionToWaitingForWakeWord("Ready. Listening for wake-word...");
         }
@@ -893,6 +967,7 @@ public sealed class VoiceListener : IDisposable
             _lastPartialText = string.Empty;
             _voiceDetectedInCommand = false;
 
+            NotifyProcessingStarted();
             OnCommandSpoken?.Invoke(candidateCheck);
             TransitionToWaitingForWakeWord("Ready. Listening for wake-word...");
             return;
@@ -935,6 +1010,7 @@ public sealed class VoiceListener : IDisposable
                 Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [STT: Vosk Final] '{finalCandidate}' (полная фраза, тишина {silenceTimeout.TotalMilliseconds:0} мс)");
                 Console.ResetColor();
 
+                NotifyProcessingStarted();
                 OnCommandSpoken?.Invoke(finalCandidate);
             }
             else if (!string.IsNullOrWhiteSpace(finalCandidate))
