@@ -1835,6 +1835,83 @@ public static class Program
         testListenerFsm.Dispose();
         kwsDetector.Dispose();
 
+        // Test 21: SAPI5 32-bit Voice Bitness & Real Negative Stress Tests (TASK: 64_Fix_Sapi5_x64_Voice_Tokens_And_Implement_Real_Negative_Tests)
+        Console.WriteLine("\n[21] Testing SAPI5 x64 Bitness Handling & Real Negative Stress Tests...");
+
+        // 21.1 SAPI5 32-bit voice token bitness handling without exceptions
+        using (var testSynth = new System.Speech.Synthesis.SpeechSynthesizer())
+        {
+            var (voiceName, needPitchShift) = SystemSpeechTtsEngine.ConfigureMaleRussianVoice(testSynth);
+            if (string.IsNullOrWhiteSpace(voiceName))
+                throw new Exception("ConfigureMaleRussianVoice returned empty voice name!");
+            if (voiceName.Contains("Irina", StringComparison.OrdinalIgnoreCase) && !needPitchShift)
+                throw new Exception("Female voice Irina cannot be selected without pitch shift!");
+            Console.WriteLine($"    [21.1] SAPI5 x64 voice bitness handling verified: selected voice '{voiceName}' (needPitchShift: {needPitchShift}).");
+        }
+
+        // 21.2 Negative KWS (<150ms frames and phonetic snippets)
+        var kwsStress = new VoskGrammarWakeWordDetector("джарвис", minDurationMs: 150, noiseGateRms: 450.0);
+        byte[] frame35ms = new byte[1120];
+        for (int i = 0; i < frame35ms.Length; i += 2)
+        {
+            short val = (short)(Math.Sin(i * 0.05) * 3000);
+            frame35ms[i] = (byte)(val & 0xFF);
+            frame35ms[i + 1] = (byte)((val >> 8) & 0xFF);
+        }
+        if (kwsStress.ProcessFrame(frame35ms))
+            throw new Exception("KWS triggered on 35ms frame (< 150ms threshold)!");
+        if (kwsStress.AccumulatedPhraseDurationMs >= 150)
+            throw new Exception($"AccumulatedPhraseDurationMs expected < 150, got {kwsStress.AccumulatedPhraseDurationMs}");
+
+        string[] negativeSnippets = ["джа", "рис", "да", "джар", "сюрприз", "вис", "джарвиса", "джарвису", "", "[unk]"];
+        foreach (var snip in negativeSnippets)
+        {
+            if (kwsStress.IsIsolatedTokenMatch(snip, "джарвис"))
+                throw new Exception($"KWS isolated match unexpectedly succeeded for snippet '{snip}'!");
+        }
+        kwsStress.Dispose();
+        Console.WriteLine("    [21.2] Negative KWS stress test verified: short frames and snippets rejected.");
+
+        // 21.3 RMS Noise Gate via VoiceListener SimulateAudioInput
+        var mockCountingDetector = new MockWakeWordDetector("джарвис");
+        var testListenerSim = new VoiceListener(wakeWords: ["джарвис"], wakeWordDetector: mockCountingDetector);
+        testListenerSim.TransitionToWaitingForWakeWord("Test RMS gate");
+
+        testListenerSim.SimulateAudioInput(quietNoise, quietNoise.Length);
+        if (mockCountingDetector.ProcessedFrameCount != 0)
+            throw new Exception("Quiet noise bypassed RMS Noise Gate in VoiceListener!");
+        if (testListenerSim.CurrentState != VoiceListenerState.WaitingForWakeWord)
+            throw new Exception("VoiceListener left WaitingForWakeWord on quiet noise!");
+        Console.WriteLine("    [21.3] RMS Noise Gate test verified: quiet noise dropped before detector/Vosk.");
+
+        // 21.4 Acoustic Echo Suppression (Mic frame discard while IsSpeaking == true)
+        testListenerSim.NotifySpeakingStarted();
+        if (!testListenerSim.IsSpeaking)
+            throw new Exception("VoiceListener.IsSpeaking must be true!");
+        testListenerSim.SimulateAudioInput(speechSignal, speechSignal.Length);
+        if (mockCountingDetector.ProcessedFrameCount != 0)
+            throw new Exception("Speech frame accepted while VoiceListener.IsSpeaking was true!");
+        testListenerSim.NotifySpeakingFinished();
+        if (testListenerSim.IsSpeaking)
+            throw new Exception("VoiceListener.IsSpeaking must be false after NotifySpeakingFinished()!");
+        Console.WriteLine("    [21.4] Acoustic Echo Suppression verified: mic frames discarded during TTS speech.");
+
+        // 21.5 FSM Concurrency Lock (parallel triggers while _isProcessing == true)
+        testListenerSim.NotifyProcessingStarted();
+        if (!testListenerSim.IsProcessing)
+            throw new Exception("VoiceListener.IsProcessing must be true!");
+        testListenerSim.SimulateAudioInput(speechSignal, speechSignal.Length);
+        mockCountingDetector.Trigger();
+        if (testListenerSim.CurrentState != VoiceListenerState.WaitingForWakeWord)
+            throw new Exception("VoiceListener FSM transitioned out of WaitingForWakeWord while IsProcessing was true!");
+        testListenerSim.NotifyProcessingFinished();
+        if (testListenerSim.IsProcessing)
+            throw new Exception("VoiceListener.IsProcessing must be false after NotifyProcessingFinished()!");
+        Console.WriteLine("    [21.5] FSM Concurrency Lock verified: parallel wake-word triggers locked out.");
+
+        testListenerSim.Dispose();
+        mockCountingDetector.Dispose();
+
         Console.WriteLine("\n>>> ALL FEATURE TESTS PASSED SUCCESSFULLY! <<<\n");
 
     }

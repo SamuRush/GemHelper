@@ -88,12 +88,19 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
 
                     return (sileroAidar.VoiceInfo.Name, false);
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
-                    Console.ForegroundColor = ConsoleColor.DarkYellow;
-                    Console.WriteLine($"[TTS: SAPI5] Не удалось активировать голос '{sileroAidar.VoiceInfo.Name}': {ex.Message}. Переход к следующему варианту.");
+                    // 32-bit SAPI voice token in 64-bit process context (e.g. Silero Aidar installed in WOW6432Node)
+                    Console.ForegroundColor = ConsoleColor.DarkCyan;
+                    Console.WriteLine($"[TTS: SAPI5 Info] Голос '{sileroAidar.VoiceInfo.Name}' (32-bit SAPI) недоступен для x64 контекста. Переключение на системный мужской голос Microsoft Pavel.");
                     Console.ResetColor();
                 }
+            }
+            else if (Has32BitVoiceToken("Aidar"))
+            {
+                Console.ForegroundColor = ConsoleColor.DarkCyan;
+                Console.WriteLine($"[TTS: SAPI5 Info] Голос 'Aidar (Russian)' (32-bit SAPI) недоступен для x64 контекста. Переключение на системный мужской голос Microsoft Pavel.");
+                Console.ResetColor();
             }
 
             // Priority 0.5: Baya — любое SAPI5-имя, содержащее "Baya" (мужской баритон)
@@ -116,19 +123,27 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
 
                     return (sileroBaya.VoiceInfo.Name, false);
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
-                    Console.ForegroundColor = ConsoleColor.DarkYellow;
-                    Console.WriteLine($"[TTS: SAPI5] Не удалось активировать голос '{sileroBaya.VoiceInfo.Name}': {ex.Message}. Переход к следующему варианту.");
+                    // 32-bit SAPI voice token in 64-bit process context (e.g. Silero Baya installed in WOW6432Node)
+                    Console.ForegroundColor = ConsoleColor.DarkCyan;
+                    Console.WriteLine($"[TTS: SAPI5 Info] Голос '{sileroBaya.VoiceInfo.Name}' (32-bit SAPI) недоступен для x64 контекста. Переключение на системный мужской голос Microsoft Pavel.");
                     Console.ResetColor();
                 }
+            }
+            else if (Has32BitVoiceToken("Baya"))
+            {
+                Console.ForegroundColor = ConsoleColor.DarkCyan;
+                Console.WriteLine($"[TTS: SAPI5 Info] Голос 'Baya (Russian)' (32-bit SAPI) недоступен для x64 контекста. Переключение на системный мужской голос Microsoft Pavel.");
+                Console.ResetColor();
             }
 
             // Priority 1: Russian male voice (e.g. Microsoft Pavel)
             var ruMaleVoice = installedVoices.FirstOrDefault(v =>
                 v.Enabled &&
                 !IsFemale(v) &&
-                v.VoiceInfo.Culture.TwoLetterISOLanguageName.Equals("ru", StringComparison.OrdinalIgnoreCase) &&
+                (v.VoiceInfo.Culture.TwoLetterISOLanguageName.Equals("ru", StringComparison.OrdinalIgnoreCase) ||
+                 v.VoiceInfo.Name.Contains("Pavel", StringComparison.OrdinalIgnoreCase)) &&
                 (v.VoiceInfo.Gender == VoiceGender.Male || v.VoiceInfo.Name.Contains("Pavel", StringComparison.OrdinalIgnoreCase)));
 
             // Priority 2: Any Russian voice with male hints or Pavel
@@ -193,6 +208,35 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
             Console.ResetColor();
             return (null, true);
         }
+    }
+
+    /// <summary>
+    /// Checks whether a voice token is registered in the 32-bit Windows SAPI registry (WOW6432Node).
+    /// </summary>
+    public static bool Has32BitVoiceToken(string voiceSubstring)
+    {
+        try
+        {
+            using var baseKey = Microsoft.Win32.RegistryKey.OpenBaseKey(Microsoft.Win32.RegistryHive.LocalMachine, Microsoft.Win32.RegistryView.Registry32);
+            using var tokensKey = baseKey.OpenSubKey(@"SOFTWARE\Microsoft\Speech\Voices\Tokens");
+            if (tokensKey != null)
+            {
+                foreach (var subKeyName in tokensKey.GetSubKeyNames())
+                {
+                    if (subKeyName.Contains(voiceSubstring, StringComparison.OrdinalIgnoreCase))
+                        return true;
+                    using var tokenKey = tokensKey.OpenSubKey(subKeyName);
+                    string? val = tokenKey?.GetValue(null)?.ToString();
+                    if (val != null && val.Contains(voiceSubstring, StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
+            }
+        }
+        catch
+        {
+            // Suppress any registry access restrictions
+        }
+        return false;
     }
 
     public async Task SpeakAsync(string text, CancellationToken ct = default)

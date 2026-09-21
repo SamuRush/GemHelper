@@ -614,6 +614,41 @@ public sealed class VoiceListener : IDisposable
         }
     }
 
+    internal void SimulateAudioInput(byte[] buffer, int bytesRecorded)
+    {
+        if (bytesRecorded == 0 || _isPaused || _isSpeaking || _isProcessing)
+        {
+            return;
+        }
+
+        lock (_lock)
+        {
+            if (_state == VoiceListenerState.Stopped || _isPaused || _isSpeaking || _isProcessing)
+            {
+                return;
+            }
+
+            double rms = CalculateRms(buffer, bytesRecorded);
+            bool isAudioSpeech = rms >= _silenceThresholdRms;
+
+            if (_state == VoiceListenerState.WaitingForWakeWord)
+            {
+                // ШУМОВОЙ ПОРОГ (RMS Energy Gate):
+                // Если энергия кадра ниже порога фонового шума — отбрасываем
+                if (!isAudioSpeech)
+                {
+                    return;
+                }
+
+                ProcessWakeWordListening(buffer, bytesRecorded, isAudioSpeech);
+            }
+            else if (_state == VoiceListenerState.ListeningForCommand)
+            {
+                ProcessCommandListening(buffer, bytesRecorded, isAudioSpeech);
+            }
+        }
+    }
+
     internal void ProcessAudioChunkForTesting(byte[] buffer, int bytesRecorded, bool isSpeech = true)
     {
         lock (_lock)
@@ -1053,7 +1088,7 @@ public sealed class VoiceListener : IDisposable
         OnStatusChanged?.Invoke(newState, reason);
     }
 
-    private static double CalculateRms(byte[] buffer, int bytesRecorded)
+    public static double CalculateRms(byte[] buffer, int bytesRecorded)
     {
         int sampleCount = bytesRecorded / 2;
         if (sampleCount == 0) return 0;

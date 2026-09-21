@@ -49,7 +49,7 @@ flowchart TD
 
     subgraph TTS_Pipeline [Resilient TTS Pipeline - Strictly Male Voices]
         TTS -->|1. Primary (EnableEdgeTts=true)| EDGE[EdgeTtsEngine / ru-RU-DmitryNeural + 5000ms Connect + Retry Policy 2 retries с FastReconnect 3000ms]
-        EDGE -.->|Failover on All Retries Exhausted| SAPI[SystemSpeechTtsEngine / SAPI5: Aidar (Russian) > Baya > Microsoft Pavel > pitch-shift]
+        EDGE -.->|Failover on All Retries Exhausted| SAPI[SystemSpeechTtsEngine / SAPI5: 32-bit Bitness Handling -> Microsoft Pavel -> pitch-shift]
         TTS -->|Pause / Resume & Confirmation| VL
     end
 ```
@@ -76,7 +76,7 @@ flowchart TD
 5. **Голосовой синтез (`IVoiceFeedbackService` / `CompositeVoiceFeedbackService.cs`)**:
    - Все обработчики и пайплайн вызывают единую абстракцию `IVoiceFeedbackService.SpeakAsync(text)`.
    - **Primary**: `EdgeTtsEngine` (`ru-RU-DmitryNeural`, базовый таймаут подключения 5000 мс, политика повторов Retry Policy до 2 повторных попыток переподключения при сетевых заминках/ошибках сокета, сброс счетчика ошибок при успехе, Keep-Alive пинг WebSocket). Не сбрасывает Дмитрия при первых задержках сети.
-   - **Offline / Fallback**: `SystemSpeechTtsEngine` (Windows SAPI5: `Aidar (Russian)` > `Baya` > `Microsoft Pavel` > принудительная модуляция тона `-40% prosody` при отсутствии мужских голосов; женский голос `Microsoft Irina Desktop` категорически заблокирован).
+   - **Offline / Fallback**: `SystemSpeechTtsEngine` (Windows SAPI5: безопасная обработка 32-битных SAPI5-токенов `Aidar (Russian)` / `Baya (Russian)` из `WOW6432Node` в 64-битном процессе без необработанных исключений и предупреждений в консоли; информативное логирование `[TTS: SAPI5 Info]` и гарантированная активация системного мужского голоса `Microsoft Pavel` как стабильного оффлайн-фоллбэка под x64; женский голос `Microsoft Irina Desktop` категорически заблокирован; при отсутствии мужских голосов — модуляция тона `-40% prosody`).
    - **Двухконтурная блокировка микрофона (FSM Processing Lock & Acoustic Echo Suppression)**:
      - При фиксации финальной команды немедленно выставляется `_isProcessing = true`, полностью блокируя захват новых команд и вейк-ворда на время работы LLM и роутера.
      - На время синтеза речи TTS выставляется `_isSpeaking = true`.
@@ -186,8 +186,13 @@ flowchart TD
   - Детальное логирование каждого шага: `[TTS] Попытка синтеза...`, `[TTS: Edge] Воспроизведение завершено.`, `[TTS: Warning] Сбой...`, `[TTS: Error]`.
   - Координация с Vosk: пауза микрофона перед речью, Acoustic Echo Suppression (блокировка аудио-фреймов флагом `_isSpeaking`), 250 мс кулдаун в блоке `finally` для гарантированного затухания акустического эха колонок, активация `EnterConfirmationListening` при наличии активного `PendingAction`.
 - [`Services/TTS/EdgeTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/EdgeTtsEngine.cs): WebSocket-клиент Edge Speech (`ru-RU-DmitryNeural`), генерация DRM-токена `Sec-MS-GEC`, базовый таймаут подключения **5000 мс**, политика повторов Retry Policy (**до 2 повторных попыток** переподключения перед переключением на fallback) — первая попытка с `ConnectionTimeoutMs` (5000 мс), повторные — с `FastReconnectTimeoutMs` (3000 мс) для ускорения сброса на SAPI5, автоматический сброс счетчика ошибок при успешном синтезе и фоновый Keep-Alive WebSocket пинг каждые 15 сек.
-- [`Services/TTS/SileroTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/SileroTtsEngine.cs): Опциональный локальный ONNX Runtime движок (`Models/Silero/v4_ru.onnx`, мужской голос `aidar`/`baya`). Guided Setup режим: при отсутствии локальной модели мгновенно выводится консольная рамка со ссылкой на ручное скачивание (`https://models.silero.ai/models/tts/ru/v4_ru.onnx` -> `./Models/Silero/v4_ru.onnx`), статус переключается в `IsAvailable = false`.
-- [`Services/TTS/SystemSpeechTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/SystemSpeechTtsEngine.cs): Надёжный Offline/Fallback движок (SAPI5). При старте выводит в лог **все обнаруженные голоса SAPI5** (`[TTS: SAPI5] Обнаружен голос: ...`). Выбор голоса: ищет точное системное имя через `Contains("Aidar")` / `Contains("Baya")` → передаёт в `SelectVoice` **полное имя** (`"Aidar (Russian)"`), обёрнутое в `try/catch`. При успехе: `[TTS: SAPI5] Успешно активирован голос: 'Aidar (Russian)'.`. Приоритет: `Aidar (Russian)` > `Baya` > `Microsoft Pavel` > любой мужской > принудительная модуляция тона (SSML `-40% prosody`). Женский голос `Microsoft Irina Desktop` категорически заблокирован.
+- [`Services/TTS/SystemSpeechTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/SystemSpeechTtsEngine.cs): Надёжный Offline/Fallback движок (SAPI5).
+  - При старте выводит в лог **все обнаруженные голоса SAPI5** (`[TTS: SAPI5] Обнаружен голос: ...`).
+  - **Механизм подхвата 32-битных SAPI5-токенов под x64**: инсталлятор Silero устанавливает голоса `Aidar (Russian)` и `Baya (Russian)` в 32-битную ветку реестра Windows SAPI (`HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\Speech\Voices\Tokens`) с 32-битными DLL. В 64-битном процессе .NET при вызове `SelectVoice` для таких токенов операционная система не может загрузить 32-битную библиотеку в x64 адресное пространство, генерируя `ArgumentException: Cannot set voice. No matching voice is installed or the voice was disabled`. Движок перехватывает данную ситуацию без необработанных исключений и красных/желтых предупреждений, логируя информативное сообщение:
+    `[TTS: SAPI5 Info] Голос '{voiceName}' (32-bit SAPI) недоступен для x64 контекста. Переключение на системный мужской голос Microsoft Pavel.`
+  - Также метод `Has32BitVoiceToken(voiceSubstring)` осуществляет безопасное чтение ветки `RegistryView.Registry32` реестра `WOW6432Node`, гарантируя отсутствие пропущенных токенов.
+  - После обнаружения несовместимости x86/x64 движок автоматически переключается на системный мужской голос `Microsoft Pavel` (`[TTS: SAPI5] Успешно активирован голос: 'Microsoft Pavel'.`), который служит стабильным гарантированным оффлайн-фоллбэком.
+  - Приоритеты выбора: `Aidar (Russian)` > `Baya` > `Microsoft Pavel` > любой мужской > принудительная модуляция тона (SSML `-40% prosody`). Женский голос `Microsoft Irina Desktop` категорически заблокирован.
 
 ### 3.4 Обработчики команд (`Handlers/`)
 Все обработчики получают экземпляр `IVoiceFeedbackService` через внедрение зависимостей (DI) в конструкторе, что устраняет обход синтеза и гарантирует прохождение через первичный Edge-TTS с безопасным откатом:
@@ -215,6 +220,18 @@ flowchart TD
   - `[Router: Dispatch]` / `[Router: Result]` — исполнение команд в `CommandRouter`.
   - `[TTS Engine: Edge-TTS (...)]`, `[TTS Engine: Silero (...)]`, `[TTS Engine: System.Speech Fallback]` — точный маркер активного движка синтеза при вызове речи.
   - `[TTS]`, `[TTS: Edge]`, `[TTS: Silero]`, `[TTS: System.Speech]`, `[TTS: Warning]`, `[TTS: Error]` — каждый этап синтеза и отказоустойчивого переключения.
+
+### 3.7 Тестовая подсистема (`Gem.Tests/`, `Gem.sln`)
+- **Решение `Gem.sln`**: объединяет основной проект `Gem.csproj` (Windows GUI/Console) и тестовый проект `Gem.Tests/Gem.Tests.csproj` (xUnit).
+- **Проект `Gem.Tests/`**:
+  - `Gem.Tests/NegativeKwsTests.cs`: Честное негативное тестирование KWS — подача аудио-фреймов длительностью < 150 мс (35 мс, 70 мс, 105 мс) и фонетических обрывков/слогов («джа», «рис», «да», «джар», «сюрприз», «вис», «джарвиса», «джарвису»). Проверяет, что вейк-ворд НЕ срабатывает (`Assert.False`).
+  - `Gem.Tests/RmsNoiseGateTests.cs`: Тестирование входного энергетического шлюза RMS Noise Gate — подача данных тишины, дыхания и тихого белого шума (RMS < 450.0). Проверяет, что фреймы отбрасываются до передачи в распознаватель Vosk, исключая галлюцинации и нагрузку на CPU.
+  - `Gem.Tests/AcousticEchoSuppressionTests.cs`: Тестирование подавления акустического эха — при активном флаге воспроизведения TTS (`IsSpeaking == true`) и в течение окна затухания (cooldown 250 мс) все входящие фреймы с микрофона гарантированно отбрасываются.
+  - `Gem.Tests/FsmConcurrencyLockTests.cs`: Тестирование блокировки параллелизма FSM — пока выполняется обработка команды (`_isProcessing == true`), поступающие аудио-триггеры вейк-ворда полностью игнорируются, не допуская смены состояния на `ListeningForCommand`.
+  - `Gem.Tests/Sapi5VoiceBitnessTests.cs`: Тестирование безопасной обработки 32-битных SAPI5-токенов в x64 процессе без необработанных исключений и проверка выбора системного мужского голоса `Microsoft Pavel`.
+- **Запуск тестов**:
+  - Через xUnit runner: `dotnet test` (автоматическое обнаружение всех тестов через `Gem.sln`).
+  - Встроенный запуск через консольное приложение: `dotnet run --project Gem.csproj -- --test-features` (блоки `[20]` и `[21]`).
 
 ---
 
@@ -309,3 +326,13 @@ stateDiagram-v2
 ### Правило 6. Запрет на пустые `catch { }` блоки
 - Во всех модулях проекта категорически запрещены «немые» перехваты исключений `catch { }` без логирования.
 - Любое подавление ошибки должно сопровождаться детальным выводом в консоль или трассировкой через `System.Diagnostics.Debug.WriteLine` с указанием контекста сбоя и `ex.Message`.
+
+### Правило 7. Честное негативное и стресс-тестирование (Negative KWS, RMS Gate, Echo Suppression, FSM Concurrency Lock)
+- В проекте категорически запрещены фиктивные тесты-заглушки (no-op / поверхностные happy-path моки).
+- Все механизмы фильтрации шума, отсечения обрывков речи и защиты от параллелизма покрываются строгими проверяемыми тестами:
+  1. **Negative KWS (< 150 мс и фонетические обрывки)**: проверяется отсечение звуковых всплесков < 150 мс (`ProcessFrame`) и фонетических обрывков/слогов («джа», «рис», «да», «джар», «сюрприз», «вис», «джарвиса», «джарвису») через `IsIsolatedTokenMatch` с утверждением `Assert.False`.
+  2. **RMS Noise Gate (450.0)**: тихий белый шум и фоновые звуки с `RMS < 450.0` обязаны отсекаться входным шлюзом `SimulateAudioInput` без вызовов `ProcessFrame` детектора и распознавателя Vosk.
+  3. **Acoustic Echo Suppression**: любые аудио-фреймы во время воспроизведения речи TTS (`IsSpeaking == true`) и в течение защитного окна затухания акустического эха колонок (250 мс cooldown) обязаны аппаратным образом сбрасываться.
+  4. **FSM Concurrency Lock**: во время обработки команды (`_isProcessing == true`) параллельные события или аудио-триггеры вейк-ворда обязаны игнорироваться, сохраняя состояние `WaitingForWakeWord`.
+- Все тесты обязаны выполняться и проходить в автоматическом пайплайне через `dotnet test`.
+

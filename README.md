@@ -12,6 +12,7 @@
 
 ```
 Gem/
+├── Gem.sln                         # Решение .NET (основной проект + тестовый проект)
 ├── Core/
 │   ├── ICommandHandler.cs          # Единый интерфейс обработчика команд (CommandName, ExecuteAsync)
 │   ├── CommandRequest.cs           # Неизменяемый DTO запроса (command, args: JsonElement)
@@ -29,7 +30,7 @@ Gem/
 │   └── WeatherCommandHandler.cs    # Прогноз погоды через WeatherService + голосовое озвучивание
 │
 ├── Services/
-│   ├── VoiceListener.cs            # Потоковый захват микрофона (NAudio WaveIn 16 кГц + Vosk STT FSM)
+│   ├── VoiceListener.cs            # Потоковый захват микрофона (NAudio WaveIn 16 кГц + Vosk STT FSM + RMS Gate)
 │   ├── LlmIntentService.cs         # Dual-Path Router: TryFastMatch (< 5 мс) + LLM fallback (LM Studio)
 │   ├── JarvisOrchestrator.cs       # FSM-координатор подтверждений (PendingActionState, 10 с таймаут)
 │   ├── SteamService.cs             # Steam: индексация VDF/ACF, Fuzzy-поиск, Pixel Scan, Install/Uninstall
@@ -48,7 +49,7 @@ Gem/
 │       ├── ITtsEngine.cs                 # Базовый контракт движка (Name, IsAvailable, SpeakAsync)
 │       ├── EdgeTtsEngine.cs              # Primary: Edge Neural TTS WebSocket (ru-RU-DmitryNeural, 5000 мс, Retry Policy)
 │       ├── SileroTtsEngine.cs            # Secondary: Silero ONNX Runtime (локальный v4_ru.onnx: aidar, Guided Setup)
-│       └── SystemSpeechTtsEngine.cs      # Safety Fallback: Windows SAPI (System.Speech, всегда доступен)
+│       └── SystemSpeechTtsEngine.cs      # Safety Fallback: Windows SAPI (обработка 32-bit токенов под x64, Microsoft Pavel)
 │
 ├── UI/
 │   ├── OverlayWidget.xaml          # WPF HUD: прозрачный всегда-поверх оверлей с анимацией состояний
@@ -61,7 +62,7 @@ Gem/
 │   └── WakeWord/
 │       ├── IWakeWordDetector.cs    # Единый контракт потокового детектора активации
 │       ├── OpenWakeWordDetector.cs # ONNX Runtime (<80 мс) детектор jarvis.onnx с автозагрузкой
-│       ├── VoskGrammarWakeWordDetector.cs # Vosk Grammar детектор на малой модели vosk-model-small-ru (строгий UTF-8 P/Invoke)
+│       ├── VoskGrammarWakeWordDetector.cs # Vosk Grammar детектор на малой модели vosk-model-small-ru (строгий UTF-8 P/Invoke, RMS Gate, 150мс)
 │       └── WakeWordFactory.cs      # Фабрика адаптивного выбора детектора по имени
 │
 ├── Win32/
@@ -69,7 +70,15 @@ Gem/
 │   ├── NativeStructs.cs            # Структуры Win32: INPUT, KEYBDINPUT, MOUSEINPUT, константы VK_*
 │   └── KeyboardHook.cs             # Утилиты низкоуровневого ввода и хуков
 │
-├── GlobalUsings.cs                 # Глобальные using-директивы проекта
+├── Gem.Tests/                      # Набор честных модульных и интеграционных тестов (xUnit)
+│   ├── NegativeKwsTests.cs         # Негативные тесты KWS: отсечение звуков < 150 мс и слогов «джа», «рис», «да»
+│   ├── RmsNoiseGateTests.cs        # Тесты шумового порога RMS Gate: сброс тихого шума и дыхания (< 450 RMS)
+│   ├── AcousticEchoSuppressionTests.cs # Тесты подавления эха колонок: отбрасывание аудио при TTS и кулдауне 250 мс
+│   ├── FsmConcurrencyLockTests.cs  # Тесты изоляции FSM: блокировка параллельных триггеров при _isProcessing == true
+│   ├── Sapi5VoiceBitnessTests.cs   # Тесты безопасной инициализации SAPI5 под x64 и выбора Microsoft Pavel
+│   └── Gem.Tests.csproj            # Проект xUnit тестирования (.NET 8 Windows)
+│
+├── GlobalUsings.cs                 # Глобальные using-директивы проекта (+ InternalsVisibleTo)
 ├── appsettings.json                # Конфигурация: LLM, TTS, STT, WakeWords, GameAliases, погода
 ├── Program.cs                      # Точка входа: регистрация DI, команд, WPF App + VoiceListener
 └── Gem.csproj                      # Проект .NET 8 Windows (WPF, NAudio, Vosk, ONNX, System.Speech)
@@ -154,27 +163,27 @@ dotnet run -- --download-model
 [+] [TTS] Инициализирована гибридная архитектура озвучки:
     - EnableEdgeTts:       True
     - Primary (Online):    Edge-TTS (ru-RU-DmitryNeural)
-    - Offline / Fallback:  SAPI5 (Aidar (Russian))
+    - Offline / Fallback:  SAPI5 (Microsoft Pavel / Aidar (Russian))
 
 1. EdgeTtsEngine        ──(таймаут 5000 мс, Retry Policy: 2 повтора: 1я—5000мс, повторы—3000мс)──>
-2. SystemSpeechTtsEngine (SAPI5: Aidar (Russian) > Baya > Pavel > pitch-shift -40%)
+2. SystemSpeechTtsEngine (SAPI5: 32-bit Bitness Handling -> Microsoft Pavel -> pitch-shift -40%)
 ```
 
-**Режим `EnableEdgeTts: false` (полностью офлайн, SAPI5 Aidar как первичный):**
+**Режим `EnableEdgeTts: false` (полностью офлайн, SAPI5 Pavel/Aidar как первичный):**
 ```
 [+] [TTS] Инициализирована гибридная архитектура озвучки:
     - EnableEdgeTts:       False
     - Primary (Online):    Edge-TTS (ru-RU-DmitryNeural) [ОТКЛЮЧЁН]
-    - Offline / Fallback:  SAPI5 (Aidar (Russian))
+    - Offline / Fallback:  SAPI5 (Microsoft Pavel / Aidar (Russian))
 
 1. (Edge-TTS пропускается — сетевые запросы не выполняются)
-2. SystemSpeechTtsEngine (SAPI5: Aidar (Russian) > Baya > Pavel — первичный голос)
+2. SystemSpeechTtsEngine (SAPI5: 32-bit Bitness Handling -> Microsoft Pavel — первичный голос)
 ```
 
 | Движок | Тип | Голос | Особенности |
 |---|---|---|---|
 | **EdgeTtsEngine** | Онлайн, WebSocket | `ru-RU-DmitryNeural` | Нейросетевое качество; таймаут 5000 мс; Retry Policy до 2 повторных попыток (повторы — 3000 мс FastReconnect); Keep-Alive пинг (15 с); **управляется флагом `EnableEdgeTts`** |
-| **SystemSpeechTtsEngine** | Офлайн, SAPI5 | **Aidar (Russian) > Baya > Pavel** | При старте выводит все найденные SAPI5 голоса; `SelectVoice` обёрнут в `try/catch`, передаётся точное системное имя (`"Aidar (Russian)"`); при успехе: `[TTS: SAPI5] Успешно активирован голос: 'Aidar (Russian)'.`; запрет Ирины |
+| **SystemSpeechTtsEngine** | Офлайн, SAPI5 | **Aidar > Baya > Microsoft Pavel** | Безопасная обработка 32-битных токенов Silero под x64 (перехват несовместимости x86/x64 без падений и предупреждений, информативный лог `[TTS: SAPI5 Info]`); автоматическая активация системного мужского голоса `Microsoft Pavel` как стабильного оффлайн-фоллбэка; строгий запрет женского голоса Ирины |
 
 **Защита от самоперехвата речи и блокировка микрофона (Acoustic Echo Suppression & Processing Lock):**  
 - **Блокировка во время обработки (Processing Lock)**: при фиксации команды микрофон мгновенно блокируется (`_isProcessing = true`), исключая повторные срабатывания и перехват посторонних звуков на всё время роутинга и генерации ответа LLM.
@@ -359,10 +368,40 @@ dotnet run
 | `[Router: FastMatch] MISS -> ...` | FastMatch не сработал, запрос идёт в LLM |
 | `[Router: Dispatch]` / `[Router: Result]` | Исполнение команды в `CommandRouter` |
 | `[TTS: SAPI5] Обнаружен голос: ...` | Перечень всех установленных SAPI5 голосов при старте |
+| `[TTS: SAPI5 Info]` | Информативный лог о несовместимости 32-битного токена с x64 процессом и переключении на Microsoft Pavel |
 | `[TTS: SAPI5] Успешно активирован голос: '...'` | Подтверждение успешного выбора голоса через `SelectVoice` |
 | `[TTS: Edge]` | Edge Neural TTS воспроизводит речь |
 | `[TTS: System.Speech]` | Переключение на Windows SAPI5 (строго мужской тембр) |
 | `[TTS: Warning]` | Сбой движка, инициирован откат к следующему |
+
+---
+
+## 🧪 Методология честного негативного и стресс-тестирования
+
+В проекте реализован набор автоматических тестов (`Gem.Tests/` на xUnit), полностью исключающий фиктивные заглушки и проверяющий поведение системы в стрессовых и граничных условиях:
+
+1. **Negative KWS Test (`NegativeKwsTests.cs`)**:
+   - **Фильтрация по длительности (< 150 мс)**: подача коротких акустических фреймов (35 мс, 70 мс, 105 мс) не вызывает срабатывания детектора вейк-ворда (`Assert.False`). Паузы > 200 мс сбрасывают накопленный счетчик длительности.
+   - **Отсечение фонетических обрывков и похожих слов**: слова и слоги «джа», «рис», «да», «джар», «сюрприз», «вис», «джарвиса», «джарвису» строго отсекаются изолированным токенизатором `IsIsolatedTokenMatch` (`Assert.False`).
+2. **RMS Noise Gate Test (`RmsNoiseGateTests.cs`)**:
+   - Подача аудио-данных тишины, дыхания и тихого белого шума (`RMS < 450.0`) отсекается входным энергетическим шлюзом `SimulateAudioInput` и не передается в распознаватель Vosk, предотвращая паразитные вызовы и нагрузку на CPU.
+3. **Acoustic Echo Suppression Test (`AcousticEchoSuppressionTests.cs`)**:
+   - При активном TTS (`IsSpeaking == true`) все входящие фреймы микрофона аппаратным образом отбрасываются.
+   - Микрофон разблокируется строго после завершения озвучки и обязательного окна затухания акустического эха колонок (**250 мс cooldown**).
+4. **FSM Concurrency Lock Test (`FsmConcurrencyLockTests.cs`)**:
+   - Во время выполнения команды и работы LLM (`_isProcessing == true`) входящие аудио-сигналы и параллельные триггеры вейк-ворда игнорируются, не допуская паразитного перехода в `ListeningForCommand`.
+5. **SAPI5 Voice Bitness Test (`Sapi5VoiceBitnessTests.cs`)**:
+   - Проверка безопасной инициализации SAPI5 в x64 процессе при наличии 32-битных токенов и гарантия выбора `Microsoft Pavel` без сбоев.
+
+### Команды запуска тестов:
+
+```bash
+# Запуск полного набора xUnit-тестов через файл решения Gem.sln
+dotnet test
+
+# Запуск встроенного набора самотестирования ассистента
+dotnet run --project Gem.csproj -- --test-features
+```
 
 ---
 
