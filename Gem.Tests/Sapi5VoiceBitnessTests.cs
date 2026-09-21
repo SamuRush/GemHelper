@@ -48,4 +48,29 @@ public class Sapi5VoiceBitnessTests
         Assert.NotNull(engine.SelectedVoiceName);
         Assert.DoesNotContain("Irina", engine.SelectedVoiceName, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void ConfigureMaleRussianVoice_WhenAidarInstalled_SelectsAidarOrPavelWithoutIrina()
+    {
+        using var synthesizer = new SpeechSynthesizer();
+        var (voiceName, needPitchShift) = SystemSpeechTtsEngine.ConfigureMaleRussianVoice(synthesizer);
+
+        Assert.NotNull(voiceName);
+        Assert.DoesNotContain("Irina", voiceName, StringComparison.OrdinalIgnoreCase);
+
+        bool aidarInstalled = false;
+        foreach (InstalledVoice v in synthesizer.GetInstalledVoices())
+        {
+            if (v.VoiceInfo.Name.Contains("Aidar", StringComparison.OrdinalIgnoreCase))
+            {
+                aidarInstalled = true;
+                break;
+            }
+        }
+
+        if (aidarInstalled)
+        {
+            Assert.Contains("Aidar", voiceName, StringComparison.OrdinalIgnoreCase);
+        }
+    }
 }

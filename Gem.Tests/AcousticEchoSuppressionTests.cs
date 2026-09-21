@@ -92,9 +92,8 @@ public class AcousticEchoSuppressionTests
         listener.NotifyProcessingStarted();
 
         var mockEdge = new MockTtsEngine("Edge", isAvailable: true);
-        var mockSilero = new MockTtsEngine("Silero", isAvailable: false);
         var mockSystem = new MockTtsEngine("System.Speech", isAvailable: true);
-        var composite = new CompositeVoiceFeedbackService(listener, mockEdge, mockSilero, mockSystem);
+        var composite = new CompositeVoiceFeedbackService(listener, mockEdge, mockSystem);
 
         var sw = Stopwatch.StartNew();
         await composite.SpeakAsync("Тестовое подтверждение действия.");

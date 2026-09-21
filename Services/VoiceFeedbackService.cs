@@ -32,7 +32,12 @@ public class VoiceFeedbackService : CompositeVoiceFeedbackService
     {
     }
 
-    public VoiceFeedbackService(VoiceListener? voiceListener, ITtsEngine edgeTts, ITtsEngine sileroTts, ITtsEngine systemSpeech)
+    public VoiceFeedbackService(VoiceListener? voiceListener, ITtsEngine edgeTts, ITtsEngine systemSpeech)
+        : base(voiceListener, edgeTts, systemSpeech)
+    {
+    }
+
+    public VoiceFeedbackService(VoiceListener? voiceListener, ITtsEngine edgeTts, ITtsEngine? sileroTts, ITtsEngine systemSpeech)
         : base(voiceListener, edgeTts, sileroTts, systemSpeech)
     {
     }

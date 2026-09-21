@@ -4,13 +4,12 @@ namespace Gem.Services;
 
 /// <summary>
 /// Hybrid resilient TTS orchestrator.
-/// Coordinates Edge-TTS (Primary), Silero ONNX (Secondary / Offline), and System.Speech (Safety Fallback)
+/// Coordinates Edge-TTS (Primary) and System.Speech SAPI5 (Offline / Safety Fallback)
 /// with seamless failover and strict Vosk STT acoustic feedback prevention.
 /// </summary>
 public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
 {
     private readonly ITtsEngine _edgeTts;
-    private readonly ITtsEngine _sileroTts;
     private readonly ITtsEngine _systemSpeech;
     private readonly VoiceListener? _voiceListener;
     private readonly SemaphoreSlim _speakingSemaphore = new(1, 1);
@@ -26,7 +25,6 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
     public event Action? OnSpeakingFinished;
 
     public ITtsEngine EdgeEngine => _edgeTts;
-    public ITtsEngine SileroEngine => _sileroTts;
     public ITtsEngine SystemSpeechEngine => _systemSpeech;
 
     public string? LastUsedEngineName { get; private set; }
@@ -39,9 +37,6 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
             edgeTts: new EdgeTtsEngine(
                 configuration?["Tts:EdgeVoice"] ?? "ru-RU-DmitryNeural",
                 int.TryParse(configuration?["Tts:ConnectionTimeoutMs"], out int tMs) && tMs > 0 ? tMs : EdgeTtsEngine.DefaultConnectionTimeoutMs),
-            sileroTts: new SileroTtsEngine(
-                configuration?["Tts:SileroModelPath"] ?? SileroTtsEngine.DefaultModelPath,
-                configuration?["Tts:SileroSpeaker"] ?? "aidar"),
             systemSpeech: new SystemSpeechTtsEngine(),
             enableEdgeTts: !bool.TryParse(configuration?["Tts:EnableEdgeTts"], out bool edgeFlag) || edgeFlag)
     {
@@ -53,7 +48,6 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
         : this(
             voiceListener: voiceListener,
             edgeTts: new EdgeTtsEngine(ttsConfig.EdgeVoice, ttsConfig.ConnectionTimeoutMs),
-            sileroTts: new SileroTtsEngine(ttsConfig.SileroModelPath, ttsConfig.SileroSpeaker),
             systemSpeech: new SystemSpeechTtsEngine(),
             enableEdgeTts: ttsConfig.EnableEdgeTts)
     {
@@ -62,20 +56,17 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
     public CompositeVoiceFeedbackService(
         VoiceListener? voiceListener,
         ITtsEngine edgeTts,
-        ITtsEngine sileroTts,
         ITtsEngine systemSpeech,
         bool enableEdgeTts = true)
     {
         _voiceListener = voiceListener;
         _edgeTts = edgeTts;
-        _sileroTts = sileroTts;
         _systemSpeech = systemSpeech;
         _enableEdgeTts = enableEdgeTts;
 
         Instance = this;
 
         string edgeVoice = (_edgeTts as EdgeTtsEngine)?.Voice ?? "ru-RU-DmitryNeural";
-        string sileroSpeaker = (_sileroTts as SileroTtsEngine)?.Speaker ?? "aidar";
         string systemVoice = (_systemSpeech as SystemSpeechTtsEngine)?.SelectedVoiceName ?? "Default";
 
         Console.ForegroundColor = ConsoleColor.Green;
@@ -84,7 +75,17 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
         Console.WriteLine($"    - Primary (Online):    {_edgeTts.Name} ({edgeVoice}){(!_enableEdgeTts ? " [ОТКЛЮЧЁН]" : "")}");
         Console.WriteLine($"    - Offline / Fallback:  SAPI5 ({systemVoice})");
         Console.ResetColor();
+    }
 
+    // Overload for backward compatibility with legacy 4-argument calls
+    public CompositeVoiceFeedbackService(
+        VoiceListener? voiceListener,
+        ITtsEngine edgeTts,
+        ITtsEngine? secondaryTts,
+        ITtsEngine systemSpeech,
+        bool enableEdgeTts = true)
+        : this(voiceListener, edgeTts, systemSpeech, enableEdgeTts)
+    {
     }
 
     /// <summary>
@@ -107,7 +108,6 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
 
             bool spoken = false;
             string edgeVoice = (_edgeTts as EdgeTtsEngine)?.Voice ?? "ru-RU-DmitryNeural";
-            string sileroSpeaker = (_sileroTts as SileroTtsEngine)?.Speaker ?? "aidar";
             string systemVoice = (_systemSpeech as SystemSpeechTtsEngine)?.SelectedVoiceName ?? "Default";
 
             // Step 1: Primary Engine (Edge-TTS) — только если включён в конфиге
@@ -132,65 +132,31 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
                     else
                     {
                         Console.ForegroundColor = ConsoleColor.DarkYellow;
-                        Console.WriteLine("[TTS: Warning] Сбой Edge-TTS: сетевой интерфейс недоступен (нет сети). Переключение на Silero TTS...");
+                        Console.WriteLine("[TTS: Warning] Сбой Edge-TTS: сетевой интерфейс недоступен (нет сети). Переключение на SAPI5...");
                         Console.ResetColor();
                     }
                 }
                 catch (Exception ex)
                 {
                     Console.ForegroundColor = ConsoleColor.DarkYellow;
-                    Console.WriteLine($"[TTS: Warning] Сбой Edge-TTS: {ex.Message}. Переключение на Silero TTS...");
+                    Console.WriteLine($"[TTS: Warning] Сбой Edge-TTS: {ex.Message}. Переключение на SAPI5...");
                     Console.ResetColor();
                 }
             }
             else
             {
                 Console.ForegroundColor = ConsoleColor.DarkCyan;
-                Console.WriteLine("[TTS] Edge-TTS отключён (EnableEdgeTts=false). Первичный движок — System.Speech (Silero SAPI5 Aidar).");
+                Console.WriteLine("[TTS] Edge-TTS отключён (EnableEdgeTts=false). Первичный движок — System.Speech SAPI5.");
                 Console.ResetColor();
             }
 
-            // Step 2: Secondary Engine (Silero ONNX Offline)
-            if (!spoken)
-            {
-                try
-                {
-                    if (_sileroTts.IsAvailable)
-                    {
-                        Console.ForegroundColor = ConsoleColor.Cyan;
-                        Console.WriteLine($"[TTS Engine: Silero ({sileroSpeaker})]");
-                        Console.ResetColor();
-
-                        await _sileroTts.SpeakAsync(text, cancellationToken);
-                        LastUsedEngineName = _sileroTts.Name;
-                        spoken = true;
-
-                        Console.ForegroundColor = ConsoleColor.Green;
-                        Console.WriteLine("[TTS: Silero] Воспроизведение завершено.");
-                        Console.ResetColor();
-                    }
-                    else
-                    {
-                        Console.ForegroundColor = ConsoleColor.DarkYellow;
-                        Console.WriteLine("[TTS: Warning] Сбой Silero ONNX: модель не найдена или не инициализирована. Переключение на System.Speech.");
-                        Console.ResetColor();
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.ForegroundColor = ConsoleColor.DarkYellow;
-                    Console.WriteLine($"[TTS: Warning] Сбой Silero ONNX: {ex.Message}. Переключение на System.Speech.");
-                    Console.ResetColor();
-                }
-            }
-
-            // Step 3: Safety Fallback Engine (System.Speech)
+            // Step 2: Offline / Fallback Engine (System.Speech SAPI5)
             if (!spoken)
             {
                 try
                 {
                     Console.ForegroundColor = ConsoleColor.Cyan;
-                    Console.WriteLine("[TTS Engine: System.Speech Fallback]");
+                    Console.WriteLine($"[TTS Engine: System.Speech SAPI5 ({systemVoice})]");
                     Console.ResetColor();
 
                     await _systemSpeech.SpeakAsync(text, cancellationToken);
@@ -295,9 +261,6 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
 
         try { (_edgeTts as IDisposable)?.Dispose(); }
         catch (Exception ex) { Console.WriteLine($"[TTS: Warning] Ошибка освобождения EdgeTts: {ex.Message}"); }
-
-        try { (_sileroTts as IDisposable)?.Dispose(); }
-        catch (Exception ex) { Console.WriteLine($"[TTS: Warning] Ошибка освобождения SileroTts: {ex.Message}"); }
 
         try { (_systemSpeech as IDisposable)?.Dispose(); }
         catch (Exception ex) { Console.WriteLine($"[TTS: Warning] Ошибка освобождения SystemSpeech: {ex.Message}"); }

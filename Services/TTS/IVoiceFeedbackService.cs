@@ -2,7 +2,7 @@ namespace Gem.Services;
 
 /// <summary>
 /// Unified contract for text-to-speech voice feedback across all JARVIS components.
-/// Coordinates resilient failover (Edge-TTS -> Silero ONNX -> System.Speech)
+/// Coordinates resilient failover (Edge-TTS -> System.Speech SAPI5)
 /// and acoustic feedback suppression with VoiceListener STT.
 /// </summary>
 public interface IVoiceFeedbackService : IDisposable
@@ -23,12 +23,7 @@ public interface IVoiceFeedbackService : IDisposable
     ITtsEngine EdgeEngine { get; }
 
     /// <summary>
-    /// Secondary local offline TTS engine (Silero ONNX).
-    /// </summary>
-    ITtsEngine SileroEngine { get; }
-
-    /// <summary>
-    /// Safety fallback TTS engine (Windows System.Speech SAPI).
+    /// Safety fallback / offline TTS engine (Windows System.Speech SAPI5).
     /// </summary>
     ITtsEngine SystemSpeechEngine { get; }
 

@@ -42,14 +42,13 @@ Gem/
 │   ├── ITimerService.cs            # Контракт сервиса таймеров
 │   ├── ActiveTimer.cs              # Модель активного таймера (Guid, Label, CancellationTokenSource)
 │   ├── JarvisResponse.cs           # DTO ответа { CommandRequest, Reply }
-│   ├── CompositeVoiceFeedbackService.cs  # Оркестратор TTS: Edge → Silero → System.Speech
+│   ├── CompositeVoiceFeedbackService.cs  # Оркестратор TTS: Edge (Primary) → System.Speech SAPI5 (Offline/Fallback)
 │   ├── VoiceFeedbackService.cs     # Мост обратной совместимости к CompositeVoiceFeedbackService
 │   └── TTS/
 │       ├── IVoiceFeedbackService.cs      # Контракт голосовой обратной связи (SpeakAsync, события, движки)
 │       ├── ITtsEngine.cs                 # Базовый контракт движка (Name, IsAvailable, SpeakAsync)
 │       ├── EdgeTtsEngine.cs              # Primary: Edge Neural TTS WebSocket (ru-RU-DmitryNeural, 5000 мс, Retry Policy)
-│       ├── SileroTtsEngine.cs            # Secondary: Silero ONNX Runtime (локальный v4_ru.onnx: aidar, Guided Setup)
-│       └── SystemSpeechTtsEngine.cs      # Safety Fallback: Windows SAPI (обработка 32-bit токенов под x64, Microsoft Pavel)
+│       └── SystemSpeechTtsEngine.cs      # Offline/Safety Fallback: Windows SAPI5 (Aidar COM direct binding / Microsoft Pavel)
 │
 ├── UI/
 │   ├── OverlayWidget.xaml          # WPF HUD: прозрачный всегда-поверх оверлей с анимацией состояний
@@ -103,7 +102,7 @@ Gem/
 - **Диагностический бенчмарк-трейс в консоли**:
   - `[WakeWord: OpenWakeWord (ONNX)] [Detection Latency: XX ms]` или `[WakeWord: VoskGrammar ("имя")] [Detection Latency: XX ms]` в момент срабатывания вейк-ворда.
   - `[STT: Vosk Partial]` и `[STT: Vosk Final]` — промежуточное и итоговое распознавание речи в реальном времени.
-  - `[TTS Engine: Edge-TTS (...)]`, `[TTS Engine: Silero (...)]`, `[TTS Engine: System.Speech Fallback]` — активный движок синтеза при каждом вызове.
+  - `[TTS Engine: Edge-TTS (...)]`, `[TTS Engine: System.Speech SAPI5 (Aidar / Pavel)]` — активный движок синтеза при каждом вызове.
  
 ### FSM состояний VoiceListener
  
@@ -156,34 +155,36 @@ dotnet run -- --download-model
 
 ## 🗣️ TTS: Отказоустойчивый синтез речи (СТРОГО мужские голоса)
 
-`CompositeVoiceFeedbackService` реализует двухуровневую цепочку отказоустойчивости с гарантией строго мужского тембра. Режим работы определяется флагом `EnableEdgeTts` в `appsettings.json`:
+`CompositeVoiceFeedbackService` реализует двухуровневую цепочку отказоустойчивости со строго мужскими голосами. Проект **больше не использует локальный ONNX-инференс Silero через файлы** и не выполняет поиск `.onnx` моделей. Silero работает **исключительно через установленный в Windows пакет SAPI5 (голос `Aidar (Russian)`)** с прямым биндингом COM-токена, а системный голос `Microsoft Pavel` служит гарантированным аварийным фоллбэком без необработанных исключений и предупреждений. Женские голоса (`Irina`) категорически заблокированы.
 
-**Режим `EnableEdgeTts: true` (по умолчанию, онлайн):**
+Режим работы определяется флагом `EnableEdgeTts` в `appsettings.json`:
+
+**Режим `EnableEdgeTts: true` (по умолчанию, гибридный):**
 ```
 [+] [TTS] Инициализирована гибридная архитектура озвучки:
     - EnableEdgeTts:       True
-    - Primary (Online):    Edge-TTS (ru-RU-DmitryNeural)
-    - Offline / Fallback:  SAPI5 (Microsoft Pavel / Aidar (Russian))
+    - Primary (Online):    Edge (ru-RU-DmitryNeural)
+    - Offline / Fallback:  SAPI5 (Aidar (Russian))
 
 1. EdgeTtsEngine        ──(таймаут 5000 мс, Retry Policy: 2 повтора: 1я—5000мс, повторы—3000мс)──>
-2. SystemSpeechTtsEngine (SAPI5: 32-bit Bitness Handling -> Microsoft Pavel -> pitch-shift -40%)
+2. SystemSpeechTtsEngine (SAPI5: прямой COM-биндинг Aidar (Russian) -> Microsoft Pavel fallback -> pitch-shift -40%)
 ```
 
-**Режим `EnableEdgeTts: false` (полностью офлайн, SAPI5 Pavel/Aidar как первичный):**
+**Режим `EnableEdgeTts: false` (полностью офлайн, SAPI5 Aidar/Pavel как первичный):**
 ```
 [+] [TTS] Инициализирована гибридная архитектура озвучки:
     - EnableEdgeTts:       False
-    - Primary (Online):    Edge-TTS (ru-RU-DmitryNeural) [ОТКЛЮЧЁН]
-    - Offline / Fallback:  SAPI5 (Microsoft Pavel / Aidar (Russian))
+    - Primary (Online):    Edge (ru-RU-DmitryNeural) [ОТКЛЮЧЁН]
+    - Offline / Fallback:  SAPI5 (Aidar (Russian))
 
 1. (Edge-TTS пропускается — сетевые запросы не выполняются)
-2. SystemSpeechTtsEngine (SAPI5: 32-bit Bitness Handling -> Microsoft Pavel — первичный голос)
+2. SystemSpeechTtsEngine (SAPI5: Aidar (Russian) / Microsoft Pavel — первичный оффлайн-голос)
 ```
 
 | Движок | Тип | Голос | Особенности |
 |---|---|---|---|
 | **EdgeTtsEngine** | Онлайн, WebSocket | `ru-RU-DmitryNeural` | Нейросетевое качество; таймаут 5000 мс; Retry Policy до 2 повторных попыток (повторы — 3000 мс FastReconnect); Keep-Alive пинг (15 с); **управляется флагом `EnableEdgeTts`** |
-| **SystemSpeechTtsEngine** | Офлайн, SAPI5 | **Aidar > Baya > Microsoft Pavel** | Безопасная обработка 32-битных токенов Silero под x64 (перехват несовместимости x86/x64 без падений и предупреждений, информативный лог `[TTS: SAPI5 Info]`); автоматическая активация системного мужского голоса `Microsoft Pavel` как стабильного оффлайн-фоллбэка; строгий запрет женского голоса Ирины |
+| **SystemSpeechTtsEngine** | Офлайн, SAPI5 | **Aidar (Russian) > Microsoft Pavel** | Работает с Silero исключительно через установленный системный SAPI5 драйвер (COM direct token binding голоса `Aidar (Russian)`), либо стабильный оффлайн-фоллбэк `Microsoft Pavel` без исключений и предупреждений; локальные файлы моделей `.onnx` не требуются; женский голос Ирины категорически заблокирован |
 
 **Защита от самоперехвата речи и блокировка микрофона (Acoustic Echo Suppression & Processing Lock):**  
 - **Блокировка во время обработки (Processing Lock)**: при фиксации команды микрофон мгновенно блокируется (`_isProcessing = true`), исключая повторные срабатывания и перехват посторонних звуков на всё время роутинга и генерации ответа LLM.

@@ -1,16 +1,18 @@
+using System.Runtime.InteropServices;
 using System.Security;
 using System.Speech.Synthesis;
 
 namespace Gem.Services;
 
 /// <summary>
-/// Safety fallback TTS engine utilizing Windows SAPI (System.Speech.Synthesis.SpeechSynthesizer).
-/// Guarantees strictly male voice (e.g. Microsoft Pavel) or forces extra-low pitch modification
-/// so that female voices (Microsoft Irina Desktop) never sound under any circumstances.
+/// Safety fallback & offline TTS engine utilizing Windows SAPI (System.Speech.Synthesis.SpeechSynthesizer / SAPI5 COM).
+/// Direct integration with installed Windows Silero SAPI5 (Aidar / Baya) with robust fallback to Microsoft Pavel.
+/// Female voices (Microsoft Irina Desktop) are strictly filtered out.
 /// </summary>
 public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
 {
     private readonly SpeechSynthesizer _synthesizer;
+    private dynamic? _spVoice;
     private readonly object _sync = new();
     private bool _disposed = false;
     private readonly bool _forceLowPitch = false;
@@ -29,12 +31,50 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
         var (voiceName, needPitchShift) = ConfigureMaleRussianVoice(_synthesizer);
         SelectedVoiceName = voiceName;
         _forceLowPitch = needPitchShift;
+
+        // Если выбран системный голос Silero (Aidar / Baya), привязать прямой зарегистрированный системный токен через SAPI COM
+        if (voiceName != null && (voiceName.Contains("Aidar", StringComparison.OrdinalIgnoreCase) ||
+                                  voiceName.Contains("Baya", StringComparison.OrdinalIgnoreCase)))
+        {
+            _spVoice = TryBindSapiComVoiceToken(voiceName.Contains("Aidar", StringComparison.OrdinalIgnoreCase) ? "Aidar" : "Baya");
+        }
+    }
+
+    /// <summary>
+    /// Пытается напрямую связать зарегистрированный системный токен SAPI5 через COM SpVoice.
+    /// </summary>
+    public static object? TryBindSapiComVoiceToken(string voiceSubstring)
+    {
+        try
+        {
+            Type? spVoiceType = Type.GetTypeFromProgID("SAPI.SpVoice");
+            if (spVoiceType == null) return null;
+
+            dynamic spVoice = Activator.CreateInstance(spVoiceType)!;
+            dynamic tokens = spVoice.GetVoices();
+            int count = tokens.Count;
+            for (int i = 0; i < count; i++)
+            {
+                dynamic token = tokens.Item(i);
+                string desc = token.GetDescription();
+                if (desc.Contains(voiceSubstring, StringComparison.OrdinalIgnoreCase))
+                {
+                    spVoice.Voice = token;
+                    return spVoice;
+                }
+            }
+        }
+        catch
+        {
+            // Безопасное подавление при отсутствии или сбое COM
+        }
+        return null;
     }
 
     /// <summary>
     /// Configures strictly male voice, excluding Irina and female voices completely.
-    /// Priority order: Aidar (SAPI5) > Baya (SAPI5) > Microsoft Pavel > Any Russian male > Any male > pitch-shift fallback.
-    /// Logs all discovered SAPI5 voices at startup. Each SelectVoice call is individually guarded by try/catch.
+    /// Priority order: Aidar (Silero SAPI5) > Baya (Silero SAPI5) > Microsoft Pavel > Any Russian male > Any male > pitch-shift fallback.
+    /// Logs all discovered SAPI5 voices at startup.
     /// </summary>
     public static (string? voiceName, bool needPitchShift) ConfigureMaleRussianVoice(SpeechSynthesizer synthesizer)
     {
@@ -69,41 +109,47 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
                        name.Contains("Female", StringComparison.OrdinalIgnoreCase);
             }
 
-            // Priority 0: Aidar — любое SAPI5-имя, содержащее "Aidar" (напр. "Aidar (Russian)")
+            // Priority 0: Aidar — системный установленный пакет Silero SAPI5
             var sileroAidar = installedVoices.FirstOrDefault(v =>
                 v.Enabled &&
                 v.VoiceInfo.Name.Contains("Aidar", StringComparison.OrdinalIgnoreCase));
 
             if (sileroAidar != null)
             {
+                bool bound = false;
                 try
                 {
                     synthesizer.SelectVoice(sileroAidar.VoiceInfo.Name);
                     synthesizer.Rate = 1;
                     synthesizer.Volume = 100;
+                    bound = true;
+                }
+                catch
+                {
+                    bound = false;
+                }
 
+                if (!bound)
+                {
+                    var comVoice = TryBindSapiComVoiceToken("Aidar");
+                    if (comVoice != null)
+                    {
+                        bound = true;
+                        try { Marshal.ReleaseComObject(comVoice); } catch { }
+                    }
+                }
+
+                if (bound)
+                {
                     Console.ForegroundColor = ConsoleColor.Green;
-                    Console.WriteLine($"[TTS: SAPI5] Успешно активирован голос: '{sileroAidar.VoiceInfo.Name}'.");
+                    Console.WriteLine("[+] [TTS: SAPI5] Активирован системный голос Silero: Aidar (Russian)");
                     Console.ResetColor();
 
                     return (sileroAidar.VoiceInfo.Name, false);
                 }
-                catch (Exception)
-                {
-                    // 32-bit SAPI voice token in 64-bit process context (e.g. Silero Aidar installed in WOW6432Node)
-                    Console.ForegroundColor = ConsoleColor.DarkCyan;
-                    Console.WriteLine($"[TTS: SAPI5 Info] Голос '{sileroAidar.VoiceInfo.Name}' (32-bit SAPI) недоступен для x64 контекста. Переключение на системный мужской голос Microsoft Pavel.");
-                    Console.ResetColor();
-                }
-            }
-            else if (Has32BitVoiceToken("Aidar"))
-            {
-                Console.ForegroundColor = ConsoleColor.DarkCyan;
-                Console.WriteLine($"[TTS: SAPI5 Info] Голос 'Aidar (Russian)' (32-bit SAPI) недоступен для x64 контекста. Переключение на системный мужской голос Microsoft Pavel.");
-                Console.ResetColor();
             }
 
-            // Priority 0.5: Baya — любое SAPI5-имя, содержащее "Baya" (мужской баритон)
+            // Priority 0.5: Baya — системный установленный пакет Silero SAPI5 (баритон)
             var sileroBaya = installedVoices.FirstOrDefault(v =>
                 v.Enabled &&
                 !IsFemale(v) &&
@@ -111,31 +157,37 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
 
             if (sileroBaya != null)
             {
+                bool bound = false;
                 try
                 {
                     synthesizer.SelectVoice(sileroBaya.VoiceInfo.Name);
                     synthesizer.Rate = 1;
                     synthesizer.Volume = 100;
+                    bound = true;
+                }
+                catch
+                {
+                    bound = false;
+                }
 
+                if (!bound)
+                {
+                    var comVoice = TryBindSapiComVoiceToken("Baya");
+                    if (comVoice != null)
+                    {
+                        bound = true;
+                        try { Marshal.ReleaseComObject(comVoice); } catch { }
+                    }
+                }
+
+                if (bound)
+                {
                     Console.ForegroundColor = ConsoleColor.Green;
-                    Console.WriteLine($"[TTS: SAPI5] Успешно активирован голос: '{sileroBaya.VoiceInfo.Name}'.");
+                    Console.WriteLine("[+] [TTS: SAPI5] Активирован системный голос Silero: Baya (Russian)");
                     Console.ResetColor();
 
                     return (sileroBaya.VoiceInfo.Name, false);
                 }
-                catch (Exception)
-                {
-                    // 32-bit SAPI voice token in 64-bit process context (e.g. Silero Baya installed in WOW6432Node)
-                    Console.ForegroundColor = ConsoleColor.DarkCyan;
-                    Console.WriteLine($"[TTS: SAPI5 Info] Голос '{sileroBaya.VoiceInfo.Name}' (32-bit SAPI) недоступен для x64 контекста. Переключение на системный мужской голос Microsoft Pavel.");
-                    Console.ResetColor();
-                }
-            }
-            else if (Has32BitVoiceToken("Baya"))
-            {
-                Console.ForegroundColor = ConsoleColor.DarkCyan;
-                Console.WriteLine($"[TTS: SAPI5 Info] Голос 'Baya (Russian)' (32-bit SAPI) недоступен для x64 контекста. Переключение на системный мужской голос Microsoft Pavel.");
-                Console.ResetColor();
             }
 
             // Priority 1: Russian male voice (e.g. Microsoft Pavel)
@@ -247,6 +299,22 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
         {
             lock (_sync)
             {
+                if (_spVoice != null)
+                {
+                    try
+                    {
+                        // 0 = SVSFDefault (синхронное воспроизведение внутри фонового таска)
+                        _spVoice.Speak(text, 0);
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.ForegroundColor = ConsoleColor.DarkYellow;
+                        Console.WriteLine($"[TTS: SAPI5] Ошибка воспроизведения через SAPI COM: {ex.Message}. Фоллбэк на SpeechSynthesizer.");
+                        Console.ResetColor();
+                    }
+                }
+
                 if (_forceLowPitch)
                 {
                     // Render through SSML with deep pitch reduction (-40%) or PromptBuilder to guarantee male pitch
@@ -282,6 +350,17 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+
+        if (_spVoice != null)
+        {
+            try
+            {
+                Marshal.ReleaseComObject(_spVoice);
+            }
+            catch { }
+            _spVoice = null;
+        }
+
         try { _synthesizer.Dispose(); }
         catch (Exception ex)
         {

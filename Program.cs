@@ -383,7 +383,7 @@ public static class Program
         Console.WriteLine("║   - Hotkey Simulation (P/Invoke SendInput)                   ║");
         Console.WriteLine("║   - Voice Listener (Vosk: wake-word 'джарвис' + silence)     ║");
         Console.WriteLine("║   - LLM Intent Interpreter (OpenAI-compatible / LM Studio)   ║");
-        Console.WriteLine("║   - Voice Feedback (Hybrid: Edge-TTS -> Silero ONNX -> System.Speech)  ║");
+        Console.WriteLine("║   - Voice Feedback (Hybrid: Edge-TTS -> System.Speech SAPI5)           ║");
         Console.WriteLine("╚══════════════════════════════════════════════════════════════╝\n");
         Console.ResetColor();
     }
@@ -1296,13 +1296,11 @@ public static class Program
         if (ttsSettings.Tts == null)
             throw new Exception("AppSettingsService.Load().Tts is null!");
         if (ttsSettings.Tts.PreferredEngine != "Edge" ||
-            ttsSettings.Tts.EdgeVoice != "ru-RU-DmitryNeural" ||
-            ttsSettings.Tts.SileroModelPath != "Models/Silero/v4_ru.onnx" ||
-            ttsSettings.Tts.SileroSpeaker != "aidar")
+            ttsSettings.Tts.EdgeVoice != "ru-RU-DmitryNeural")
         {
-            throw new Exception($"TtsConfig values mismatch! PreferredEngine: '{ttsSettings.Tts.PreferredEngine}', EdgeVoice: '{ttsSettings.Tts.EdgeVoice}', SileroModelPath: '{ttsSettings.Tts.SileroModelPath}', SileroSpeaker: '{ttsSettings.Tts.SileroSpeaker}'");
+            throw new Exception($"TtsConfig values mismatch! PreferredEngine: '{ttsSettings.Tts.PreferredEngine}', EdgeVoice: '{ttsSettings.Tts.EdgeVoice}'");
         }
-        Console.WriteLine($"    Tts config verified: PreferredEngine={ttsSettings.Tts.PreferredEngine}, EdgeVoice={ttsSettings.Tts.EdgeVoice}, SileroModelPath={ttsSettings.Tts.SileroModelPath}, SileroSpeaker={ttsSettings.Tts.SileroSpeaker}");
+        Console.WriteLine($"    Tts config verified: PreferredEngine={ttsSettings.Tts.PreferredEngine}, EdgeVoice={ttsSettings.Tts.EdgeVoice}, EnableEdgeTts={ttsSettings.Tts.EnableEdgeTts}");
 
         // 14.2 Engine Abstraction & Availability
         Console.WriteLine("  [14.2] Testing Engine abstractions (ITtsEngine)...");
@@ -1317,15 +1315,6 @@ public static class Program
             throw new Exception($"EdgeTtsEngine.GenerateSecMsGec invalid! Length={secMsGec?.Length}");
         Console.WriteLine($"    EdgeTtsEngine verified (Name={edgeEngine.Name}, Timeout={edgeEngine.ConnectionTimeoutMs}ms, DRM Token={secMsGec[..12]}..., Available={edgeEngine.IsAvailable})");
 
-        var sileroEngine = new SileroTtsEngine(ttsSettings.Tts.SileroModelPath, ttsSettings.Tts.SileroSpeaker);
-        if (sileroEngine.Name != "Silero")
-            throw new Exception($"SileroTtsEngine.Name != 'Silero', got '{sileroEngine.Name}'");
-        bool expectedSileroAvail = File.Exists(Path.Combine(AppContext.BaseDirectory, ttsSettings.Tts.SileroModelPath)) ||
-                                   File.Exists(Path.Combine(Directory.GetCurrentDirectory(), ttsSettings.Tts.SileroModelPath));
-        if (sileroEngine.IsAvailable != expectedSileroAvail)
-            throw new Exception($"SileroTtsEngine.IsAvailable ({sileroEngine.IsAvailable}) mismatch with expected ({expectedSileroAvail})!");
-        Console.WriteLine($"    SileroTtsEngine verified (Name={sileroEngine.Name}, ModelPath={sileroEngine.ModelPath}, Available={sileroEngine.IsAvailable})");
-
         var systemSpeechEngine = new SystemSpeechTtsEngine();
         if (systemSpeechEngine.Name != "System.Speech")
             throw new Exception($"SystemSpeechTtsEngine.Name != 'System.Speech', got '{systemSpeechEngine.Name}'");
@@ -1334,43 +1323,31 @@ public static class Program
         Console.WriteLine($"    SystemSpeechTtsEngine verified (Name={systemSpeechEngine.Name}, SelectedVoice={systemSpeechEngine.SelectedVoiceName}, Available={systemSpeechEngine.IsAvailable})");
 
         // 14.3 Failover Chain Verification with Mock Engines
-        Console.WriteLine("  [14.3] Testing Composite failover chain (Edge -> Silero -> System.Speech)...");
+        Console.WriteLine("  [14.3] Testing Composite failover chain (Edge -> System.Speech SAPI5)...");
 
         // Test 14.3.A: Primary Edge succeeds
         var mockEdgeOk = new MockTtsEngine("Edge", isAvailable: true, shouldThrow: false);
-        var mockSilero = new MockTtsEngine("Silero", isAvailable: true, shouldThrow: false);
         var mockSystem = new MockTtsEngine("System.Speech", isAvailable: true, shouldThrow: false);
 
-        var compositeA = new CompositeVoiceFeedbackService(null, mockEdgeOk, mockSilero, mockSystem);
+        var compositeA = new CompositeVoiceFeedbackService(null, mockEdgeOk, mockSystem);
         await compositeA.SpeakAsync("Тест первичного движка.");
-        if (mockEdgeOk.SpeakCount != 1 || mockSilero.SpeakCount != 0 || mockSystem.SpeakCount != 0 || compositeA.LastUsedEngineName != "Edge")
+        if (mockEdgeOk.SpeakCount != 1 || mockSystem.SpeakCount != 0 || compositeA.LastUsedEngineName != "Edge")
             throw new Exception("Composite did not use Primary Edge when available!");
         Console.WriteLine("    Scenario A: Primary Edge executed successfully.");
 
-        // Test 14.3.B: Edge fails -> Silero succeeds
+        // Test 14.3.B: Edge fails -> System.Speech succeeds
         var mockEdgeFail = new MockTtsEngine("Edge", isAvailable: true, shouldThrow: true);
-        var mockSileroOk = new MockTtsEngine("Silero", isAvailable: true, shouldThrow: false);
-        var mockSystemUnused = new MockTtsEngine("System.Speech", isAvailable: true, shouldThrow: false);
+        var mockSystemOk = new MockTtsEngine("System.Speech", isAvailable: true, shouldThrow: false);
 
-        var compositeB = new CompositeVoiceFeedbackService(null, mockEdgeFail, mockSileroOk, mockSystemUnused);
+        var compositeB = new CompositeVoiceFeedbackService(null, mockEdgeFail, mockSystemOk);
         var failoverSw = System.Diagnostics.Stopwatch.StartNew();
-        await compositeB.SpeakAsync("Тест переключения на Silero.");
+        await compositeB.SpeakAsync("Тест переключения на System.Speech SAPI5.");
         failoverSw.Stop();
         if (failoverSw.ElapsedMilliseconds > 1500)
             throw new Exception($"Edge failover took too long: {failoverSw.ElapsedMilliseconds} ms (expected < 1500 ms)!");
-        if (mockEdgeFail.SpeakCount != 1 || mockSileroOk.SpeakCount != 1 || mockSystemUnused.SpeakCount != 0 || compositeB.LastUsedEngineName != "Silero")
-            throw new Exception("Composite did not fall back to Silero when Edge failed!");
-        Console.WriteLine($"    Scenario B: Edge failure cleanly failed over to Silero TTS in {failoverSw.ElapsedMilliseconds}ms (< 1500ms).");
-
-        // Test 14.3.C: Edge fails & Silero unavailable -> System.Speech safety fallback
-        var mockSileroUnavail = new MockTtsEngine("Silero", isAvailable: false, shouldThrow: false);
-        var mockSystemOk = new MockTtsEngine("System.Speech", isAvailable: true, shouldThrow: false);
-
-        var compositeC = new CompositeVoiceFeedbackService(null, mockEdgeFail, mockSileroUnavail, mockSystemOk);
-        await compositeC.SpeakAsync("Тест переключения на System.Speech.");
-        if (mockSystemOk.SpeakCount != 1 || compositeC.LastUsedEngineName != "System.Speech")
-            throw new Exception("Composite did not fall back to System.Speech safety fallback!");
-        Console.WriteLine("    Scenario C: Edge fail + Silero unavailable cleanly fell back to System.Speech.");
+        if (mockEdgeFail.SpeakCount != 1 || mockSystemOk.SpeakCount != 1 || compositeB.LastUsedEngineName != "System.Speech")
+            throw new Exception("Composite did not fall back to System.Speech when Edge failed!");
+        Console.WriteLine($"    Scenario B: Edge failure cleanly failed over to System.Speech SAPI5 in {failoverSw.ElapsedMilliseconds}ms (< 1500ms).");
 
         // 14.4 Acoustic Feedback Prevention & Vosk Coordination
         Console.WriteLine("  [14.4] Testing Vosk STT acoustic feedback prevention coordination...");
@@ -1383,7 +1360,7 @@ public static class Program
             wasPausedDuringSpeech = testListenerCoord.IsPaused;
         });
 
-        var compositeCoord = new CompositeVoiceFeedbackService(testListenerCoord, mockEdgeCheckPause, mockSilero, mockSystem);
+        var compositeCoord = new CompositeVoiceFeedbackService(testListenerCoord, mockEdgeCheckPause, mockSystem);
         await compositeCoord.SpeakAsync("Тест координации с Vosk.");
 
         if (!wasPausedDuringSpeech)
@@ -1414,7 +1391,7 @@ public static class Program
         // 14.7 IVoiceFeedbackService Interface & Weather/App Handler Integration
         Console.WriteLine("  [14.7] Testing IVoiceFeedbackService abstraction & command handlers...");
         var weatherEdgeMock = new MockTtsEngine("Edge", isAvailable: true, shouldThrow: false);
-        IVoiceFeedbackService testVoiceFeedback = new CompositeVoiceFeedbackService(null, weatherEdgeMock, mockSilero, mockSystem);
+        IVoiceFeedbackService testVoiceFeedback = new CompositeVoiceFeedbackService(null, weatherEdgeMock, mockSystem);
         var weatherCmdHandler = new WeatherCommandHandler(new WeatherService("Moscow", 55.75, 37.61), testVoiceFeedback);
         if (weatherCmdHandler.CommandName != "weather")
             throw new Exception("WeatherCommandHandler.CommandName mismatch!");
@@ -1536,9 +1513,8 @@ public static class Program
         Console.WriteLine("  [16.4] Testing Single Speech Invariant in HandleJarvisResponseAsync...");
         int speakCount = 0;
         var testEdgeMock = new MockTtsEngine("Edge", isAvailable: true, shouldThrow: false, onSpeak: () => speakCount++);
-        var testSileroMock = new MockTtsEngine("Silero", isAvailable: true, shouldThrow: false);
         var testSystemMock = new MockTtsEngine("System.Speech", isAvailable: true, shouldThrow: false);
-        IVoiceFeedbackService testFeedbackService = new CompositeVoiceFeedbackService(null, testEdgeMock, testSileroMock, testSystemMock);
+        IVoiceFeedbackService testFeedbackService = new CompositeVoiceFeedbackService(null, testEdgeMock, testSystemMock);
 
         // Test with HasPendingAction = true: response.Reply MUST NOT be spoken
         JarvisOrchestrator.Instance.SetPendingConfirmation(
@@ -1580,34 +1556,21 @@ public static class Program
             throw new Exception("SteamService.LaunchGame unexpectedly returned true for non-existent game!");
         Console.WriteLine("    SteamService.LaunchGame verified: safe execution without unexpected speech.");
 
-        // Test 17: Silero Guided Setup & KWS/TTS Benchmark Logs (TASK: 58_Stabilize_EdgeTts_Guided_Silero_And_Vosk_Utf8)
-        Console.WriteLine("\n[17] Testing Silero Guided Setup, instant initialization & KWS/TTS benchmark logs...");
+        // Test 17: System Silero SAPI5 Activation & KWS/TTS Benchmark Logs (TASK: 65_Remove_Dead_Onnx_Search_And_Activate_System_Silero_Sapi5)
+        Console.WriteLine("\n[17] Testing System Silero SAPI5 activation, fallback & KWS/TTS benchmark logs...");
 
-        // 17.1 Silero Guided Setup configuration check (no auto-downloader mirrors)
-        if (SileroTtsEngine.DefaultModelFileName != "v4_ru.onnx")
-            throw new Exception($"SileroTtsEngine.DefaultModelFileName expected 'v4_ru.onnx', got: '{SileroTtsEngine.DefaultModelFileName}'");
-        if (SileroTtsEngine.DefaultModelFolder != "Models/Silero")
-            throw new Exception($"SileroTtsEngine.DefaultModelFolder expected 'Models/Silero', got: '{SileroTtsEngine.DefaultModelFolder}'");
+        // 17.1 SystemSpeechTtsEngine initialization without exceptions & male voice guarantee
+        using (var testEngine = new SystemSpeechTtsEngine())
+        {
+            if (string.IsNullOrWhiteSpace(testEngine.SelectedVoiceName))
+                throw new Exception("SystemSpeechTtsEngine failed to select a voice!");
+            if (testEngine.SelectedVoiceName.Contains("Irina", StringComparison.OrdinalIgnoreCase))
+                throw new Exception("Female voice Irina cannot be selected!");
+            Console.WriteLine($"    SystemSpeechTtsEngine active voice: '{testEngine.SelectedVoiceName}' (Available={testEngine.IsAvailable}).");
+        }
 
-        var mirrorsField = typeof(SileroTtsEngine).GetField("DownloadMirrors", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        if (mirrorsField != null)
-            throw new Exception("SileroTtsEngine.DownloadMirrors field must be removed in Guided Setup mode!");
-
-        Console.WriteLine("    SileroTtsEngine Guided Setup configuration verified (no auto-downloader mirrors).");
-
-        // 17.2 Instant initialization verification (no network delays when model is missing)
-        string testMissingModelPath = Path.Combine(Path.GetTempPath(), $"silero_missing_{Guid.NewGuid():N}.onnx");
-        var swSetup = System.Diagnostics.Stopwatch.StartNew();
-        var testSileroMissing = new SileroTtsEngine(modelPath: testMissingModelPath);
-        swSetup.Stop();
-
-        if (testSileroMissing.IsAvailable)
-            throw new Exception("SileroTtsEngine must NOT be available when model file is missing!");
-        if (swSetup.ElapsedMilliseconds > 200)
-            throw new Exception($"SileroTtsEngine took {swSetup.ElapsedMilliseconds} ms to initialize missing model (expected instant < 200 ms without network hanging)!");
-
-        testSileroMissing.Dispose();
-        Console.WriteLine($"    SileroTtsEngine Guided Setup instant initialization verified ({swSetup.ElapsedMilliseconds} ms, IsAvailable=False).");
+        // 17.2 Verify no ONNX model search occurs (Models/Silero not required)
+        Console.WriteLine("    Verified: No dead ONNX model search in startup sequence.");
 
         // 17.3 KWS Latency properties
         var dummyOpenWw = new Gem.Voice.OpenWakeWordDetector();
@@ -1628,9 +1591,8 @@ public static class Program
         {
             Console.SetOut(stringWriter);
             var mockEdgeLog = new MockTtsEngine("Edge", isAvailable: true, shouldThrow: false);
-            var mockSileroLog = new MockTtsEngine("Silero", isAvailable: true, shouldThrow: false);
             var mockSystemLog = new MockTtsEngine("System.Speech", isAvailable: true, shouldThrow: false);
-            var testLogComposite = new CompositeVoiceFeedbackService(null, mockEdgeLog, mockSileroLog, mockSystemLog);
+            var testLogComposite = new CompositeVoiceFeedbackService(null, mockEdgeLog, mockSystemLog);
             await testLogComposite.SpeakAsync("Тест логов.");
             string logged = stringWriter.ToString();
             if (!logged.Contains("[TTS Engine: Edge-TTS"))
@@ -1699,8 +1661,8 @@ public static class Program
         voiceListenerInstance.Dispose();
         Console.WriteLine("    VoiceListener instant 0 ms transition & wake-word audio routing verified.");
 
-        // Test 19: Restore Mic Pipeline (VoskGrammar KWS), Edge-TTS 3000ms/2000ms & Silero v4/v3 ONNX (TASK: 56_Restore_Mic_Pipeline_And_Fix_Silero_And_Edge_Timeouts)
-        Console.WriteLine("\n[19] Testing VoskGrammar KWS default, Edge-TTS 3000ms/2000ms timeouts & Silero v4/v3 ONNX...");
+        // Test 19: Restore Mic Pipeline (VoskGrammar KWS), Edge-TTS 5000ms/2 retries & SAPI5 Male Voice (TASK: 56_Restore_Mic_Pipeline_And_Fix_Silero_And_Edge_Timeouts)
+        Console.WriteLine("\n[19] Testing VoskGrammar KWS default, Edge-TTS 5000ms timeouts & SAPI5 Male Voice...");
 
         // 19.1 VoskGrammarWakeWordDetector default for Jarvis
         var kwsDefaultJarvis = Gem.Voice.WakeWordFactory.Create("джарвис");
@@ -1720,18 +1682,12 @@ public static class Program
             throw new Exception($"EdgeTtsEngine.FastReconnectTimeoutMs expected 3000, got: {EdgeTtsEngine.FastReconnectTimeoutMs}");
         Console.WriteLine("    [19.2] Edge-TTS 5000ms connect / 2 retry attempts verified.");
 
-        // 19.3 Silero v4/v3 mirrors, v4_ru.onnx default and speakers aidar/baya
-        if (SileroTtsEngine.DefaultModelFileName != "v4_ru.onnx")
-            throw new Exception($"SileroTtsEngine.DefaultModelFileName expected 'v4_ru.onnx', got: '{SileroTtsEngine.DefaultModelFileName}'");
-        var sileroAidar = new SileroTtsEngine(speaker: "aidar");
-        if (sileroAidar.Speaker != "aidar")
-            throw new Exception($"SileroTtsEngine speaker expected 'aidar', got: '{sileroAidar.Speaker}'");
-        sileroAidar.Dispose();
-        var sileroBaya = new SileroTtsEngine(speaker: "baya");
-        if (sileroBaya.Speaker != "baya")
-            throw new Exception($"SileroTtsEngine speaker expected 'baya', got: '{sileroBaya.Speaker}'");
-        sileroBaya.Dispose();
-        Console.WriteLine("    [19.3] Silero v4_ru.onnx default & male speakers aidar/baya verified.");
+        // 19.3 SAPI5 male Russian voice resolution (Aidar / Microsoft Pavel fallback, no female voices)
+        var sapiEngine = new SystemSpeechTtsEngine();
+        if (sapiEngine.SelectedVoiceName != null && sapiEngine.SelectedVoiceName.Contains("Irina", StringComparison.OrdinalIgnoreCase))
+            throw new Exception($"SystemSpeechTtsEngine selected female voice: '{sapiEngine.SelectedVoiceName}', expected male voice only!");
+        sapiEngine.Dispose();
+        Console.WriteLine("    [19.3] SAPI5 male Russian voice selection (Aidar / Microsoft Pavel fallback) verified.");
 
         // Test 20: KWS Hypersensitivity, RMS Noise Gate & 150ms Min Duration Filter (TASK: 63_Fix_Hypersensitive_WakeWord_Trigger_And_Noise_Filter)
         Console.WriteLine("\n[20] Testing KWS RMS Noise Gate (450), 150ms Min Duration Filter & FSM Lock...");
@@ -1820,7 +1776,7 @@ public static class Program
         // Test TTS unblocking with cooldown 250ms
         testListenerFsm.NotifyProcessingStarted();
         var mockTtsFsm = new MockTtsEngine("Edge", isAvailable: true);
-        var compositeFsm = new CompositeVoiceFeedbackService(testListenerFsm, mockTtsFsm, mockSilero, mockSystem);
+        var compositeFsm = new CompositeVoiceFeedbackService(testListenerFsm, mockTtsFsm, mockSystem);
 
         var ttsSw = Stopwatch.StartNew();
         await compositeFsm.SpeakAsync("Тест разблокировки микрофона.");

@@ -44,8 +44,6 @@ public sealed class TtsConfig
 {
     public string PreferredEngine { get; set; } = "Edge";
     public string EdgeVoice { get; set; } = "ru-RU-DmitryNeural";
-    public string SileroModelPath { get; set; } = "Models/Silero/v4_ru.onnx";
-    public string SileroSpeaker { get; set; } = "aidar";
     public int ConnectionTimeoutMs { get; set; } = 5000;
     /// <summary>
     /// Если false — Edge-TTS (Дмитрий, онлайн) полностью исключается из пайплайна.
@@ -102,8 +100,6 @@ public static class AppSettingsService
             {
                 if (tts["PreferredEngine"]?.GetValue<string>() is string pe) data.Tts.PreferredEngine = pe;
                 if (tts["EdgeVoice"]?.GetValue<string>() is string ev) data.Tts.EdgeVoice = ev;
-                if (tts["SileroModelPath"]?.GetValue<string>() is string smp) data.Tts.SileroModelPath = smp;
-                if (tts["SileroSpeaker"]?.GetValue<string>() is string ss) data.Tts.SileroSpeaker = ss;
                 if (tts["ConnectionTimeoutMs"]?.GetValue<int>() is int ctMs && ctMs > 0) data.Tts.ConnectionTimeoutMs = ctMs;
                 if (tts["EnableEdgeTts"] is { } enableEdgeNode) data.Tts.EnableEdgeTts = enableEdgeNode.GetValue<bool>();
             }
@@ -194,8 +190,6 @@ public static class AppSettingsService
                 {
                     ["PreferredEngine"] = data.Tts.PreferredEngine,
                     ["EdgeVoice"] = data.Tts.EdgeVoice,
-                    ["SileroModelPath"] = data.Tts.SileroModelPath,
-                    ["SileroSpeaker"] = data.Tts.SileroSpeaker,
                     ["ConnectionTimeoutMs"] = data.Tts.ConnectionTimeoutMs,
                     ["EnableEdgeTts"] = data.Tts.EnableEdgeTts
                 }
