@@ -5,6 +5,7 @@
 # --- Build output ---
 bin/
 obj/
+dist/
 
 # --- IDE & editor directories ---
 .vs/
@@ -16,7 +17,8 @@ model/
 model-small/
 
 # --- ONNX модели (Silero TTS, openWakeWord и другие весовые файлы) ---
-Models/
+/Models/
+!scripts/Models/
 *.onnx
 *.zip
 

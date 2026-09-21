@@ -1,0 +1,96 @@
+name: Release Packaging and Distribution
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag (e.g. v1.0.0)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build, Package & Publish Release
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore Gem.sln
+
+      - name: Run automated tests
+        run: dotnet test Gem.sln -c Release --no-restore --verbosity normal
+
+      - name: Build self-contained release package
+        shell: pwsh
+        run: |
+          ./scripts/build_release.ps1 -Configuration Release -Runtime win-x64 -ZipOutput $true
+
+      - name: Verify release artifacts
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/JARVIS-win-x64.zip")) {
+              Write-Error "Release zip artifact dist/JARVIS-win-x64.zip not found!"
+              exit 1
+          }
+          $hash = (Get-FileHash dist/JARVIS-win-x64.zip -Algorithm SHA256).Hash
+          Write-Host "Artifact verified. SHA-256: $hash"
+
+      - name: Determine Release Tag
+        id: get_tag
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ github.event.inputs.tag_name }}") {
+              $tag = "${{ github.event.inputs.tag_name }}"
+          }
+          Write-Output "tag=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Create GitHub Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.get_tag.outputs.tag }}
+          name: "JARVIS Release ${{ steps.get_tag.outputs.tag }}"
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            dist/JARVIS-win-x64.zip
+            dist/checksums.txt
+          body: |
+            ## 🚀 JARVIS / GemHelper — Портативный релиз (win-x64)
+
+            Автономный дистрибутив голосового ассистента для Windows 10/11 x64.
+            **Установка .NET SDK не требуется** — все необходимые компоненты уже включены в сборку!
+
+            ### 📦 Быстрый старт:
+            1. Скачайте архив **`JARVIS-win-x64.zip`** ниже.
+            2. Распакуйте архив в любую удобную папку на компьютере (например, `C:\JARVIS`).
+            3. Запустите **`QuickStart.bat`** (или `Run.bat` / `JARVIS.exe`).
+            4. При первом запуске скрипт предложит скачать полноразмерную языковую модель Vosk (`vosk-model-ru-0.42`) в один клик.
+
+            ### 📋 Содержимое архива:
+            - `JARVIS.exe` / `Gem.exe` — исполняемый файл приложения.
+            - `QuickStart.bat` / `Run.bat` — интерактивный запуск с проверкой окружения.
+            - `appsettings.json` — конфигурация ассистента.
+            - `Models/Vosk/` — каталог языковой модели распознавания речи со скриптом проверки `CheckModel.bat`.
+            - `Models/WakeWord/` — каталог для моделей активации (openWakeWord).
+            - `Dependencies/` — ссылки и руководства по установке VC++ Redistributable и Silero SAPI5.
+
+            ### 🔐 Контрольные суммы (SHA-256):
+            См. прикреплённый файл `checksums.txt`.

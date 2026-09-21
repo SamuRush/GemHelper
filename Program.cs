@@ -98,11 +98,13 @@ public static class Program
 
         // 4. Initialize background voice listener (Vosk)
         VoiceListener? voiceListener = null;
-        string voskModelPath = Directory.Exists(settingsData.VoskModelPath)
-            ? settingsData.VoskModelPath
-            : VoskModelHelper.DefaultModelFolder;
+        string? resolvedModelPath = VoskModelHelper.FindModelDirectory(settingsData.VoskModelPath);
+        string voskModelPath = resolvedModelPath
+            ?? (Directory.Exists(settingsData.VoskModelPath)
+                ? settingsData.VoskModelPath
+                : VoskModelHelper.DefaultModelFolder);
 
-        if (Directory.Exists(voskModelPath))
+        if (Directory.Exists(voskModelPath) && VoskModelHelper.IsModelAvailable(voskModelPath))
         {
             try
             {
@@ -118,8 +120,8 @@ public static class Program
         else
         {
             Console.ForegroundColor = ConsoleColor.DarkYellow;
-            Console.WriteLine($"[i] Папка модели Vosk '{voskModelPath}' не найдена. Фоновый микрофон ожидает загрузки модели.");
-            Console.WriteLine("    Чтобы загрузить полноразмерную русскую модель Vosk vosk-model-ru-0.42 (~1.5 ГБ), выполните: dotnet run -- --download-model");
+            Console.WriteLine($"[i] Папка модели Vosk '{voskModelPath}' не найдена или не содержит файлов модели. Фоновый микрофон ожидает загрузки модели.");
+            Console.WriteLine("    Чтобы загрузить полноразмерную русскую модель Vosk vosk-model-ru-0.42 (~1.5 ГБ), выполните: QuickStart.bat или Gem.exe --download-model");
             Console.ResetColor();
         }
 
@@ -514,12 +516,13 @@ public static class Program
 
         try
         {
+            string targetDir = Directory.Exists("Models/Vosk") ? "Models/Vosk" : VoskModelHelper.DefaultModelFolder;
             await VoskModelHelper.DownloadModelAsync(
-                targetDirectory: VoskModelHelper.DefaultModelFolder,
+                targetDirectory: targetDir,
                 progress: progress);
             Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine("\n[+] Модель vosk-model-ru-0.42 успешно скачана и распакована в './model'!");
-            Console.WriteLine("    Можно запускать: dotnet run");
+            Console.WriteLine($"\n[+] Модель vosk-model-ru-0.42 успешно скачана и распакована в '{targetDir}'!");
+            Console.WriteLine("    Можно запускать: QuickStart.bat или Gem.exe");
             Console.ResetColor();
         }
         catch (Exception ex)

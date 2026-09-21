@@ -26,6 +26,64 @@ public static class VoskModelHelper
     }
 
     /// <summary>
+    /// Searches for a valid Vosk model directory across standard search locations:
+    /// 1. Specified preferred path (if non-empty) relative to CWD and AppContext.BaseDirectory
+    /// 2. "Models/Vosk" relative to CWD and AppContext.BaseDirectory
+    /// 3. "model" relative to CWD and AppContext.BaseDirectory
+    /// Also inspects direct subdirectories (e.g. Models/Vosk/vosk-model-ru-0.42).
+    /// </summary>
+    public static string? FindModelDirectory(string? preferredPath = null)
+    {
+        var candidates = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(preferredPath))
+        {
+            candidates.Add(preferredPath);
+            if (!Path.IsPathRooted(preferredPath))
+            {
+                candidates.Add(Path.Combine(AppContext.BaseDirectory, preferredPath));
+            }
+        }
+
+        candidates.Add("Models/Vosk");
+        candidates.Add(Path.Combine(AppContext.BaseDirectory, "Models", "Vosk"));
+        candidates.Add(DefaultModelFolder);
+        candidates.Add(Path.Combine(AppContext.BaseDirectory, DefaultModelFolder));
+
+        foreach (var candidate in candidates)
+        {
+            if (string.IsNullOrWhiteSpace(candidate) || !Directory.Exists(candidate))
+            {
+                continue;
+            }
+
+            if (IsModelAvailable(candidate))
+            {
+                return candidate;
+            }
+
+            // Check if user extracted model inside a subfolder, e.g. Models/Vosk/vosk-model-ru-0.42
+            try
+            {
+                var subDirs = Directory.GetDirectories(candidate);
+                foreach (var sub in subDirs)
+                {
+                    if (IsModelAvailable(sub))
+                    {
+                        return sub;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[VoskModelHelper] Ошибка сканирования подпапок {candidate}: {ex.Message}");
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Downloads and extracts the full-size Russian Vosk model vosk-model-ru-0.42 (~1.5 GB) to the specified folder.
     /// </summary>
     public static async Task DownloadModelAsync(

@@ -16,9 +16,8 @@ public sealed class OpenWakeWordDetector : IWakeWordDetector
 
     private static readonly string[] DownloadMirrors =
     [
-        "https://raw.githubusercontent.com/dscripka/openWakeWord/v0.5.1/openwakeword/resources/models/hey_jarvis_v0.1.onnx",
+        "https://media.githubusercontent.com/media/dscripka/openWakeWord/v0.5.1/openwakeword/resources/models/hey_jarvis_v0.1.onnx",
         "https://github.com/dscripka/openWakeWord/raw/v0.5.1/openwakeword/resources/models/hey_jarvis_v0.1.onnx",
-        "https://raw.githubusercontent.com/dscripka/openWakeWord/main/openwakeword/resources/models/hey_jarvis_v0.1.onnx",
         "https://huggingface.co/Soulcreek2/speechkit-wakeword-models/resolve/main/hey_jarvis.onnx"
     ];
 
@@ -132,6 +131,16 @@ public sealed class OpenWakeWordDetector : IWakeWordDetector
                             }
                         }
                     }
+                }
+
+                var tempInfo = new FileInfo(tempPath);
+                if (tempInfo.Length < 50 * 1024)
+                {
+                    try { File.Delete(tempPath); } catch { }
+                    Console.ForegroundColor = ConsoleColor.DarkYellow;
+                    Console.WriteLine($"[WakeWord Warning] Файл из {url} слишком мал ({tempInfo.Length} байт). Пропуск источника.");
+                    Console.ResetColor();
+                    continue;
                 }
 
                 if (File.Exists(_modelPath)) File.Delete(_modelPath);
