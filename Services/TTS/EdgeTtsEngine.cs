@@ -20,9 +20,10 @@ public sealed class EdgeTtsEngine : ITtsEngine, IDisposable
     private const string ChromiumUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0";
     private const string EdgeExtensionOrigin = "chrome-extension://jdiccldimpdaibmpdkgikmbggipbghpp";
 
-    public const int DefaultConnectionTimeoutMs = 5000;
-    public const int FastReconnectTimeoutMs = 3000;
-    public const int MaxRetryAttempts = 2;
+    public const int DefaultConnectionTimeoutMs = 1500;
+    public const int FirstAudioChunkTimeoutMs = 2000;
+    public const int FastReconnectTimeoutMs = 1500;
+    public const int MaxRetryAttempts = 0;
 
     public int ConnectionTimeoutMs { get; set; } = DefaultConnectionTimeoutMs;
 
@@ -265,45 +266,58 @@ public sealed class EdgeTtsEngine : ITtsEngine, IDisposable
         bool receivedFirstAudio = false;
 
         using var firstAudioCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        firstAudioCts.CancelAfter(timeoutMs);
+        firstAudioCts.CancelAfter(FirstAudioChunkTimeoutMs);
 
-        while (_ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
+        try
         {
-            using var frameStream = new MemoryStream();
-            WebSocketReceiveResult result;
-            do
+            while (_ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
             {
-                var receiveToken = receivedFirstAudio ? ct : firstAudioCts.Token;
-                result = await _ws.ReceiveAsync(new ArraySegment<byte>(receiveBuffer), receiveToken);
-                frameStream.Write(receiveBuffer, 0, result.Count);
-            } while (!result.EndOfMessage);
-
-            byte[] frameBytes = frameStream.ToArray();
-
-            if (result.MessageType == WebSocketMessageType.Close)
-            {
-                ResetClient();
-                break;
-            }
-
-            if (result.MessageType == WebSocketMessageType.Text)
-            {
-                string textMsg = Encoding.UTF8.GetString(frameBytes);
-                if (textMsg.Contains("Path:turn.end", StringComparison.OrdinalIgnoreCase))
+                using var frameStream = new MemoryStream();
+                WebSocketReceiveResult result;
+                do
                 {
+                    var receiveToken = receivedFirstAudio ? ct : firstAudioCts.Token;
+                    result = await _ws.ReceiveAsync(new ArraySegment<byte>(receiveBuffer), receiveToken);
+                    frameStream.Write(receiveBuffer, 0, result.Count);
+                } while (!result.EndOfMessage);
+
+                byte[] frameBytes = frameStream.ToArray();
+
+                if (result.MessageType == WebSocketMessageType.Close)
+                {
+                    ResetClient();
                     break;
                 }
-            }
-            else if (result.MessageType == WebSocketMessageType.Binary && frameBytes.Length > 2)
-            {
-                int headerLen = (frameBytes[0] << 8) | frameBytes[1];
-                int audioOffset = 2 + headerLen;
-                if (frameBytes.Length > audioOffset)
+
+                if (result.MessageType == WebSocketMessageType.Text)
                 {
-                    mp3Stream.Write(frameBytes, audioOffset, frameBytes.Length - audioOffset);
-                    receivedFirstAudio = true;
+                    string textMsg = Encoding.UTF8.GetString(frameBytes);
+                    if (textMsg.Contains("Path:turn.end", StringComparison.OrdinalIgnoreCase))
+                    {
+                        break;
+                    }
+                }
+                else if (result.MessageType == WebSocketMessageType.Binary && frameBytes.Length > 2)
+                {
+                    int headerLen = (frameBytes[0] << 8) | frameBytes[1];
+                    int audioOffset = 2 + headerLen;
+                    if (frameBytes.Length > audioOffset)
+                    {
+                        mp3Stream.Write(frameBytes, audioOffset, frameBytes.Length - audioOffset);
+                        receivedFirstAudio = true;
+                    }
                 }
             }
+        }
+        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            ResetClient();
+            throw new TimeoutException($"Превышен жесткий тайм-лимит ({FirstAudioChunkTimeoutMs} мс) на получение первого чанка Edge-TTS.", ex);
+        }
+        catch
+        {
+            ResetClient();
+            throw;
         }
 
         if (mp3Stream.Length == 0)

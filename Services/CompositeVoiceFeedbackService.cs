@@ -132,14 +132,14 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
                     else
                     {
                         Console.ForegroundColor = ConsoleColor.DarkYellow;
-                        Console.WriteLine("[TTS: Warning] Сбой Edge-TTS: сетевой интерфейс недоступен (нет сети). Переключение на SAPI5...");
+                        Console.WriteLine($"[TTS: Warning] Сбой Edge-TTS: сетевой интерфейс недоступен (нет сети). Мгновенное переключение на SAPI5 ({systemVoice})...");
                         Console.ResetColor();
                     }
                 }
                 catch (Exception ex)
                 {
                     Console.ForegroundColor = ConsoleColor.DarkYellow;
-                    Console.WriteLine($"[TTS: Warning] Сбой Edge-TTS: {ex.Message}. Переключение на SAPI5...");
+                    Console.WriteLine($"[TTS: Warning] Сбой Edge-TTS: {ex.Message}. Мгновенное переключение на SAPI5 ({systemVoice})...");
                     Console.ResetColor();
                 }
             }
