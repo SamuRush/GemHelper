@@ -48,8 +48,8 @@ flowchart TD
     VFS --> TTS[CompositeVoiceFeedbackService]
 
     subgraph TTS_Pipeline [Resilient TTS Pipeline - Strictly Male Voices]
-        TTS -->|1. Primary (EnableEdgeTts=true)| EDGE[EdgeTtsEngine / ru-RU-DmitryNeural + 5000ms Connect + Retry Policy 2 retries с FastReconnect 3000ms]
-        EDGE -.->|Failover on All Retries Exhausted| SAPI[SystemSpeechTtsEngine / SAPI5: Direct COM Token Aidar (Russian) -> Microsoft Pavel fallback -> pitch-shift]
+        TTS -->|1. Primary (EnableEdgeTts=true)| EDGE[EdgeTtsEngine / ru-RU-DmitryNeural + 1500ms Connect + 2000ms FirstChunk]
+        EDGE -.->|Fast Failover <= 1.6s| SAPI[SystemSpeechTtsEngine / SAPI5: Direct COM Token Aidar (Russian) -> Microsoft Pavel fallback -> pitch-shift]
         TTS -->|Pause / Resume & Confirmation| VL
     end
 ```
@@ -75,7 +75,7 @@ flowchart TD
    - Если в ответе присутствует `CommandRequest`, роутер логирует `[Router: Dispatch] Маршрутизация команды...`, находит зарегистрированный `ICommandHandler` и вызывает `ExecuteAsync()`, после чего логирует `[Router: Result]`.
 5. **Голосовой синтез (`IVoiceFeedbackService` / `CompositeVoiceFeedbackService.cs`)**:
    - Все обработчики и пайплайн вызывают единую абстракцию `IVoiceFeedbackService.SpeakAsync(text)`.
-   - **Primary**: `EdgeTtsEngine` (`ru-RU-DmitryNeural`, базовый таймаут подключения 5000 мс, политика повторов Retry Policy до 2 повторных попыток переподключения при сетевых заминках/ошибках сокета, сброс счетчика ошибок при успехе, Keep-Alive пинг WebSocket). Не сбрасывает Дмитрия при первых задержках сети.
+   - **Primary**: `EdgeTtsEngine` (`ru-RU-DmitryNeural`, базовый таймаут подключения **1500 мс**, жесткий таймаут первого чанка аудиоданных **2000 мс** через `CancellationTokenSource` с немедленным разрывом сокета без повторов, сброс счетчика ошибок при успехе, Keep-Alive пинг WebSocket). Обеспечивает мгновенный Fast Failover на SAPI5 не более чем за 1.6 с.
    - **Offline / Fallback**: `SystemSpeechTtsEngine` (Windows SAPI5: проект полностью отказался от поиска `.onnx` моделей и локального ONNX-инференса Silero через файлы; активация Silero происходит исключительно через установленный в систему Windows SAPI5-драйвер с прямым COM-биндингом токена `Aidar (Russian)` / `Baya (Russian)`; в качестве аварийного оффлайн-фоллбэка активируется системный мужской голос `Microsoft Pavel` без необработанных исключений и предупреждений в консоли; женский голос `Microsoft Irina Desktop` категорически заблокирован; при отсутствии мужских голосов — модуляция тона `-40% prosody`).
    - **Двухконтурная блокировка микрофона (FSM Processing Lock & Acoustic Echo Suppression)**:
      - При фиксации финальной команды немедленно выставляется `_isProcessing = true`, полностью блокируя захват новых команд и вейк-ворда на время работы LLM и роутера.
@@ -109,6 +109,8 @@ flowchart TD
 - [`Core/CommandRequest.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Core/CommandRequest.cs): Неизменяемый DTO входящей команды (`Command`, аргументы `Args` в формате `JsonElement`).
 - [`Core/CommandResult.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Core/CommandResult.cs): Результат исполнения (`Success`, `Message`, `Data`). Фабричные методы `Ok()` и `Fail()`.
 - [`Core/CommandRouter.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Core/CommandRouter.cs): Диспетчер команд. Регистрация через fluent API `.Register()`, валидация JSON и асинхронная маршрутизация.
+- [`Core/CliRunner.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Core/CliRunner.cs): Изолированный CLI-раннер команд первого запуска и диагностики (`--download-model`, `--test-features`, `--help`), предотвращающий раздувание `Program.cs`.
+- [`Services/ServiceCollectionExtensions.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/ServiceCollectionExtensions.cs): Модульные методы расширения DI (`AddJarvisCore()`, `AddJarvisHandlers()`, `AddJarvisTts()`, `ConfigureJarvisRouter()`), реализующие чистую компоновку зависимостей `IServiceProvider` и сократившие размер `Program.cs` до компактной точки входа (19.5 КБ).
 - [`Core/JarvisState.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Core/JarvisState.cs): Enum состояний HUD: `Idle`, `Listening`, `Thinking`, `Action`.
 
 #### 3.2 Сервисы захвата речи и адаптивного Wake-Word (`Voice/`, `Voice/WakeWord/`)
@@ -127,9 +129,10 @@ flowchart TD
   - **Защита KWS от ложных срабатываний (Token Matching)**: проверка детекции вейк-ворда выполняется строго через скомпилированный `Regex` с изоляцией токенов `(?:\b|\s|^){customName}(?:\b|\s|$)` и парсинг токенов Vosk JSON. Подстрочные проверки (`Contains`) запрещены, что полностью блокирует ложные срабатывания на фонетические обрывки («джа», «рис», «вис») и дыхательный/фоновый шум.
 - [`Voice/WakeWord/WakeWordFactory.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Voice/WakeWord/WakeWordFactory.cs):
   - Фабрика: по умолчанию инициализирует `VoskGrammarWakeWordDetector` для мгновенной 0 мс детекции как для имени «джарвис», так и для кастомных имен с передачей параметров `NoiseGateRms` и `MinDurationMs`.
-- [`Services/VoiceListener.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/VoiceListener.cs):
+  - [`Services/VoiceListener.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/VoiceListener.cs):
   - Потоковый захват микрофона (`NAudio.Wave.WaveInEvent`, 16 кГц, 1 канал, 16 бит).
   - Входная фильтрация по уровню RMS в `OnAudioDataAvailable`: фреймы тишины и низкоамплитудного фонового шума (`RMS < 450.0`) отсекаются до обработки KWS/STT.
+  - **Реактивная волна RMS (`OnRmsLevelChanged`)**: потокобезопасный проброс текущей энергии звука в UI HUD для динамической анимации пульсации неонового кольца во время речи пользователя.
   - Интеграция с `IWakeWordDetector` в состоянии `WaitingForWakeWord`.
   - **Двухконтурная блокировка микрофона (FSM Processing Lock & Acoustic Echo Suppression)**:
     - При фиксации команды мгновенно активируется `NotifyProcessingStarted()` (`_isProcessing = true`), блокируя захват новых фраз на всё время маршрутизации команды и сетевой генерации ответа LLM.
@@ -154,8 +157,8 @@ flowchart TD
   - Фонетическая нормализация Vosk: транслитерация (En $\leftrightarrow$ Ru), очистка командных префиксов («удали», «деинсталлируй», «сноси») и нечеткий поиск Левенштейна.
   - Пороги уверенности: $\ge 0.82$ — точное действие; $[0.60, 0.82)$ — запрос подтверждения; $< 0.60$ — игра не найдена.
   - Поиск установленных игр для деинсталляции (`FindInstalledGame`): нечеткое сопоставление по имени, транслиту и алиасам среди установленных игр и манифестов с автоинициацией диалога подтверждения («Вы действительно хотите удалить {GameTitle}, сэр?») и переходом в режим прямого ожидания ответа без вейк-ворда (`EnterConfirmationListening`).
-  - Автоматизация установки (`InstallGameAsync`) с визуальным поиском синей кнопки через сканирование `Bitmap` окна.
-  - Автоматизация деинсталляции (`UninstallGameAsync`) через протокол `steam://uninstall/{appId}`: строгая фильтрация HWND модального диалога Steam (проверка PID процессов `steam`/`steamwebhelper`, заголовков «Удаление»/«Uninstall» и Rect), визуальный поиск центра синей кнопки подтверждения в нижней левой части окна и клик мыши без использования нестабильных эмуляций `Enter` / `VK_RETURN`.
+  - Автоматизация установки (`InstallGameAsync`) с поиском целевых кнопок («Установить» / «Install») приоритетно через Win32 UI Automation (`FindSteamButtonViaUiAutomation`) и вторичным фоллбэком на попиксельный сканер синей кнопки (`FindSteamBlueButton`).
+  - Автоматизация деинсталляции (`UninstallGameAsync`) через протокол `steam://uninstall/{appId}`: строгая фильтрация HWND модального диалога Steam (проверка PID процессов `steam`/`steamwebhelper`, заголовков «Удаление»/«Uninstall» через `IsMatchingDialogTitle` и Rect), поиск кнопки подтверждения («Удалить» / «Uninstall») через Win32 UI Automation (`AutomationElement`) независимо от масштабирования экрана (DPI 125%/150%), темной/светлой темы и HDR; вторичный фоллбэк на попиксельный сканер `FindSteamBlueButtonInWindow`; клик мыши без использования нестабильных эмуляций `Enter` / `VK_RETURN`.
 - [`Services/TimerService.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TimerService.cs):
   - Потокобезопасная коллекция `ConcurrentDictionary<Guid, ActiveTimer>`.
   - Фоновые воркеры на `Task.Delay` с индивидуальными `CancellationTokenSource`.
@@ -186,7 +189,7 @@ flowchart TD
   - Потокобезопасный `SemaphoreSlim(1, 1)` для сериализации речи.
   - Детальное логирование каждого шага: `[TTS] Попытка синтеза...`, `[TTS: Edge] Воспроизведение завершено.`, `[TTS: Warning] Сбой...`, `[TTS: Error]`.
   - Координация с Vosk: пауза микрофона перед речью, Acoustic Echo Suppression (блокировка аудио-фреймов флагом `_isSpeaking`), 250 мс кулдаун в блоке `finally` для гарантированного затухания акустического эха колонок, активация `EnterConfirmationListening` при наличии активного `PendingAction`.
-- [`Services/TTS/EdgeTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/EdgeTtsEngine.cs): WebSocket-клиент Edge Speech (`ru-RU-DmitryNeural`), генерация DRM-токена `Sec-MS-GEC`, базовый таймаут подключения **5000 мс**, политика повторов Retry Policy (**до 2 повторных попыток** переподключения перед переключением на fallback) — первая попытка с `ConnectionTimeoutMs` (5000 мс), повторные — с `FastReconnectTimeoutMs` (3000 мс) для ускорения сброса на SAPI5, автоматический сброс счетчика ошибок при успешном синтезе и фоновый Keep-Alive WebSocket пинг каждые 15 сек.
+- [`Services/TTS/EdgeTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/EdgeTtsEngine.cs): WebSocket-клиент Edge Speech (`ru-RU-DmitryNeural`), генерация DRM-токена `Sec-MS-GEC`, быстрый таймаут подключения **1500 мс** (`ConnectionTimeoutMs`), жесткий таймаут ожидания первого аудиочанка **2000 мс** (`FirstAudioChunkTimeoutMs`) с немедленной отменой сокета через токен и мгновенным откатом на SAPI5 без долгих ретраев; сброс счетчика ошибок при успешном синтезе и фоновый Keep-Alive WebSocket пинг каждые 15 сек. Полный переход на SAPI5 занимает $\le 1.6$ с.
 - [`Services/TTS/SystemSpeechTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/SystemSpeechTtsEngine.cs): Надёжный Offline/Fallback движок (SAPI5).
   - При старте выводит в лог **все обнаруженные голоса SAPI5** (`[TTS: SAPI5] Обнаружен голос: ...`).
   - **Прямой COM-биндинг системных токенов Silero SAPI5**: инсталлятор Silero регистрирует токены `Aidar (Russian)` и `Baya (Russian)` через COM-интерфейс `ISpObjectToken`. В управляемом `System.Speech` вызов `SelectVoice` для синтетических токенов может завершаться ошибкой, поэтому движок использует прямое связывание токена через нативный COM `SAPI.SpVoice` (`spVoice.Voice = token`), активируя нативный голос `Aidar (Russian)` без необходимости ручного переноса токенов в реестре.
@@ -221,7 +224,17 @@ flowchart TD
   - `[TTS Engine: Edge-TTS (...)]`, `[TTS Engine: System.Speech Fallback]` — точный маркер активного движка синтеза при вызове речи.
   - `[TTS]`, `[TTS: Edge]`, `[TTS: SAPI5]`, `[TTS: System.Speech]`, `[TTS: Warning]`, `[TTS: Error]` — каждый этап синтеза и отказоустойчивого переключения.
 
-### 3.7 Тестовая подсистема (`Gem.Tests/`, `Gem.sln`)
+### 3.7 Пользовательский интерфейс HUD (`UI/OverlayWindow.xaml`, `UI/OverlayWindow.xaml.cs`)
+- **Реактивная пульсация неонового кольца (RMS Waveform)**: `VoiceListener.OnRmsLevelChanged(float rms)` передает текущий уровень звуковой энергии в UI потокобезопасно через `Dispatcher`. Масштаб (`RingScale`) и прозрачность внутреннего неонового кольца (`InnerRing.Opacity`) динамически пульсируют при речи пользователя (эффект «дыхания» HUD).
+- **Плавный морфинг состояний (WPF Storyboards & DropShadowEffect)**: анимация перехода свечения за 250 мс между 4 ключевыми состояниями ассистента:
+  - `Idle`: мягкий циан (`#00E5FF`);
+  - `Listening`: янтарный/золотой (`#FFD600`);
+  - `Thinking`: неоновый фиолетовый (`#D500F9`);
+  - `Action`: изумрудно-зеленый (`#00E676`).
+- **Субтитры распознавания речи (Speech Subtitle Banner)**: плашка в нижней части виджета, выводящая промежуточные гипотезы `Vosk PartialResult` и финальные `FinalResult` с автоматическим затуханием (Fade-out) через 3 секунды тишины.
+- **Оверлей активных таймеров (Mini Active Timer Overlay)**: компактный счетчик обратного отсчета (`⏱ MM:SS`) в правом верхнем углу виджета, динамически отображающий ближайший активный таймер из `TimerService`.
+
+### 3.8 Тестовая подсистема (`Gem.Tests/`, `Gem.sln`)
 - **Решение `Gem.sln`**: объединяет основной проект `Gem.csproj` (Windows GUI/Console) и тестовый проект `Gem.Tests/Gem.Tests.csproj` (xUnit).
 - **Проект `Gem.Tests/`**:
   - `Gem.Tests/NegativeKwsTests.cs`: Честное негативное тестирование KWS — подача аудио-фреймов длительностью < 150 мс (35 мс, 70 мс, 105 мс) и фонетических обрывков/слогов («джа», «рис», «да», «джар», «сюрприз», «вис», «джарвиса», «джарвису»). Проверяет, что вейк-ворд НЕ срабатывает (`Assert.False`).
@@ -229,6 +242,10 @@ flowchart TD
   - `Gem.Tests/AcousticEchoSuppressionTests.cs`: Тестирование подавления акустического эха — при активном флаге воспроизведения TTS (`IsSpeaking == true`) и в течение окна затухания (cooldown 250 мс) все входящие фреймы с микрофона гарантированно отбрасываются.
   - `Gem.Tests/FsmConcurrencyLockTests.cs`: Тестирование блокировки параллелизма FSM — пока выполняется обработка команды (`_isProcessing == true`), поступающие аудио-триггеры вейк-ворда полностью игнорируются, не допуская смены состояния на `ListeningForCommand`.
   - `Gem.Tests/Sapi5VoiceBitnessTests.cs`: Тестирование безопасной обработки 32-битных SAPI5-токенов в x64 процессе без необработанных исключений и проверка выбора системного мужского голоса `Microsoft Pavel`.
+  - `Gem.Tests/TtsFailoverTests.cs`: Тестирование быстрого отката TTS (Fast Failover) — симуляция сетевого сбоя/таймаута Edge-TTS и проверка переключения на SAPI5 не более чем за 1.6 с.
+  - `Gem.Tests/HudModernizationTests.cs`: Тестирование палитры неонового свечения состояний HUD, формул масштабирования RMS-пульсации и корректности форматирования таймеров (`⏱ MM:SS`).
+  - `Gem.Tests/DiDecompositionTests.cs`: Тестирование декомпозиции DI-контейнера — проверка регистрации сервисов через `ServiceCollectionExtensions` (`AddJarvisCore`, `AddJarvisHandlers`, `AddJarvisTts`, `ConfigureJarvisRouter`) и отсутствие прямого обращения к синглтонам `.Instance`.
+  - `Gem.Tests/SteamAutomationTests.cs`: Тестирование Win32 UI Automation в `SteamService` — сопоставление заголовков модальных окон, сопоставление имен кнопок действий («Удалить», «Uninstall») и безопасная обработка нулевых дескрипторов окон.
 - **Запуск тестов**:
   - Через xUnit runner: `dotnet test` (автоматическое обнаружение всех тестов через `Gem.sln`).
   - Встроенный запуск через консольное приложение: `dotnet run --project Gem.csproj -- --test-features` (блоки `[20]` и `[21]`).

@@ -33,7 +33,7 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
         VoiceListener? voiceListener = null,
         IConfiguration? configuration = null)
         : this(
-            voiceListener: voiceListener,
+            voiceListener: voiceListener ?? VoiceListener.Instance,
             edgeTts: new EdgeTtsEngine(
                 configuration?["Tts:EdgeVoice"] ?? "ru-RU-DmitryNeural",
                 int.TryParse(configuration?["Tts:ConnectionTimeoutMs"], out int tMs) && tMs > 0 ? tMs : EdgeTtsEngine.DefaultConnectionTimeoutMs),
@@ -100,7 +100,7 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
         try
         {
             // 1. Pause microphone capture before speaking across all engines
-            var listener = _voiceListener ?? VoiceListener.Instance;
+            var listener = _voiceListener;
             listener?.PauseListening();
             // Acoustic Echo Suppression: выставляем _isSpeaking и сбрасываем KWS/STT буферы мгновенно
             listener?.NotifySpeakingStarted();
@@ -195,7 +195,7 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
                 await Task.Delay(250).ConfigureAwait(false);
 
                 // 3. Снять флаги _isSpeaking и _isProcessing строго ПОСЛЕ cooldown (250 мс)
-                var listener = _voiceListener ?? VoiceListener.Instance;
+                var listener = _voiceListener;
                 listener?.NotifySpeakingFinished();
                 listener?.NotifyProcessingFinished();
 
