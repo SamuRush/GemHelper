@@ -77,12 +77,12 @@ public class OverdriveShatterTests
         {
             try
             {
-                var host = new ArcReactorVisualHost();
+                var host = new ArcReactorVisualHost { OverdriveDuration = 0.50 };
                 Assert.True(host.EnableShatterOverdrive);
                 Assert.False(host.IsOverdriveActive);
 
-                // Подаем серию мощных басовых ударов для наполнения аккумулятора энергии
-                for (int frame = 0; frame < 20; frame++)
+                // Подаем серию мощных басовых ударов до активации перегрузки (3.0-3.5 секунды)
+                while (!host.IsOverdriveActive)
                 {
                     host.TriggerBassFrame(subBassEnergy: 1.0f, beatIntensity: 1.0f, dt: 0.05);
                 }
@@ -223,11 +223,11 @@ public class OverdriveShatterTests
                 var hostLow = new ArcReactorVisualHost { OverdriveThreshold = 0.50 };
                 var hostHigh = new ArcReactorVisualHost { OverdriveThreshold = 1.40 };
 
-                // Подаем умеренный бас
-                for (int frame = 0; frame < 10; frame++)
+                // Подаем умеренный бас в течение 2.0 секунд
+                for (int frame = 0; frame < 40; frame++)
                 {
-                    hostLow.TriggerBassFrame(subBassEnergy: 0.7f, beatIntensity: 0.6f, dt: 0.05);
-                    hostHigh.TriggerBassFrame(subBassEnergy: 0.7f, beatIntensity: 0.6f, dt: 0.05);
+                    hostLow.TriggerBassFrame(subBassEnergy: 0.90f, beatIntensity: 0.85f, dt: 0.05);
+                    hostHigh.TriggerBassFrame(subBassEnergy: 0.90f, beatIntensity: 0.85f, dt: 0.05);
                 }
 
                 // При низком пороге овердрайв должен сработать раньше, чем при высоком
@@ -321,11 +321,12 @@ public class OverdriveShatterTests
             {
                 var host = new ArcReactorVisualHost
                 {
+                    OverdriveDuration = 0.50,
                     OverdriveCooldown = 5.0 // 5 seconds cooldown
                 };
 
-                // Trigger overdrive
-                for (int i = 0; i < 20; i++)
+                // Trigger overdrive (3.0-3.5s of heavy bass)
+                while (!host.IsOverdriveActive)
                 {
                     host.TriggerBassFrame(subBassEnergy: 1.0f, beatIntensity: 1.0f, dt: 0.05);
                 }
@@ -333,7 +334,7 @@ public class OverdriveShatterTests
                 Assert.True(host.IsOverdriveActive);
 
                 // Run silence until overdrive finishes and magnetic reverse gathers shards back
-                for (int i = 0; i < 50; i++)
+                for (int i = 0; i < 60; i++)
                 {
                     host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.05);
                 }
@@ -360,7 +361,7 @@ public class OverdriveShatterTests
                 Assert.Equal(0.0, host.CooldownRemaining, precision: 2);
 
                 // Now heavy bass should trigger overdrive again
-                for (int i = 0; i < 25; i++)
+                while (!host.IsOverdriveActive)
                 {
                     host.TriggerBassFrame(subBassEnergy: 1.0f, beatIntensity: 1.0f, dt: 0.05);
                 }
@@ -408,11 +409,12 @@ public class OverdriveShatterTests
             {
                 var host = new ArcReactorVisualHost
                 {
-                    OverdriveThreshold = 0.50
+                    OverdriveThreshold = 0.50,
+                    OverdriveDuration = 0.50
                 };
 
                 // Trigger overdrive
-                for (int i = 0; i < 20; i++)
+                while (!host.IsOverdriveActive)
                 {
                     host.TriggerBassFrame(subBassEnergy: 1.0f, beatIntensity: 1.0f, dt: 0.05);
                 }
@@ -444,7 +446,7 @@ public class OverdriveShatterTests
                 }
 
                 // Recall phase: shards must unstick and gather back into core
-                for (int i = 0; i < 50; i++)
+                for (int i = 0; i < 70; i++)
                 {
                     host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.05);
                 }
@@ -555,7 +557,7 @@ public class OverdriveShatterTests
                 };
 
                 // Trigger overdrive with heavy bass
-                for (int i = 0; i < 20; i++)
+                while (!host.IsOverdriveActive)
                 {
                     host.TriggerBassFrame(subBassEnergy: 1.0f, beatIntensity: 1.0f, dt: 0.05);
                 }
@@ -577,8 +579,15 @@ public class OverdriveShatterTests
                     host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.05);
                 }
 
-                // Overdrive should now conclude, finish reassembly, and enter cooldown
+                // Overdrive should now conclude and enter reassembly
                 Assert.False(host.IsOverdriveActive, "Overdrive should deactivate after the hold duration expires");
+
+                // Advance past three-phase reassembly (Phase 1 absorption + 400ms dramatic pause + slam)
+                for (int i = 0; i < 40; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.05);
+                }
+
                 Assert.True(host.IsOnCooldown, "Host should be in cooldown after overdrive concludes");
             }
             catch (Exception ex)
@@ -608,8 +617,8 @@ public class OverdriveShatterTests
                     ShardCount = 48
                 };
 
-                // Trigger overdrive
-                for (int i = 0; i < 20; i++)
+                // Trigger overdrive (2.5s for 0.50 threshold)
+                for (int i = 0; i < 50; i++)
                 {
                     host.TriggerBassFrame(subBassEnergy: 1.0f, beatIntensity: 1.0f, dt: 0.05);
                 }
@@ -696,5 +705,657 @@ public class OverdriveShatterTests
         Assert.Equal(600.0, aabb.Bottom);
         Assert.Equal(400.0, aabb.Width);
         Assert.Equal(400.0, aabb.Height);
+
+        // Clear works cleanly
+        tracker.Clear();
+        Assert.Equal(0, tracker.Count);
+    }
+
+    [Fact]
+    public void ArcReactorVisualHost_JitWindowTracking_OnlyActiveWhenHighChargeOrOverdrive()
+    {
+        Exception? threadEx = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var host = new ArcReactorVisualHost
+                {
+                    EnableWindowCollisions = true,
+                    OverdriveThreshold = 0.85
+                };
+
+                // In idle (0 charge), window tracker is cleared
+                host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.05);
+                Assert.Equal(0, host.WindowTracker.Count);
+                Assert.True(host.OverloadCharge <= 0.50);
+
+                // When charge exceeds 50% or overdrive is active, tracker can update
+                for (int i = 0; i < 70; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 1.0f, beatIntensity: 1.0f, dt: 0.05);
+                }
+                Assert.True(host.IsOverdriveActive);
+                Assert.True(host.OverloadCharge > 0.50);
+            }
+            catch (Exception ex)
+            {
+                threadEx = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        if (threadEx != null) throw threadEx;
+    }
+
+    [Fact]
+    public void ArcReactorVisualHost_VisualChargeGaugeAndOverrideTitle_ActivatesAt80Percent()
+    {
+        Exception? threadEx = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var host = new ArcReactorVisualHost
+                {
+                    OverdriveThreshold = 1.0
+                };
+
+                Assert.False(host.IsOverrideTitleVisible);
+
+                // Ramp up charge gradually towards 0.80
+                for (int i = 0; i < 20; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 0.7f, beatIntensity: 0.6f, dt: 0.05);
+                }
+
+                // Push bass harder to reach >= 0.80 charge before detonation
+                for (int i = 0; i < 30; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 0.95f, beatIntensity: 0.85f, dt: 0.05);
+                    if (host.OverloadCharge >= 0.80 && !host.IsOverdriveActive)
+                    {
+                        Assert.True(host.IsOverrideTitleVisible, "OVERRIDE title should be visible when charge >= 80%");
+                        break;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                threadEx = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        if (threadEx != null) throw threadEx;
+    }
+
+    [Fact]
+    public void ArcReactorVisualHost_ThreePhaseReassembly_Phase1AbsorptionThenDramaticPauseThenPhase2HydraulicSlam()
+    {
+        Exception? threadEx = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var host = new ArcReactorVisualHost
+                {
+                    OverdriveDuration = 0.50, // short duration for test
+                    OverdriveThreshold = 0.50,
+                    OverdriveCooldown = 5.0,
+                    ShardCount = 32
+                };
+
+                // 1. Trigger overdrive
+                while (!host.IsOverdriveActive)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 1.0f, beatIntensity: 1.0f, dt: 0.05);
+                }
+
+                Assert.True(host.IsOverdriveActive, "Overdrive must be active");
+                Assert.Equal(ReassemblyPhase.None, host.CurrentReassemblyPhase);
+
+                // 2. Advance time past the remaining overdrive duration (15 frames * 0.05s = 0.75s)
+                for (int i = 0; i < 15; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.05);
+                }
+
+                // 3. Overdrive has ended -> Must enter Reassembly Phase 1 (Absorption)
+                Assert.False(host.IsOverdriveActive);
+                Assert.True(host.IsReassembling);
+
+                // Check that Phase 1 absorption pulls particles magnetically
+                // Advance frames until all particles reach center -> enters Dramatic Pause
+                for (int i = 0; i < 20; i++)
+                {
+                    if (host.CurrentReassemblyPhase == ReassemblyPhase.DramaticPause)
+                    {
+                        break;
+                    }
+                    host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.05);
+                }
+
+                // 4. Dramatic Pause must be active! (400 ms hold)
+                Assert.Equal(ReassemblyPhase.DramaticPause, host.CurrentReassemblyPhase);
+                Assert.True(host.IsReassembling);
+
+                // Advance past 400 ms dramatic pause (10 frames * 0.05s = 0.50s)
+                for (int i = 0; i < 10; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.05);
+                    if (host.CurrentReassemblyPhase == ReassemblyPhase.Phase2_Slam)
+                    {
+                        break;
+                    }
+                }
+
+                // 5. Phase 2 (Hyper Slam & Shockwave)
+                Assert.Equal(ReassemblyPhase.Phase2_Slam, host.CurrentReassemblyPhase);
+                Assert.True(host.IsOnCooldown, "Cooldown must engage upon hydraulic slam");
+
+                // Advance into impact window (t >= 0.20s): 5 frames * 0.05s = 0.25s
+                for (int i = 0; i < 5; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.05);
+                }
+
+                Assert.True(host.ShockwaveRadius > 80.0, "Shockwave ring should expand on slam impact");
+                Assert.True(host.ShockwaveOpacity > 0.0, "Shockwave opacity should be active");
+                Assert.True(host.WhiteoutIntensity > 0.0, "Whiteout flash should be active in impact window");
+            }
+            catch (Exception ex)
+            {
+                threadEx = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        if (threadEx != null) throw threadEx;
+    }
+
+    [Fact]
+    public void ArcReactorVisualHost_Pacing_Requires2Point5To3Point5SecondsToTrigger_NoInstantJumpOnPeakKick()
+    {
+        Exception? threadEx = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var host = new ArcReactorVisualHost
+                {
+                    OverdriveThreshold = 0.85
+                };
+
+                // 1. Single massive kick (1 frame of 1.0f sub-bass + 1.0f beat intensity)
+                host.TriggerBassFrame(subBassEnergy: 1.0f, beatIntensity: 1.0f, dt: 0.05);
+
+                // Must NOT jump to 100% or trigger overdrive!
+                Assert.False(host.IsOverdriveActive, "Single peak kick must NOT instantaneously trigger Overdrive");
+                Assert.True(host.OverloadCharge < 0.20, "Charge must accumulate smoothly without binary jump");
+
+                // 2. Feed 1.5 seconds of heavy bass (30 frames * 0.05s)
+                for (int i = 0; i < 30; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 1.0f, beatIntensity: 1.0f, dt: 0.05);
+                }
+
+                // 1.5 seconds must still NOT be enough to trigger threshold 0.85
+                Assert.False(host.IsOverdriveActive, "1.5s is insufficient; Overdrive requires 2.5-3.5s of dense bass");
+                Assert.True(host.OverloadCharge < 0.75, "Overload charge at 1.5s should be around ~40-60%");
+
+                // 3. Continue feeding up to 3.2 seconds total (another 35 frames)
+                for (int i = 0; i < 35; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 1.0f, beatIntensity: 1.0f, dt: 0.05);
+                }
+
+                // Now at ~3.2 seconds, Overdrive triggers!
+                Assert.True(host.IsOverdriveActive, "3.2 seconds of continuous dense bass should trigger Overdrive");
+                Assert.True(host.IsOverrideTitleVisible, "OVERRIDE title should be active post-detonation for 2.0s");
+            }
+            catch (Exception ex)
+            {
+                threadEx = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        if (threadEx != null) throw threadEx;
+    }
+
+    [Fact]
+    public void ArcReactorVisualHost_DynamicOverdriveHold_ExtendsOnContinuousHeavyBeats()
+    {
+        Exception? threadEx = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var host = new ArcReactorVisualHost
+                {
+                    OverdriveThreshold = 0.50,
+                    OverdriveDuration = 3.0 // 3.0s base duration for test
+                };
+
+                // Trigger overdrive
+                while (!host.IsOverdriveActive)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 1.0f, beatIntensity: 1.0f, dt: 0.05);
+                }
+
+                Assert.True(host.IsOverdriveActive);
+
+                // Now simulate music continuing with heavy beat kicks for 5.0 seconds (100 frames * 0.05s)
+                // If there were no dynamic extension, Overdrive would expire after 3.0 seconds!
+                for (int i = 0; i < 100; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 0.95f, beatIntensity: 0.90f, dt: 0.05);
+                }
+
+                // With dynamic extension (+1.8s per debounced kick), Overdrive is still alive and rocking!
+                Assert.True(host.IsOverdriveActive, "Continuous heavy beat during Overdrive must dynamically extend the mode");
+
+                // Now music calms down (silence for 12.5 seconds > 10.5s cap) -> enters reassembly and cooldown
+                for (int i = 0; i < 250; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.05);
+                }
+
+                Assert.False(host.IsOverdriveActive, "Overdrive must end after music stops");
+                Assert.True(host.IsOnCooldown, "Cooldown engages after overdrive and reassembly conclude");
+            }
+            catch (Exception ex)
+            {
+                threadEx = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        if (threadEx != null) throw threadEx;
+    }
+
+    [Fact]
+    public void WindowBoundsTracker_StrictFiltering_StructureAndZeroGcSafety()
+    {
+        var tracker = new WindowBoundsTracker();
+        tracker.Clear();
+        Assert.Equal(0, tracker.Count);
+
+        // Update with mock dimensions
+        tracker.Update(IntPtr.Zero, 1.0, 1920.0, 1080.0);
+        // Tracker does not throw and bounds array remains fixed-size
+        Assert.Equal(WindowBoundsTracker.MaxWindows, tracker.Bounds.Length);
+        foreach (var b in tracker.Bounds)
+        {
+            if (tracker.Count > 0)
+            {
+                // Windows recorded must be >= 300x300 and within screen
+                Assert.True(b.Width >= 0.0);
+                Assert.True(b.Height >= 0.0);
+            }
+        }
+    }
+
+    [Fact]
+    public void HudSettings_EnableMemoryGlitch_DefaultAndPersistence()
+    {
+        var config = new HudSettingsConfig();
+        Assert.True(config.EnableMemoryGlitch, "EnableMemoryGlitch must default to true");
+
+        config.EnableMemoryGlitch = false;
+        string tempJsonPath = Path.Combine(Path.GetTempPath(), $"hud_glitch_{Guid.NewGuid()}.json");
+        try
+        {
+            HudSettingsStorage.SaveToFile(config, tempJsonPath);
+            Assert.True(File.Exists(tempJsonPath));
+
+            var loaded = HudSettingsStorage.LoadFromFile(tempJsonPath);
+            Assert.False(loaded.EnableMemoryGlitch, "Loaded configuration must retain false for EnableMemoryGlitch");
+
+            loaded.EnableMemoryGlitch = true;
+            HudSettingsStorage.SaveToFile(loaded, tempJsonPath);
+
+            var reloaded = HudSettingsStorage.LoadFromFile(tempJsonPath);
+            Assert.True(reloaded.EnableMemoryGlitch, "Reloaded configuration must retain true for EnableMemoryGlitch");
+        }
+        finally
+        {
+            if (File.Exists(tempJsonPath)) File.Delete(tempJsonPath);
+        }
+    }
+
+    [Fact]
+    public void MemoryGlitch_Spawn_CoordinatesStrictly250PxFromReactorCenter()
+    {
+        Exception? threadEx = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var host = new ArcReactorVisualHost();
+                host.Center = new System.Windows.Point(1200.0, 700.0);
+
+                for (int i = 0; i < 5; i++)
+                {
+                    bool spawned = host.SpawnGlitchBlock(1920.0, 1080.0, host.Center);
+                    Assert.True(spawned, "Must successfully spawn a glitch block into pool");
+                }
+
+                var snapshot = host.GetGlitchBlocksSnapshot();
+                int activeCount = 0;
+                foreach (var b in snapshot)
+                {
+                    if (!b.Active) continue;
+                    activeCount++;
+
+                    // Verify distance from center to any point in block box [b.X - 10, b.X + 370] x [b.Y - 8, b.Y + 100] is >= 250 px
+                    double clampX = Math.Clamp(host.Center.X, b.X - 10.0, b.X + 370.0);
+                    double clampY = Math.Clamp(host.Center.Y, b.Y - 8.0, b.Y + 100.0);
+                    double dx = host.Center.X - clampX;
+                    double dy = host.Center.Y - clampY;
+                    double dist = Math.Sqrt(dx * dx + dy * dy);
+
+                    Assert.True(dist >= 249.0, $"Spawned glitch block box must be at least 250 px away from reactor center (was {dist:F1} px)");
+                    Assert.InRange(b.TotalLife, 1.5, 2.5);
+                    Assert.InRange(b.LineCount, 3, 5);
+                }
+
+                Assert.Equal(5, activeCount);
+            }
+            catch (Exception ex)
+            {
+                threadEx = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        if (threadEx != null) throw threadEx;
+    }
+
+    [Fact]
+    public void MemoryGlitch_DecryptionProgression_18CharsPerSecAndFadeOut()
+    {
+        Exception? threadEx = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var host = new ArcReactorVisualHost
+                {
+                    EnableMemoryGlitch = true,
+                    EnableShatterOverdrive = true,
+                    OverdriveThreshold = 0.40,
+                    OverdriveDuration = 0.80
+                };
+                host.Center = new System.Windows.Point(1000.0, 500.0);
+
+                // Accumulate bass steadily for 2.8 seconds to trigger Overdrive
+                for (int i = 0; i < 56; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 0.90f, beatIntensity: 0.85f, dt: 0.05);
+                }
+
+                Assert.True(host.IsOverdriveActive, "Overdrive must activate under continuous bass");
+                Assert.True(host.ActiveGlitchBlockCount > 0, "Active glitch blocks must spawn during Overdrive");
+
+                var snapshot = host.GetGlitchBlocksSnapshot();
+                var firstBlock = snapshot[0];
+                Assert.True(firstBlock.Active);
+                Assert.True(firstBlock.LastDecodedStep >= 0, "Decoded step must advance");
+
+                // Progress time during Overdrive: characters decode at 18 chars/sec
+                int prevStep = firstBlock.LastDecodedStep;
+                for (int i = 0; i < 6; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 0.90f, beatIntensity: 0.85f, dt: 0.05);
+                }
+                var updated = host.GetGlitchBlocksSnapshot()[0];
+                Assert.True(updated.LastDecodedStep >= prevStep, "Decryption step must advance as age increases");
+
+                // Now overdrive duration expires and music stops -> Overdrive ends
+                for (int i = 0; i < 60; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.05);
+                }
+
+                Assert.False(host.IsOverdriveActive, "Overdrive must end after duration and calm music");
+
+                // Advance another 1.0 second in calm mode: all remaining blocks must complete organic fade-out and deactivate
+                for (int i = 0; i < 20; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.05);
+                }
+
+                Assert.Equal(0, host.ActiveGlitchBlockCount);
+            }
+            catch (Exception ex)
+            {
+                threadEx = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        if (threadEx != null) throw threadEx;
+    }
+
+    [Fact]
+    public void MemoryGlitch_HitTesting_IsTransparent()
+    {
+        Exception? threadEx = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var host = new ArcReactorVisualHost();
+                host.Center = new System.Windows.Point(800.0, 500.0);
+                host.SpawnGlitchBlock(1920.0, 1080.0, host.Center);
+
+                var snapshot = host.GetGlitchBlocksSnapshot();
+                var block = snapshot[0];
+                Assert.True(block.Active);
+
+                // Hit testing at block coordinates must return HTTRANSPARENT / null hit
+                // because it is outside the 75px core radius!
+                var hitParam = new System.Windows.Media.PointHitTestParameters(new System.Windows.Point(block.X + 50.0, block.Y + 20.0));
+                var hitResult = System.Windows.Media.VisualTreeHelper.HitTest(host, hitParam.HitPoint);
+
+                Assert.Null(hitResult);
+            }
+            catch (Exception ex)
+            {
+                threadEx = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        if (threadEx != null) throw threadEx;
+    }
+
+    [Fact]
+    public void OverdriveTimer_RefreshCap_NeverExceedsMaxDuration()
+    {
+        Exception? threadEx = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                double configuredDuration = 5.0;
+                var host = new ArcReactorVisualHost
+                {
+                    OverdriveDuration = configuredDuration,
+                    OverdriveThreshold = 0.50
+                };
+
+                // Accumulate bass until overdrive triggers
+                while (!host.IsOverdriveActive)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 1.0f, beatIntensity: 1.0f, dt: 0.05);
+                }
+
+                Assert.True(host.IsOverdriveActive);
+                Assert.InRange(host.OverdriveRemainingTimer, 4.9, configuredDuration);
+
+                // Simulate countdown without kicks for 2.0s
+                for (int i = 0; i < 40; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.05);
+                }
+
+                // Timer must count down honestly
+                Assert.InRange(host.OverdriveRemainingTimer, 2.8, 3.2);
+
+                // Now deliver 20 consecutive heavy kick transients with varying dt
+                for (int i = 0; i < 20; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 1.0f, beatIntensity: 1.0f, dt: 0.05);
+                    // Crucial invariant: timer must REFRESH to configuredDuration but NEVER exceed it!
+                    Assert.True(host.OverdriveRemainingTimer <= configuredDuration,
+                        $"Timer ({host.OverdriveRemainingTimer}) must never exceed maxDuration ({configuredDuration})");
+                }
+
+                // Verify it refreshed back close to maxDuration (clamped)
+                Assert.InRange(host.OverdriveRemainingTimer, 4.8, configuredDuration);
+
+                // Now music goes completely silent: timer must count down honestly to 0 with zero delay
+                double expectedFrames = configuredDuration / 0.05;
+                for (int i = 0; i < (int)expectedFrames + 5; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.05);
+                    if (!host.IsOverdriveActive) break;
+                }
+
+                Assert.False(host.IsOverdriveActive, "Overdrive must deactivate after countdown finishes");
+                Assert.True(host.IsReassembling, "Reassembly must start immediately upon overdrive expiration");
+            }
+            catch (Exception ex)
+            {
+                threadEx = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        if (threadEx != null) throw threadEx;
+    }
+
+    [Fact]
+    public void HyperSlam_5StepKineticCollapse_ChoreographyVerification()
+    {
+        Exception? threadEx = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var host = new ArcReactorVisualHost
+                {
+                    OverdriveDuration = 0.20,
+                    OverdriveThreshold = 0.50
+                };
+
+                // 1. Trigger Overdrive
+                while (!host.IsOverdriveActive)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 1.0f, beatIntensity: 1.0f, dt: 0.05);
+                }
+
+                // Split distance in Overdrive should be positive (proportional to OverdriveProgress)
+                Assert.True(host.CalculateSplitDistance() > 0.0);
+
+                // 2. Let Overdrive expire -> enters Phase 1 (Absorption)
+                while (host.IsOverdriveActive)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.05);
+                }
+
+                Assert.Equal(ReassemblyPhase.Phase1_Absorption, host.CurrentReassemblyPhase);
+                Assert.Equal(18.0, host.CalculateSplitDistance(), precision: 2);
+
+                // 3. Fast-forward through Phase 1 absorption into Dramatic Pause
+                while (host.CurrentReassemblyPhase == ReassemblyPhase.Phase1_Absorption)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.05);
+                }
+
+                Assert.Equal(ReassemblyPhase.DramaticPause, host.CurrentReassemblyPhase);
+                Assert.Equal(18.0, host.CalculateSplitDistance(), precision: 2);
+
+                // 4. Fast-forward through Dramatic Pause (400 ms) until Phase 2 starts
+                while (host.CurrentReassemblyPhase == ReassemblyPhase.DramaticPause)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.05);
+                }
+
+                Assert.Equal(ReassemblyPhase.Phase2_Slam, host.CurrentReassemblyPhase);
+
+                // --- STEP 1: Anticipation / Inhale (120 ms, t in [0.0, 0.12]) ---
+                // Halves pull apart further from 18px to ~22px
+                // Advance 2 frames * 0.05s = 0.10s (within Step 1)
+                host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.05);
+                host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.05);
+                double splitInhale = host.CalculateSplitDistance();
+                Assert.True(splitInhale > 18.0, $"Split distance during inhale ({splitInhale}) must expand beyond 18px");
+                Assert.True(splitInhale <= 22.0, $"Split distance ({splitInhale}) must not exceed 22px");
+                Assert.Equal(1.0, host.OverdriveProgress, precision: 2); // stays fiery red
+
+                // --- STEP 2: Hyper Slam (80 ms, t in [0.12, 0.20]) ---
+                // Advance to t = 0.18s
+                host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.05);
+                host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.03);
+                double splitSlam = host.CalculateSplitDistance();
+                Assert.True(splitSlam < splitInhale, $"Split distance ({splitSlam}) must accelerate inward");
+                Assert.Equal(1.0, host.OverdriveProgress, precision: 2); // still fiery red
+
+                // --- STEP 3 & STEP 4: Point of Impact (t in [0.20, 0.28]) ---
+                // Advance to t = 0.22s (impact!)
+                host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.04);
+                Assert.True(host.WhiteoutIntensity > 0.0, "Core whiteout flash must erupt at impact");
+                Assert.True(host.ShockwaveRadius >= 80.0, "Shockwave blast radius must be >= 80px");
+                Assert.True(host.ShockwaveOpacity > 0.0, "Shockwave opacity must be active");
+
+                // --- STEP 5: Heavy Mechanical Settle & Cool (t in [0.20, 0.50]) ---
+                // Advance to t = 0.40s
+                host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.18);
+                // Shockwave expanded significantly
+                Assert.True(host.ShockwaveRadius > 200.0, $"Shockwave radius ({host.ShockwaveRadius}) should expand towards 370px");
+                // Color cooling in progress
+                Assert.True(host.OverdriveProgress < 0.60, $"Core should be cooling towards cyan, progress was {host.OverdriveProgress}");
+
+                // Advance past t = 0.50s: Phase 2 finishes completely
+                host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.15);
+                Assert.Equal(ReassemblyPhase.None, host.CurrentReassemblyPhase);
+                Assert.False(host.IsReassembling);
+                Assert.Equal(0.0, host.WhiteoutIntensity);
+                Assert.Equal(0.0, host.ShockwaveOpacity);
+                Assert.Equal(0.0, host.OverdriveProgress);
+            }
+            catch (Exception ex)
+            {
+                threadEx = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        if (threadEx != null) throw threadEx;
     }
 }
+

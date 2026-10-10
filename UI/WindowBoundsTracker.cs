@@ -45,6 +45,7 @@ public sealed class WindowBoundsTracker
     private double _screenWidth = 1920.0;
     private double _screenHeight = 1080.0;
     private readonly StringBuilder _classBuffer = new(256);
+    private readonly StringBuilder _titleBuffer = new(256);
     private readonly NativeMethods.EnumWindowsProc _enumProc;
 
     public int Count => _count;
@@ -53,6 +54,13 @@ public sealed class WindowBoundsTracker
     public WindowBoundsTracker()
     {
         _enumProc = EnumWindowCallback;
+    }
+
+    public void Clear()
+    {
+        _count = 0;
+        _tempCount = 0;
+        _lastScanTime = -10.0;
     }
 
     public void Update(IntPtr myHwnd, double now, double screenW, double screenH)
@@ -82,37 +90,73 @@ public sealed class WindowBoundsTracker
     private bool EnumWindowCallback(IntPtr hWnd, IntPtr lParam)
     {
         if (hWnd == IntPtr.Zero || hWnd == _ignoreHwnd) return true;
-        if (!NativeMethods.IsWindowVisible(hWnd) || NativeMethods.IsIconic(hWnd)) return true;
 
-        _classBuffer.Clear();
-        NativeMethods.GetClassName(hWnd, _classBuffer, 256);
-        string cls = _classBuffer.ToString();
+        // 1. Проверка владельца: только корневые окна приложений (без GW_OWNER)
+        if (NativeMethods.GetWindow(hWnd, NativeMethods.GW_OWNER) != IntPtr.Zero) return true;
 
-        // Exclude shell desktop, taskbar, tooltips, popup overlays
-        if (cls.Equals("Progman", StringComparison.OrdinalIgnoreCase) ||
-            cls.Equals("WorkerW", StringComparison.OrdinalIgnoreCase) ||
-            cls.Equals("Shell_TrayWnd", StringComparison.OrdinalIgnoreCase) ||
-            cls.Equals("Shell_SecondaryTrayWnd", StringComparison.OrdinalIgnoreCase))
+        // 2. Проверка стилей: окно должно быть WS_VISIBLE и не быть WS_EX_TOOLWINDOW
+        int style = NativeMethods.GetWindowLong(hWnd, NativeMethods.GWL_STYLE);
+        if ((style & NativeMethods.WS_VISIBLE) == 0) return true;
+
+        int exStyle = NativeMethods.GetWindowLong(hWnd, NativeMethods.GWL_EXSTYLE);
+        if ((exStyle & NativeMethods.WS_EX_TOOLWINDOW) != 0) return true;
+
+        // 3. Отсекать свернутые окна (IsIconic)
+        if (NativeMethods.IsIconic(hWnd)) return true;
+
+        // 4. Отсекать скрытые UWP / висячие виртуальные десктопы через DWMWA_CLOAKED
+        int hrCloaked = NativeMethods.DwmGetWindowAttribute(hWnd, NativeMethods.DWMWA_CLOAKED, out int isCloaked, sizeof(int));
+        if (hrCloaked == 0 && isCloaked != 0) return true;
+
+        // 5. Проверка заголовка окна: отсекать пустые и системные заголовки
+        int titleLen = NativeMethods.GetWindowTextLength(hWnd);
+        if (titleLen <= 0) return true;
+
+        _titleBuffer.Clear();
+        NativeMethods.GetWindowText(hWnd, _titleBuffer, 256);
+        string title = _titleBuffer.ToString().Trim();
+        if (string.IsNullOrEmpty(title)) return true;
+
+        if (title.Equals("Default IME", StringComparison.OrdinalIgnoreCase) ||
+            title.Equals("MSCTFIME UI", StringComparison.OrdinalIgnoreCase) ||
+            title.Equals("Settings", StringComparison.OrdinalIgnoreCase) ||
+            title.Equals("Параметры", StringComparison.OrdinalIgnoreCase) ||
+            title.Equals("Program Manager", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
 
-        // Query visual bounds without drop shadows via DWM
+        // 6. Проверка класса окна: отсекать служебные оболочки Windows
+        _classBuffer.Clear();
+        NativeMethods.GetClassName(hWnd, _classBuffer, 256);
+        string cls = _classBuffer.ToString();
+
+        if (cls.Equals("Progman", StringComparison.OrdinalIgnoreCase) ||
+            cls.Equals("WorkerW", StringComparison.OrdinalIgnoreCase) ||
+            cls.Equals("Shell_TrayWnd", StringComparison.OrdinalIgnoreCase) ||
+            cls.Equals("Shell_SecondaryTrayWnd", StringComparison.OrdinalIgnoreCase) ||
+            cls.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase) ||
+            cls.Contains("Tooltip", StringComparison.OrdinalIgnoreCase) ||
+            cls.Contains("Popup", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // 7. Снятие геометрии через DWM (без теней) или GetWindowRect
         int hr = NativeMethods.DwmGetWindowAttribute(hWnd, NativeMethods.DWMWA_EXTENDED_FRAME_BOUNDS, out RECT rect, Marshal.SizeOf<RECT>());
         if (hr != 0)
         {
-            // Fallback to standard GetWindowRect
             if (!NativeMethods.GetWindowRect(hWnd, out rect)) return true;
         }
 
         int w = rect.Width;
         int h = rect.Height;
 
-        // Ignore zero/tiny windows or windows taking full virtual screen desktop
-        if (w < 120 || h < 80) return true;
-        if (w >= _screenWidth && h >= _screenHeight) return true; // Fullscreen app / desktop surface
+        // 8. Отсекать окна размером менее 300x300 px и полноэкранные перекрытия десктопа
+        if (w < 300 || h < 300) return true;
+        if (w >= _screenWidth && h >= _screenHeight) return true;
 
-        // Ignore off-screen windows
+        // 9. Игнорировать окна за пределами экрана
         if (rect.Right <= 0 || rect.Left >= _screenWidth || rect.Bottom <= 0 || rect.Top >= _screenHeight)
         {
             return true;

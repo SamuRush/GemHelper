@@ -46,6 +46,7 @@ public sealed class HudSettingsConfig
     public double OverdriveDuration { get; set; } = 10.0;
     public bool EnableMouseRepulsion { get; set; } = true;
     public bool EnableWindowCollisions { get; set; } = true;
+    public bool EnableMemoryGlitch { get; set; } = true;
 }
 
 public sealed class AppSettingsData

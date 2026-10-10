@@ -44,6 +44,9 @@ public static class NativeMethods
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
 
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    public static extern int GetWindowTextLength(IntPtr hWnd);
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
 
@@ -59,9 +62,13 @@ public static class NativeMethods
     public static extern bool IsIconic(IntPtr hWnd);
 
     public const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;
+    public const int DWMWA_CLOAKED = 14;
 
     [DllImport("dwmapi.dll")]
     public static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out RECT pvAttribute, int cbAttribute);
+
+    [DllImport("dwmapi.dll", EntryPoint = "DwmGetWindowAttribute")]
+    public static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
 
     public const int DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 = 19;
     public const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
@@ -88,6 +95,13 @@ public static class NativeMethods
         }
     }
 
+    public const int GWL_STYLE = -16;
+    public const int WS_VISIBLE = 0x10000000;
+    public const uint GW_OWNER = 4;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+
     public const int GWL_EXSTYLE = -20;
     public const int WS_EX_LAYERED = 0x00080000;
     public const int WS_EX_TRANSPARENT = 0x00000020;
@@ -99,6 +113,21 @@ public static class NativeMethods
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongW", SetLastError = true)]
     private static extern int GetWindowLong32(IntPtr hWnd, int nIndex);
+
+    public static int GetWindowLong(IntPtr hWnd, int nIndex)
+    {
+        if (hWnd == IntPtr.Zero) return 0;
+        try
+        {
+            return IntPtr.Size == 8
+                ? (int)GetWindowLongPtr64(hWnd, nIndex).ToInt64()
+                : GetWindowLong32(hWnd, nIndex);
+        }
+        catch
+        {
+            return 0;
+        }
+    }
 
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
     private static extern IntPtr SetWindowLongPtr64(IntPtr hWnd, int nIndex, IntPtr dwNewLong);

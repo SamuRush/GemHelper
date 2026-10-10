@@ -391,6 +391,11 @@ public class MediaControlTests
     [InlineData("включи яндекс музыку")]
     public void TryFastMatch_NewMediaContracts_LatencyMustBeUnder5Ms(string phrase)
     {
+        for (int i = 0; i < 5; i++)
+        {
+            _ = LlmIntentService.TryFastMatch(phrase); // Warmup JIT & static structures
+        }
+
         var sw = Stopwatch.StartNew();
         var response = LlmIntentService.TryFastMatch(phrase);
         sw.Stop();

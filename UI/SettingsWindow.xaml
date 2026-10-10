@@ -810,6 +810,13 @@
                                   Foreground="#ECECF1" FontSize="13" Margin="24,4,0,4"
                                   Checked="HudSetting_ValueChanged" Unchecked="HudSetting_ValueChanged"/>
                         <TextBlock Text="Осколки отскакивают от открытых окон Windows (браузер, блокнот, папки) и могут застревать на их рамках с мини-эквалайзером."
+                                   FontSize="11" Foreground="#88889C" Margin="48,0,0,10" TextWrapping="Wrap"/>
+
+                        <!-- Memory Glitch Decryptor Checkbox -->
+                        <CheckBox x:Name="ChkMemoryGlitch" Content="Киберпанк-дешифратор памяти (Cyberpunk Memory Glitch Decryptor)"
+                                  Foreground="#ECECF1" FontSize="13" Margin="24,4,0,4"
+                                  Checked="HudSetting_ValueChanged" Unchecked="HudSetting_ValueChanged"/>
+                        <TextBlock Text="Спавнит динамические блоки сбоев ядра, прерываний и дампов памяти со скоростью 15-20 симв/сек на экране во время перегрузки."
                                    FontSize="11" Foreground="#88889C" Margin="48,0,0,14" TextWrapping="Wrap"/>
 
                         <!-- Color Shift Checkbox -->

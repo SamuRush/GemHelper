@@ -52,6 +52,8 @@ public class FastRoutingTests
     [InlineData("расскажи шутку")]   // Should defer to LLM
     public void TryFastMatch_ExecutionLatency_MustBeStrictlyUnder5Ms(string phrase)
     {
+        _ = LlmIntentService.TryFastMatch(phrase); // Warmup on worker thread
+
         var sw = Stopwatch.StartNew();
         var response = LlmIntentService.TryFastMatch(phrase);
         sw.Stop();
@@ -70,6 +72,9 @@ public class FastRoutingTests
             "диспетчер задач", "сверни все", "скриншот", "скопируй", "вставь",
             "погода", "таймер на 10 секунд", "отмени таймер", "закройся", "выход"
         ];
+
+        // Warmup on worker thread
+        for (int i = 0; i < phrases.Length; i++) _ = LlmIntentService.TryFastMatch(phrases[i]);
 
         var sw = Stopwatch.StartNew();
         for (int i = 0; i < phrases.Length; i++)

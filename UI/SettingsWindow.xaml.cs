@@ -157,6 +157,7 @@ public sealed partial class SettingsWindow : Window
             TxtShardCountVal.Text = $"{hud.ShardCount} шт";
             ChkMouseRepulsion.IsChecked = hud.EnableMouseRepulsion;
             ChkWindowCollisions.IsChecked = hud.EnableWindowCollisions;
+            ChkMemoryGlitch.IsChecked = hud.EnableMemoryGlitch;
 
             TxtCustomCoreColor.Text = hud.CustomCoreColor ?? "#00E5FF";
             TxtCustomGlowColor.Text = hud.CustomGlowColor ?? "#0040FF";
@@ -842,6 +843,7 @@ public sealed partial class SettingsWindow : Window
             OverdriveDuration = SldOverdriveDuration?.Value ?? 10.0,
             EnableMouseRepulsion = ChkMouseRepulsion?.IsChecked == true,
             EnableWindowCollisions = ChkWindowCollisions?.IsChecked == true,
+            EnableMemoryGlitch = ChkMemoryGlitch?.IsChecked == true,
             CustomCoreColor = TxtCustomCoreColor?.Text?.Trim() ?? "#00E5FF",
             CustomGlowColor = TxtCustomGlowColor?.Text?.Trim() ?? "#0040FF",
             CustomRaysColor = TxtCustomRaysColor?.Text?.Trim() ?? "#00FFAA"

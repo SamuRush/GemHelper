@@ -44,6 +44,7 @@ public static class HudSettingsStorage
             ["OverdriveDuration"] = config.OverdriveDuration,
             ["EnableMouseRepulsion"] = config.EnableMouseRepulsion,
             ["EnableWindowCollisions"] = config.EnableWindowCollisions,
+            ["EnableMemoryGlitch"] = config.EnableMemoryGlitch,
             ["CustomCoreColor"] = config.CustomCoreColor,
             ["CustomGlowColor"] = config.CustomGlowColor,
             ["CustomRaysColor"] = config.CustomRaysColor
@@ -110,6 +111,7 @@ public static class HudSettingsStorage
         if (node["OverdriveDuration"]?.GetValue<double>() is double od) config.OverdriveDuration = od;
         if (node["EnableMouseRepulsion"] is { } mr) config.EnableMouseRepulsion = mr.GetValue<bool>();
         if (node["EnableWindowCollisions"] is { } wc) config.EnableWindowCollisions = wc.GetValue<bool>();
+        if (node["EnableMemoryGlitch"] is { } emg) config.EnableMemoryGlitch = emg.GetValue<bool>();
         if (node["CustomCoreColor"]?.GetValue<string>() is string ccc) config.CustomCoreColor = ccc;
         if (node["CustomGlowColor"]?.GetValue<string>() is string cgc) config.CustomGlowColor = cgc;
         if (node["CustomRaysColor"]?.GetValue<string>() is string crc) config.CustomRaysColor = crc;

@@ -5,6 +5,7 @@ using System.Windows.Media;
 using Gem.Core;
 using Gem.Services;
 using Gem.Win32;
+using System.Text;
 
 namespace Gem.UI;
 
@@ -370,6 +371,20 @@ public enum BoundaryEdge : byte
 }
 
 /// <summary>
+/// Three-phase cinematic reassembly states for the reactor core:
+/// Phase 1: Halves remain split with open molten rift while active shards accelerate magnetically and annihilate.
+/// Dramatic Pause: 400ms pause with halves held open at 18px and molten rift humming with tension.
+/// Phase 2: Core halves slam shut with hydraulic spring overshoot, shockwave ring and white seam spark.
+/// </summary>
+public enum ReassemblyPhase : byte
+{
+    None = 0,
+    Phase1_Absorption = 1,
+    DramaticPause = 2,
+    Phase2_Slam = 3
+}
+
+/// <summary>
 /// Lightweight struct representing a single energy shard in the reactor overdrive shatter particle system.
 /// Fixed-size pool in ArcReactorVisualHost guarantees 0 allocations in the render loop.
 /// Supports screen boundary collisions, elastic bounce physics, and stuck shard mini-visualizer.
@@ -408,6 +423,30 @@ public struct ShardParticle
 }
 
 /// <summary>
+/// Lightweight struct representing a cyberpunk memory dump glitch decryptor block.
+/// Fixed-size pool in ArcReactorVisualHost guarantees 0 allocations in the 60 FPS render loop.
+/// Decrypts at 15-20 characters per second and renders formatted text directly via DrawingVisual.
+/// </summary>
+public struct GlitchCodeBlock
+{
+    public bool Active;
+    public double X;
+    public double Y;
+    public double TotalLife;
+    public double Age;
+    public bool IsCrimson;
+    public int LineCount;
+    public int Template0;
+    public int Template1;
+    public int Template2;
+    public int Template3;
+    public int Template4;
+    public int LastDecodedStep;
+    public FormattedText? CachedFormattedText;
+    public FormattedText? CachedGlowFormattedText;
+}
+
+/// <summary>
 /// High-performance holographic Arc Reactor core element rendered at 60 FPS via DrawingVisual.
 /// Replaces the legacy HUD sphere with Tony Stark / JARVIS Arc Reactor visual architecture:
 /// - Layer 1: Radial audio spectrograph crown (128 bilateral procedural rays driven by honest FFT)
@@ -425,12 +464,41 @@ public sealed class ArcReactorVisualHost : FrameworkElement
     private const int DefaultShardCount = 32;
     public const int MaxShardCount = 350;
     public const double ReassemblyDuration = 0.8;
+    public const int MaxGlitchBlocks = 8;
+    public const double GlitchCharsPerSecond = 18.0;
+
+    public static readonly string[] GlitchCodeTemplates = new[]
+    {
+        "0x7FFE9B40 :: MEM_CORRUPTION_DETECTED",
+        "FATAL_CORE_BREACH -> IRQ_OVERRIDE_0x0F",
+        "DISPATCH_THREAD :: GAIN_SATURATION > 140%",
+        "SYS_SIGNAL_TRACE: 0xDEADBEEF [FLUSH]",
+        "STACK_OVERFLOW :: VECTOR_TABLE_COLLAPSE",
+        "SEGFAULT_IN_CORE :: KERNEL_HALT_0x89",
+        "MEM_DECRYPT [0x00FF88] -> BYPASS_OK",
+        "CRITICAL_TEMP :: VOLTAGE_SURGE_9.8V",
+        "BUFFER_UNDERRUN :: WASAPI_STREAM_DESYNC",
+        "DMA_CHANNEL_7 :: ADDR_FAULT_0xBADF00D",
+        "SYNAPSE_FAULT -> NEURAL_DEFORMATION",
+        "QUANTUM_LEAK: ENTROPY_SPIKE +320dB",
+        "KERNEL_PANIC :: RING0_EXCEPTION_0x1C",
+        "AUDIO_DSP_OVERFLOW: 128_BANDS_CLIPPED",
+        "RESONANCE_CASCADE: SUB_BASS_UNSTABLE",
+        "REGISTER_DUMP: EAX=0xDEAD EBX=0xBEEF"
+    };
+
+    private const string GlitchGlyphs = "0123456789ABCDEF$#@%&!*<>/?~_=";
 
     private readonly DrawingVisual _drawingVisual = new();
     private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
     private double _lastTime = 0;
     private double _currentTime = 0;
     private bool _isRenderingHooked = false;
+
+    // Cyberpunk Memory Glitch Decryptor state (fixed pool, zero allocations at 60 FPS)
+    private readonly GlitchCodeBlock[] _glitchBlocks = new GlitchCodeBlock[MaxGlitchBlocks];
+    private readonly StringBuilder _glitchTextBuffer = new(512);
+    private double _glitchSpawnTimer = 0.0;
 
     // Angles for the 5 concentric orbital rings (asynchronous opposite rotation)
     private double _angleRing1 = 0; // Outer tick scale (+14 deg/s)
@@ -466,14 +534,20 @@ public sealed class ArcReactorVisualHost : FrameworkElement
     private bool _wasOverdriveActive = false;
     private bool _shardsExploded = false;
 
-    // Overload Charge Gauge, Split Core, and Reassembly state
+    // Overload Charge Gauge, Split Core, and Two-Phase Reassembly state
     private double _smoothedCharge = 0.0;
     private double _shakeOffsetX = 0.0;
     private double _shakeOffsetY = 0.0;
     private double _overdriveTimer = 0.0;
     private bool _isReassembling = false;
-    private double _reassemblyTimer = 0.0;
+    private ReassemblyPhase _reassemblyPhase = ReassemblyPhase.None;
+    private double _reassemblyPhaseTimer = 0.0;
     private double _sparkFlash = 0.0;
+    private double _detonationTitleBurstTimer = 0.0;
+    private double _shockwaveRadius = 0.0;
+    private double _shockwaveOpacity = 0.0;
+    private double _whiteoutIntensity = 0.0;
+    private double _kickDebounceTimer = 0.0;
 
     // Windows application AABB bounds tracker
     private readonly WindowBoundsTracker _windowTracker = new();
@@ -499,13 +573,39 @@ public sealed class ArcReactorVisualHost : FrameworkElement
     public double OverdriveDuration { get; set; } = 0.0;
     public bool EnableMouseRepulsion { get; set; } = true;
     public bool EnableWindowCollisions { get; set; } = true;
+    public bool EnableMemoryGlitch { get; set; } = true;
     public IntPtr HostHwnd { get; set; } = IntPtr.Zero;
     public bool IsOverdriveActive { get; private set; } = false;
     public double OverdriveProgress { get; private set; } = 0.0;
     public double CooldownRemaining => _cooldownTimer;
     public bool IsOnCooldown => _cooldownTimer > 0.0;
     public bool IsReassembling => _isReassembling;
+    public ReassemblyPhase CurrentReassemblyPhase => _reassemblyPhase;
+    public bool IsOverrideTitleVisible => (_smoothedCharge >= 0.80 && !IsOverdriveActive) || _detonationTitleBurstTimer > 0.0;
+    public double ShockwaveRadius => _shockwaveRadius;
+    public double ShockwaveOpacity => _shockwaveOpacity;
+    public double WhiteoutIntensity => _whiteoutIntensity;
+    public double OverdriveRemainingTimer => _overdriveTimer;
+    public WindowBoundsTracker WindowTracker => _windowTracker;
     public double OverloadCharge => _smoothedCharge;
+    public int ActiveGlitchBlockCount
+    {
+        get
+        {
+            int count = 0;
+            for (int i = 0; i < MaxGlitchBlocks; i++)
+            {
+                if (_glitchBlocks[i].Active) count++;
+            }
+            return count;
+        }
+    }
+    public GlitchCodeBlock[] GetGlitchBlocksSnapshot()
+    {
+        var snapshot = new GlitchCodeBlock[MaxGlitchBlocks];
+        Array.Copy(_glitchBlocks, snapshot, MaxGlitchBlocks);
+        return snapshot;
+    }
     public int ShardCount
     {
         get => _activeShardCount;
@@ -535,6 +635,7 @@ public sealed class ArcReactorVisualHost : FrameworkElement
     private readonly StreamGeometry _biomorphicFaceGeometry = new();
     private readonly StreamGeometry _dynamicCrackGeometry = new();
     private readonly StreamGeometry _dynamicSparkGeometry = new();
+    private readonly StreamGeometry _dynamicTitleSparkGeometry = new();
     private readonly StreamGeometry _dynamicChargeGaugeGeometry = new();
 
     // Reusable clip rectangles and split transforms for split core fracture
@@ -551,6 +652,9 @@ public sealed class ArcReactorVisualHost : FrameworkElement
     private readonly RotateTransform _rotRing4 = new();
     private readonly RotateTransform _rotRing5 = new();
     private readonly TranslateTransform _transCenter = new();
+    private readonly ScaleTransform _titleScaleTransform = new();
+    private readonly TranslateTransform _titleTranslateTransform = new();
+    private readonly TransformGroup _titleTransformGroup = new();
 
     // Static frozen resources shared across all instances
     private static readonly SolidColorBrush StaticWhiteBrush;
@@ -559,11 +663,39 @@ public sealed class ArcReactorVisualHost : FrameworkElement
     private static readonly Pen StaticBiomorphicThickPen;
     private static readonly SolidColorBrush StaticBiomorphicNodeBrush;
 
+    private static readonly Pen StaticOverloadGaugeTrackPen;
     private static readonly Pen StaticOverloadGaugeHotPen;
     private static readonly RadialGradientBrush StaticMoltenRiftBrush;
     private static readonly Pen StaticCrackPen;
     private static readonly Pen StaticSparkPen;
     private static readonly RadialGradientBrush StaticSparkHaloBrush;
+    private static readonly RadialGradientBrush StaticCoreWhiteoutBrush;
+    private static readonly Geometry StaticOverrideTextGeometry;
+    private static readonly SolidColorBrush StaticCyanGlitchBrush;
+    private static readonly SolidColorBrush StaticCrimsonGlitchBrush;
+    private static readonly Pen[] StaticShockwavePens = PrecomputeShockwavePens();
+
+    private static readonly Typeface StaticGlitchTypeface;
+    private static readonly SolidColorBrush StaticGlitchCrimsonBrush;
+    private static readonly SolidColorBrush StaticGlitchCrimsonGlowBrush;
+    private static readonly SolidColorBrush StaticGlitchCyanBrush;
+    private static readonly SolidColorBrush StaticGlitchCyanGlowBrush;
+    private static readonly SolidColorBrush StaticGlitchDarkBackdropBrush;
+    private static readonly Pen StaticGlitchCrimsonBorderPen;
+    private static readonly Pen StaticGlitchCyanBorderPen;
+
+    private static Pen[] PrecomputeShockwavePens()
+    {
+        var pens = new Pen[32];
+        for (int i = 0; i < 32; i++)
+        {
+            byte alpha = (byte)Math.Clamp((int)(i / 31.0 * 255.0), 0, 255);
+            var pen = new Pen(new SolidColorBrush(Color.FromArgb(alpha, 0x00, 0xE5, 0xFF)), 3.0);
+            pen.Freeze();
+            pens[i] = pen;
+        }
+        return pens;
+    }
 
     static ArcReactorVisualHost()
     {
@@ -579,6 +711,12 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         StaticBiomorphicThickPen.Freeze();
 
         StaticBiomorphicNodeBrush = StaticWhiteBrush;
+
+        StaticOverloadGaugeTrackPen = new Pen(new SolidColorBrush(Color.FromArgb(45, 255, 255, 255)), 1.4)
+        {
+            DashStyle = new DashStyle(new double[] { 1, 3 }, 0)
+        };
+        StaticOverloadGaugeTrackPen.Freeze();
 
         StaticOverloadGaugeHotPen = new Pen(new SolidColorBrush(Color.FromRgb(0xFF, 0x00, 0x3C)), 2.4);
         StaticOverloadGaugeHotPen.Freeze();
@@ -613,6 +751,61 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         StaticSparkHaloBrush.GradientStops.Add(new GradientStop(Color.FromArgb(150, 0, 229, 255), 0.5));
         StaticSparkHaloBrush.GradientStops.Add(new GradientStop(Color.FromArgb(0, 0, 229, 255), 1.0));
         StaticSparkHaloBrush.Freeze();
+
+        StaticCoreWhiteoutBrush = new RadialGradientBrush
+        {
+            GradientOrigin = new Point(0.5, 0.5),
+            Center = new Point(0.5, 0.5),
+            RadiusX = 0.5,
+            RadiusY = 0.5
+        };
+        StaticCoreWhiteoutBrush.GradientStops.Add(new GradientStop(Color.FromArgb(255, 255, 255, 255), 0.0));
+        StaticCoreWhiteoutBrush.GradientStops.Add(new GradientStop(Color.FromArgb(250, 255, 255, 255), 0.45));
+        StaticCoreWhiteoutBrush.GradientStops.Add(new GradientStop(Color.FromArgb(190, 225, 250, 255), 0.75));
+        StaticCoreWhiteoutBrush.GradientStops.Add(new GradientStop(Color.FromArgb(0, 200, 240, 255), 1.0));
+        StaticCoreWhiteoutBrush.Freeze();
+
+        StaticCyanGlitchBrush = new SolidColorBrush(Color.FromArgb(210, 0, 229, 255));
+        StaticCyanGlitchBrush.Freeze();
+
+        StaticCrimsonGlitchBrush = new SolidColorBrush(Color.FromArgb(210, 255, 0, 60));
+        StaticCrimsonGlitchBrush.Freeze();
+
+        var typeface = new Typeface(new FontFamily("Consolas, Courier New, monospace"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal);
+        var formattedText = new FormattedText(
+            "OVERRIDE!",
+            System.Globalization.CultureInfo.InvariantCulture,
+            FlowDirection.LeftToRight,
+            typeface,
+            18.0,
+            Brushes.White,
+            1.0
+        );
+        StaticOverrideTextGeometry = formattedText.BuildGeometry(new Point(-formattedText.Width / 2.0, -formattedText.Height / 2.0));
+        StaticOverrideTextGeometry.Freeze();
+
+        StaticGlitchTypeface = new Typeface(new FontFamily("Consolas, Cascadia Code, Lucida Console, monospace"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal);
+
+        StaticGlitchCrimsonBrush = new SolidColorBrush(Color.FromRgb(0xFF, 0x00, 0x3C));
+        StaticGlitchCrimsonBrush.Freeze();
+
+        StaticGlitchCrimsonGlowBrush = new SolidColorBrush(Color.FromArgb(110, 0xFF, 0x00, 0x3C));
+        StaticGlitchCrimsonGlowBrush.Freeze();
+
+        StaticGlitchCyanBrush = new SolidColorBrush(Color.FromRgb(0x00, 0xE5, 0xFF));
+        StaticGlitchCyanBrush.Freeze();
+
+        StaticGlitchCyanGlowBrush = new SolidColorBrush(Color.FromArgb(110, 0x00, 0xE5, 0xFF));
+        StaticGlitchCyanGlowBrush.Freeze();
+
+        StaticGlitchDarkBackdropBrush = new SolidColorBrush(Color.FromArgb(180, 8, 12, 18));
+        StaticGlitchDarkBackdropBrush.Freeze();
+
+        StaticGlitchCrimsonBorderPen = new Pen(new SolidColorBrush(Color.FromArgb(140, 0xFF, 0x00, 0x3C)), 1.0);
+        StaticGlitchCrimsonBorderPen.Freeze();
+
+        StaticGlitchCyanBorderPen = new Pen(new SolidColorBrush(Color.FromArgb(140, 0x00, 0xE5, 0xFF)), 1.0);
+        StaticGlitchCyanBorderPen.Freeze();
     }
 
     public AudioSpectrumAnalyzer SpectrumAnalyzer => _analyzer;
@@ -653,6 +846,7 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         OverdriveDuration = config.OverdriveDuration;
         EnableMouseRepulsion = config.EnableMouseRepulsion;
         EnableWindowCollisions = config.EnableWindowCollisions;
+        EnableMemoryGlitch = config.EnableMemoryGlitch;
 
         if (CurrentTheme == HudColorTheme.Custom)
         {
@@ -678,6 +872,9 @@ public sealed class ArcReactorVisualHost : FrameworkElement
     {
         AddVisualChild(_drawingVisual);
         AddLogicalChild(_drawingVisual);
+
+        _titleTransformGroup.Children.Add(_titleScaleTransform);
+        _titleTransformGroup.Children.Add(_titleTranslateTransform);
 
         PrecomputeTrigonometry();
         BuildStaticGeometries();
@@ -731,33 +928,87 @@ public sealed class ArcReactorVisualHost : FrameworkElement
             _cooldownTimer = Math.Max(0.0, _cooldownTimer - dt);
         }
 
-        // 2. Update reassembly timer
+        if (_kickDebounceTimer > 0.0)
+        {
+            _kickDebounceTimer = Math.Max(0.0, _kickDebounceTimer - dt);
+        }
+
+        // 2. Update reassembly state machine
         if (_isReassembling)
         {
-            _reassemblyTimer -= dt;
-            if (_reassemblyTimer <= 0.0)
+            if (_reassemblyPhase == ReassemblyPhase.DramaticPause)
             {
-                _isReassembling = false;
-                _reassemblyTimer = 0.0;
-                _sparkFlash = 1.0;
-                _cooldownTimer = OverdriveCooldown;
-                for (int i = 0; i < _activeShardCount; i++)
+                _reassemblyPhaseTimer -= dt;
+                if (_reassemblyPhaseTimer <= 0.0)
                 {
-                    _shards[i].Active = false;
-                    _shards[i].IsStuck = false;
+                    _reassemblyPhase = ReassemblyPhase.Phase2_Slam;
+                    _reassemblyPhaseTimer = 0.0;
+                    _sparkFlash = 0.0;
+                    _shockwaveRadius = 80.0;
+                    _shockwaveOpacity = 0.0;
+                    _whiteoutIntensity = 0.0;
+                    _cooldownTimer = OverdriveCooldown;
+                }
+            }
+            else if (_reassemblyPhase == ReassemblyPhase.Phase2_Slam)
+            {
+                _reassemblyPhaseTimer += dt;
+                double t = _reassemblyPhaseTimer;
+
+                // Step 3: Core Whiteout (60-80 ms plasma flash in impact window t in [0.20, 0.28])
+                if (t >= 0.20 && t < 0.28)
+                {
+                    double wT = (t - 0.20) / 0.08;
+                    _whiteoutIntensity = Math.Max(0.0, 1.0 - wT);
+                }
+                else
+                {
+                    _whiteoutIntensity = 0.0;
+                }
+
+                // Step 4: Shockwave Blast (expanding radius 80 -> 370 px, opacity 1.0 -> 0.0 over 300 ms for t in [0.20, 0.50])
+                if (t >= 0.20)
+                {
+                    double shockT = Math.Clamp((t - 0.20) / 0.30, 0.0, 1.0);
+                    _shockwaveRadius = 80.0 + shockT * 290.0; // from 80.0 to 370.0 px
+                    _shockwaveOpacity = Math.Max(0.0, 1.0 - shockT);
+                }
+                else
+                {
+                    _shockwaveRadius = 80.0;
+                    _shockwaveOpacity = 0.0;
+                }
+
+                if (_reassemblyPhaseTimer >= 0.50)
+                {
+                    _reassemblyPhase = ReassemblyPhase.None;
+                    _isReassembling = false;
+                    _shockwaveOpacity = 0.0;
+                    _whiteoutIntensity = 0.0;
+                    OverdriveProgress = 0.0;
                 }
             }
         }
 
-        if (_sparkFlash > 0.0)
+        if (_reassemblyPhase == ReassemblyPhase.Phase2_Slam && _reassemblyPhaseTimer >= 0.20 && _reassemblyPhaseTimer < 0.35)
+        {
+            _sparkFlash = Math.Max(0.0, 1.0 - (_reassemblyPhaseTimer - 0.20) / 0.15);
+        }
+        else if (_sparkFlash > 0.0)
         {
             _sparkFlash = Math.Max(0.0, _sparkFlash - dt * 4.0);
+        }
+
+        if (_detonationTitleBurstTimer > 0.0)
+        {
+            _detonationTitleBurstTimer = Math.Max(0.0, _detonationTitleBurstTimer - dt);
         }
 
         if (!EnableShatterOverdrive && !EnableFullscreenOverdrive)
         {
             IsOverdriveActive = false;
             _isReassembling = false;
+            _reassemblyPhase = ReassemblyPhase.None;
             _bassEnergyAccumulator = 0.0;
             OverdriveProgress = Math.Max(0.0, OverdriveProgress - dt * 4.0);
             UpdateShardsPhysics(dt, beatIntensity, subBassEnergy);
@@ -768,6 +1019,7 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         float triggerThreshold = (float)Math.Clamp(OverdriveThreshold, 0.40, 1.50);
         float inputGate = 0.45f * (triggerThreshold / 0.85f);
         float combined = subBassEnergy * 0.6f + beatIntensity * 0.4f;
+        double maxDuration = OverdriveDuration > 0.0 ? OverdriveDuration : 10.0;
 
         if (_cooldownTimer > 0.0)
         {
@@ -779,17 +1031,12 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         {
             if (combined > inputGate)
             {
-                _bassEnergyAccumulator += (combined - inputGate * 0.75f) * dt * 2.5;
+                // Smooth exponential accumulation rate requiring 2.5 - 3.5 seconds of steady dense bass
+                _bassEnergyAccumulator += (combined - inputGate * 0.75f) * dt * 0.40;
             }
             else
             {
-                _bassEnergyAccumulator -= dt * 2.0;
-            }
-
-            // Sudden drop / peak hit kick
-            if (beatIntensity > 0.90f && subBassEnergy > 0.80f)
-            {
-                _bassEnergyAccumulator = Math.Max(_bassEnergyAccumulator, (double)triggerThreshold);
+                _bassEnergyAccumulator -= dt * 0.45;
             }
 
             _bassEnergyAccumulator = Math.Clamp(_bassEnergyAccumulator, 0.0, 2.0);
@@ -797,30 +1044,43 @@ public sealed class ArcReactorVisualHost : FrameworkElement
             if (!IsOverdriveActive && !_isReassembling && _bassEnergyAccumulator >= triggerThreshold)
             {
                 IsOverdriveActive = true;
-                _overdriveTimer = OverdriveDuration;
+                _overdriveTimer = maxDuration;
                 _isReassembling = false;
-                _reassemblyTimer = 0.0;
+                _reassemblyPhase = ReassemblyPhase.None;
+                _reassemblyPhaseTimer = 0.0;
                 _sparkFlash = 0.0;
+                _detonationTitleBurstTimer = 2.0; // 2.0 seconds post-detonation title burst
             }
             else if (IsOverdriveActive)
             {
-                if (OverdriveDuration > 0.0)
+                // Strict Timer Refresh Cap (Refresh, NOT Accumulation):
+                // When an incoming powerful bass kick arrives, if remaining time is less than maxDuration,
+                // reset the timer back to maxDuration.
+                // The timer MUST NEVER, under any circumstances, exceed maxDuration!
+                if (combined > inputGate * 1.15f && _kickDebounceTimer <= 0.0)
                 {
-                    _overdriveTimer -= dt;
-                    if (_overdriveTimer <= 0.0)
+                    _kickDebounceTimer = 0.25;
+                    if (_overdriveTimer < maxDuration)
                     {
-                        IsOverdriveActive = false;
-                        _isReassembling = true;
-                        _reassemblyTimer = ReassemblyDuration;
+                        _overdriveTimer = maxDuration;
                     }
                 }
-                else
+
+                // Strictly ensure timer never exceeds maxDuration
+                _overdriveTimer = Math.Min(_overdriveTimer, maxDuration);
+
+                // Honest countdown by dt without delay when music calms down
+                _overdriveTimer -= dt;
+                if (_overdriveTimer <= 0.0)
                 {
-                    if (_bassEnergyAccumulator <= triggerThreshold * 0.35)
+                    IsOverdriveActive = false;
+                    _isReassembling = true;
+                    _reassemblyPhase = ReassemblyPhase.Phase1_Absorption;
+                    _reassemblyPhaseTimer = 1.8; // 1.8s absorption duration
+                    for (int i = 0; i < _activeShardCount; i++)
                     {
-                        IsOverdriveActive = false;
-                        _isReassembling = true;
-                        _reassemblyTimer = ReassemblyDuration;
+                        _shards[i].IsStuck = false;
+                        _shards[i].StuckEdge = BoundaryEdge.None;
                     }
                 }
             }
@@ -834,8 +1094,22 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         }
         else if (_isReassembling)
         {
-            double rProg = Math.Clamp(1.0 - (_reassemblyTimer / ReassemblyDuration), 0.0, 1.0);
-            OverdriveProgress = 1.0 - rProg;
+            if (_reassemblyPhase == ReassemblyPhase.Phase1_Absorption || _reassemblyPhase == ReassemblyPhase.DramaticPause)
+            {
+                OverdriveProgress = 1.0;
+            }
+            else if (_reassemblyPhase == ReassemblyPhase.Phase2_Slam)
+            {
+                if (_reassemblyPhaseTimer < 0.20)
+                {
+                    OverdriveProgress = 1.0;
+                }
+                else
+                {
+                    double coolT = Math.Clamp((_reassemblyPhaseTimer - 0.20) / 0.30, 0.0, 1.0);
+                    OverdriveProgress = 1.0 - coolT;
+                }
+            }
         }
         else
         {
@@ -860,7 +1134,7 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         // Update charge ratio & screen jitter
         double rawCharge = (_cooldownTimer > 0.0 || _isReassembling) ? 0.0 : Math.Clamp(_bassEnergyAccumulator / triggerThreshold, 0.0, 1.0);
         if (IsOverdriveActive) rawCharge = 1.0;
-        _smoothedCharge += (rawCharge - _smoothedCharge) * Math.Clamp(dt * 7.0, 0.0, 1.0);
+        _smoothedCharge += (rawCharge - _smoothedCharge) * Math.Clamp(dt * 4.0, 0.0, 1.0);
 
         if (_smoothedCharge > 0.80)
         {
@@ -876,6 +1150,11 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         }
 
         UpdateShardsPhysics(dt, beatIntensity, subBassEnergy);
+
+        Point center = Center;
+        double boundsW = ActualWidth > 0 ? ActualWidth : (SystemParameters.PrimaryScreenWidth > 0 ? SystemParameters.PrimaryScreenWidth : 1920.0);
+        double boundsH = ActualHeight > 0 ? ActualHeight : (SystemParameters.PrimaryScreenHeight > 0 ? SystemParameters.PrimaryScreenHeight : 1080.0);
+        UpdateGlitchBlocks(dt, _currentTime > 0 ? _currentTime : _stopwatch.Elapsed.TotalSeconds, boundsW, boundsH, center);
 
         OnOverdriveFrame?.Invoke(IsOverdriveActive, OverdriveProgress, beatIntensity);
     }
@@ -913,11 +1192,15 @@ public sealed class ArcReactorVisualHost : FrameworkElement
             _shardsExploded = false;
         }
 
-        // Update top-level application window boundaries tracker
-        if (EnableWindowCollisions)
+        // JIT Window Tracking: only query EnumWindows when preparing (> 50% charge) or active overdrive
+        if (EnableWindowCollisions && (_smoothedCharge > 0.50 || IsOverdriveActive))
         {
             double nowTime = _currentTime > 0 ? _currentTime : _stopwatch.Elapsed.TotalSeconds;
             _windowTracker.Update(HostHwnd, nowTime, boundsW, boundsH);
+        }
+        else
+        {
+            _windowTracker.Clear();
         }
 
         // Mouse repulsion physics (Win32 GetCursorPos)
@@ -1056,39 +1339,71 @@ public sealed class ArcReactorVisualHost : FrameworkElement
                 }
             }
         }
-        else
+        else if (_isReassembling && _reassemblyPhase == ReassemblyPhase.Phase1_Absorption)
         {
-            // Reassembly / Magnetic Recall phase: all particles detach and fly back into core
-            double pullSpeed = _isReassembling
-                ? 8.0 + (1.0 - (_reassemblyTimer / ReassemblyDuration)) * 14.0
-                : 7.5;
-            double recallLerp = Math.Clamp(dt * pullSpeed, 0.0, 1.0);
+            // Phase 1 (Absorption): Core halves stay wide open at 18px with rift exposed.
+            // All active & stuck shards detach and accelerate magnetically into the open rift,
+            // annihilating upon touching the center (dist <= 22px).
+            int activeCount = 0;
+            double pullLerp = Math.Clamp(dt * (11.0 + (1.0 - _reassemblyPhaseTimer) * 12.0), 0.0, 1.0);
 
             for (int i = 0; i < _activeShardCount; i++)
             {
+                if (!_shards[i].Active) continue;
+
                 _shards[i].IsStuck = false;
                 _shards[i].StuckEdge = BoundaryEdge.None;
 
-                double targetX = center.X + _shards[i].BaseRadius * Math.Cos(_shards[i].BaseAngle);
-                double targetY = center.Y + _shards[i].BaseRadius * Math.Sin(_shards[i].BaseAngle);
+                double dx = center.X - _shards[i].X;
+                double dy = center.Y - _shards[i].Y;
+                double dist = Math.Sqrt(dx * dx + dy * dy);
 
-                _shards[i].X += (targetX - _shards[i].X) * recallLerp;
-                _shards[i].Y += (targetY - _shards[i].Y) * recallLerp;
+                if (dist <= 22.0)
+                {
+                    // Annihilated inside open rift!
+                    _shards[i].Active = false;
+                    _shards[i].Life = 0f;
+                    _shards[i].Vx = 0.0;
+                    _shards[i].Vy = 0.0;
+                }
+                else
+                {
+                    activeCount++;
+                    // Strong magnetic tractor beam pulling directly into (cx, cy)
+                    _shards[i].X += dx * pullLerp;
+                    _shards[i].Y += dy * pullLerp;
+                    _shards[i].Rotation += _shards[i].RotSpeed * dt * 2.0;
+                    _shards[i].Life = (float)Math.Clamp(dist / 90.0, 0.2, 1.0);
+                }
+            }
 
-                double dx = _shards[i].X - center.X;
-                double dy = _shards[i].Y - center.Y;
-                _shards[i].CurrentRadius = Math.Sqrt(dx * dx + dy * dy);
-
-                _shards[i].Rotation += _shards[i].RotSpeed * dt * 0.4;
-                _shards[i].Life = (float)Math.Clamp(OverdriveProgress * (0.65f + beatIntensity * 0.35f), 0.0, 1.0);
-                _shards[i].Active = OverdriveProgress > 0.02;
+            _reassemblyPhaseTimer -= dt;
+            if (activeCount == 0 || _reassemblyPhaseTimer <= 0.0)
+            {
+                // All particles absorbed: Transition to Dramatic Pause (400 ms) before hydraulic slam!
+                for (int i = 0; i < _activeShardCount; i++)
+                {
+                    _shards[i].Active = false;
+                    _shards[i].Life = 0f;
+                }
+                _reassemblyPhase = ReassemblyPhase.DramaticPause;
+                _reassemblyPhaseTimer = 0.40;
+            }
+        }
+        else
+        {
+            // Outside overdrive/Phase 1: all shards inactive
+            for (int i = 0; i < _activeShardCount; i++)
+            {
+                _shards[i].Active = false;
+                _shards[i].IsStuck = false;
             }
         }
     }
 
     private void CheckWindowCollisions(ref ShardParticle shard)
     {
-        if (!EnableWindowCollisions) return;
+        if (!EnableWindowCollisions || _windowTracker.Count == 0) return;
         int count = _windowTracker.Count;
         var bounds = _windowTracker.Bounds;
 
@@ -1180,15 +1495,15 @@ public sealed class ArcReactorVisualHost : FrameworkElement
     private void CheckBoundaryCollisions(ref ShardParticle shard, double boundsW, double boundsH)
     {
         // Left boundary
-        if (shard.X <= 0)
+        if (shard.X <= 2.0)
         {
-            shard.X = 0;
+            shard.X = 2.0;
             if (_rand.NextDouble() < 0.07)
             {
                 shard.IsStuck = true;
                 shard.StuckEdge = BoundaryEdge.Left;
-                shard.StuckX = 0;
-                shard.StuckY = shard.Y;
+                shard.StuckX = 2.0;
+                shard.StuckY = Math.Clamp(shard.Y, 2.0, boundsH - 2.0);
                 shard.StuckAngle = 0.0; // Inward normal points right (+X)
                 shard.Vx = 0; shard.Vy = 0;
                 return;
@@ -1198,15 +1513,15 @@ public sealed class ArcReactorVisualHost : FrameworkElement
             shard.Vy = (shard.Vy + (_rand.NextDouble() - 0.5) * Math.Abs(shard.Vx) * 0.35) * bounce;
         }
         // Right boundary
-        else if (shard.X >= boundsW)
+        else if (shard.X >= boundsW - 2.0)
         {
-            shard.X = boundsW;
+            shard.X = boundsW - 2.0;
             if (_rand.NextDouble() < 0.07)
             {
                 shard.IsStuck = true;
                 shard.StuckEdge = BoundaryEdge.Right;
-                shard.StuckX = boundsW;
-                shard.StuckY = shard.Y;
+                shard.StuckX = boundsW - 2.0;
+                shard.StuckY = Math.Clamp(shard.Y, 2.0, boundsH - 2.0);
                 shard.StuckAngle = Math.PI; // Inward normal points left (-X)
                 shard.Vx = 0; shard.Vy = 0;
                 return;
@@ -1217,15 +1532,15 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         }
 
         // Top boundary
-        if (shard.Y <= 0)
+        if (shard.Y <= 2.0)
         {
-            shard.Y = 0;
+            shard.Y = 2.0;
             if (_rand.NextDouble() < 0.07)
             {
                 shard.IsStuck = true;
                 shard.StuckEdge = BoundaryEdge.Top;
-                shard.StuckX = shard.X;
-                shard.StuckY = 0;
+                shard.StuckX = Math.Clamp(shard.X, 2.0, boundsW - 2.0);
+                shard.StuckY = 2.0;
                 shard.StuckAngle = Math.PI / 2.0; // Inward normal points down (+Y)
                 shard.Vx = 0; shard.Vy = 0;
                 return;
@@ -1235,15 +1550,15 @@ public sealed class ArcReactorVisualHost : FrameworkElement
             shard.Vx = (shard.Vx + (_rand.NextDouble() - 0.5) * Math.Abs(shard.Vy) * 0.35) * bounce;
         }
         // Bottom boundary
-        else if (shard.Y >= boundsH)
+        else if (shard.Y >= boundsH - 2.0)
         {
-            shard.Y = boundsH;
+            shard.Y = boundsH - 2.0;
             if (_rand.NextDouble() < 0.07)
             {
                 shard.IsStuck = true;
                 shard.StuckEdge = BoundaryEdge.Bottom;
-                shard.StuckX = shard.X;
-                shard.StuckY = boundsH;
+                shard.StuckX = Math.Clamp(shard.X, 2.0, boundsW - 2.0);
+                shard.StuckY = boundsH - 2.0;
                 shard.StuckAngle = -Math.PI / 2.0; // Inward normal points up (-Y)
                 shard.Vx = 0; shard.Vy = 0;
                 return;
@@ -1576,6 +1891,53 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         }
     }
 
+    /// <summary>
+    /// Calculates horizontal split distance of core halves in pixels based on overdrive/reassembly kinematics.
+    /// Choreography:
+    /// - Overdrive active: OverdriveProgress * 18.0 px
+    /// - Phase 1 (Absorption) &amp; Dramatic Pause: held wide at 18.0 px
+    /// - Phase 2 (Hyper Slam):
+    ///   * Step 1: Anticipation / Inhale (120 ms, t in [0.0, 0.12]): widens further from 18px to 22px
+    ///   * Step 2: Hyper Slam (80 ms, t in [0.12, 0.20]): EaseInExpo p^4 slam inward from 22px to 0px at t = 0.20
+    ///   * Step 5: Heavy Mechanical Settle (300 ms, t in [0.20, 0.50]): damped spring oscillations settling rock-solid
+    /// </summary>
+    public double CalculateSplitDistance()
+    {
+        if (IsOverdriveActive)
+        {
+            return OverdriveProgress * 18.0;
+        }
+        else if (_isReassembling)
+        {
+            if (_reassemblyPhase == ReassemblyPhase.Phase1_Absorption || _reassemblyPhase == ReassemblyPhase.DramaticPause)
+            {
+                return 18.0;
+            }
+            else if (_reassemblyPhase == ReassemblyPhase.Phase2_Slam)
+            {
+                double t = _reassemblyPhaseTimer;
+                if (t < 0.12)
+                {
+                    // Step 1: Anticipation / Inhale (120 ms)
+                    return 18.0 + 4.0 * Math.Sin((t / 0.12) * Math.PI / 2.0);
+                }
+                else if (t < 0.20)
+                {
+                    // Step 2: Hyper Slam (80 ms)
+                    double p = (t - 0.12) / 0.08;
+                    return 22.0 * (1.0 - p * p * p * p);
+                }
+                else
+                {
+                    // Step 5: Heavy Mechanical Settle (300 ms)
+                    double tau = t - 0.20;
+                    return Math.Max(0.0, 3.6 * Math.Exp(-14.0 * tau) * Math.Cos(45.0 * tau));
+                }
+            }
+        }
+        return 0.0;
+    }
+
     private void RenderFrame(double now)
     {
         Point center = Center;
@@ -1613,17 +1975,7 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         double shatterImpulse = OverdriveProgress * 14.0;
 
         // Split core calculation (two diverging halves exposing molten energy rift)
-        double splitDistance = 0.0;
-        if (IsOverdriveActive)
-        {
-            splitDistance = OverdriveProgress * 18.0;
-        }
-        else if (_isReassembling)
-        {
-            double rProg = Math.Clamp(1.0 - (_reassemblyTimer / ReassemblyDuration), 0.0, 1.0);
-            double overshoot = Math.Sin(rProg * Math.PI) * 3.5;
-            splitDistance = Math.Max(0.0, 18.0 * (1.0 - rProg) - overshoot);
-        }
+        double splitDistance = CalculateSplitDistance();
 
         using (DrawingContext dc = _drawingVisual.RenderOpen())
         {
@@ -1633,6 +1985,9 @@ public sealed class ArcReactorVisualHost : FrameworkElement
             // OVERLOAD CHARGE GAUGE ARC (0% to 100% circular meter)
             // Fills as bass density accumulates. Pulses hot red when > 80%.
             // =================================================================
+            // Background track ring
+            dc.DrawEllipse(null, StaticOverloadGaugeTrackPen, center, 80.0, 80.0);
+
             if (_smoothedCharge > 0.02)
             {
                 double sweepAngle = Math.Min(359.9, _smoothedCharge * 360.0);
@@ -1640,17 +1995,113 @@ public sealed class ArcReactorVisualHost : FrameworkElement
                 double startAngle = -Math.PI / 2.0;
                 double endAngle = startAngle + sweepRad;
 
-                Point pStart = new Point(cx + 78.0 * Math.Cos(startAngle), cy + 78.0 * Math.Sin(startAngle));
-                Point pEnd = new Point(cx + 78.0 * Math.Cos(endAngle), cy + 78.0 * Math.Sin(endAngle));
+                Point pStart = new Point(cx + 80.0 * Math.Cos(startAngle), cy + 80.0 * Math.Sin(startAngle));
+                Point pEnd = new Point(cx + 80.0 * Math.Cos(endAngle), cy + 80.0 * Math.Sin(endAngle));
                 bool isLargeArc = sweepAngle > 180.0;
 
                 using (var gCtx = _dynamicChargeGaugeGeometry.Open())
                 {
                     gCtx.BeginFigure(pStart, false, false);
-                    gCtx.ArcTo(pEnd, new Size(78.0, 78.0), 0, isLargeArc, SweepDirection.Clockwise, true, false);
+                    gCtx.ArcTo(pEnd, new Size(80.0, 80.0), 0, isLargeArc, SweepDirection.Clockwise, true, false);
                 }
                 Pen gaugePen = _smoothedCharge > 0.80 ? StaticOverloadGaugeHotPen : pal.PrimaryPen;
                 dc.DrawGeometry(null, gaugePen, _dynamicChargeGaugeGeometry);
+
+                // Tip indicator dot
+                dc.DrawEllipse(StaticTipBrush, null, pEnd, 2.2, 2.2);
+            }
+
+            // =================================================================
+            // CYBERPUNK OVERRIDE TITLE (80%..100% charge & 2.0s detonation burst)
+            // Monospaced bold text with chromatic aberration (cyan/crimson offsets)
+            // and horizontal glitch jitter. On detonation: scale jump + neon pulse.
+            // =================================================================
+            bool showTitle = (_smoothedCharge >= 0.80 && !IsOverdriveActive) || _detonationTitleBurstTimer > 0.0;
+            if (showTitle)
+            {
+                double titleScale = 1.0;
+                double titleAlpha = 1.0;
+                double jitterX = 0.0;
+                double jitterY = 0.0;
+
+                if (_detonationTitleBurstTimer > 0.0)
+                {
+                    double burstElapsed = 2.0 - _detonationTitleBurstTimer;
+                    if (burstElapsed < 0.30)
+                    {
+                        double jumpT = burstElapsed / 0.30;
+                        titleScale = 1.0 + Math.Sin(jumpT * Math.PI) * 0.35;
+                    }
+                    else
+                    {
+                        titleScale = 1.0 + 0.05 * Math.Sin(now * 22.0); // neon pulse
+                    }
+
+                    if (_detonationTitleBurstTimer < 0.50)
+                    {
+                        titleAlpha = Math.Clamp(_detonationTitleBurstTimer / 0.50, 0.0, 1.0);
+                    }
+                    else
+                    {
+                        titleAlpha = 1.0;
+                    }
+
+                    jitterX = (_rand.NextDouble() - 0.5) * 4.0;
+                    jitterY = (_rand.NextDouble() - 0.5) * 2.5;
+                }
+                else
+                {
+                    double chargeIntensity = Math.Clamp((_smoothedCharge - 0.80) / 0.20, 0.0, 1.0);
+                    titleScale = 1.0 + chargeIntensity * 0.08 * Math.Sin(now * 15.0);
+                    jitterX = (_rand.NextDouble() - 0.5) * 3.5 * chargeIntensity;
+                    jitterY = (_rand.NextDouble() - 0.5) * 1.8 * chargeIntensity;
+                }
+
+                bool isFlickerVisible = (_detonationTitleBurstTimer > 0.0) || (Math.Sin(now * 38.0) > -0.45);
+                if (isFlickerVisible && titleAlpha > 0.05)
+                {
+                    _titleScaleTransform.ScaleX = titleScale;
+                    _titleScaleTransform.ScaleY = titleScale;
+                    _titleTranslateTransform.X = cx + jitterX;
+                    _titleTranslateTransform.Y = (cy - 88.0) + jitterY;
+
+                    dc.PushTransform(_titleTransformGroup);
+
+                    double glitchOffset = 2.4 + Math.Sin(now * 32.0) * 1.2;
+
+                    // 1. Cyan layer offset left
+                    _titleTranslateTransform.X -= glitchOffset;
+                    dc.DrawGeometry(StaticCyanGlitchBrush, null, StaticOverrideTextGeometry);
+
+                    // 2. Crimson layer offset right
+                    _titleTranslateTransform.X += (glitchOffset * 2.0);
+                    dc.DrawGeometry(StaticCrimsonGlitchBrush, null, StaticOverrideTextGeometry);
+
+                    // 3. Center white layer
+                    _titleTranslateTransform.X -= glitchOffset;
+                    dc.DrawGeometry(StaticWhiteBrush, null, StaticOverrideTextGeometry);
+
+                    dc.Pop(); // _titleTransformGroup
+                }
+
+                if (_detonationTitleBurstTimer > 1.4)
+                {
+                    // Dispersing sparks from title in first 600 ms of detonation
+                    using (var sparkCtx = _dynamicTitleSparkGeometry.Open())
+                    {
+                        for (int k = 0; k < 6; k++)
+                        {
+                            double sAngle = k * (Math.PI / 3.0) + now * 5.0;
+                            double sDist0 = 12.0 * titleScale;
+                            double sDist1 = 28.0 * titleScale;
+                            Point sp0 = new Point(cx + sDist0 * Math.Cos(sAngle), (cy - 88.0) + sDist0 * Math.Sin(sAngle));
+                            Point sp1 = new Point(cx + sDist1 * Math.Cos(sAngle), (cy - 88.0) + sDist1 * Math.Sin(sAngle));
+                            sparkCtx.BeginFigure(sp0, false, false);
+                            sparkCtx.LineTo(sp1, true, false);
+                        }
+                    }
+                    dc.DrawGeometry(null, StaticSparkPen, _dynamicTitleSparkGeometry);
+                }
             }
 
             // =================================================================
@@ -1725,6 +2176,15 @@ public sealed class ArcReactorVisualHost : FrameworkElement
                 dc.DrawEllipse(pal.PlasmaBrush, null, shakenCenter, plasmaRadius, plasmaRadius);
                 dc.DrawEllipse(pal.NuclearBrush, null, shakenCenter, nuclearRadius, nuclearRadius);
                 RenderBiomorphicFace(dc, shakenCenter, now, (float)_smoothedSubBass, pal);
+            }
+
+            // Step 3: Core Whiteout - Blinding nuclear white plasma flash over reactor core on slam impact
+            if (_whiteoutIntensity > 0.01)
+            {
+                dc.PushOpacity(_whiteoutIntensity);
+                double whiteoutRadius = (plasmaRadius * 1.5) * (0.8 + 0.2 * _whiteoutIntensity);
+                dc.DrawEllipse(StaticCoreWhiteoutBrush, null, shakenCenter, whiteoutRadius, whiteoutRadius);
+                dc.Pop();
             }
 
             // Electric spark flash running along seam on reassembly snap
@@ -1851,6 +2311,13 @@ public sealed class ArcReactorVisualHost : FrameworkElement
             // Outer containment dotted circle
             dc.DrawEllipse(null, pal.PenContainment, center, BaseRadius + dynamicMaxRayHeight * 0.85, BaseRadius + dynamicMaxRayHeight * 0.85);
 
+            // Expanding Shockwave Ring on Phase 2 Hydraulic Slam
+            if (_shockwaveOpacity > 0.01)
+            {
+                int penIdx = Math.Clamp((int)(_shockwaveOpacity * 31.0), 0, 31);
+                dc.DrawEllipse(null, StaticShockwavePens[penIdx], center, _shockwaveRadius, _shockwaveRadius);
+            }
+
             dc.Pop(); // _rootScaleTransform
 
             // =================================================================
@@ -1936,6 +2403,18 @@ public sealed class ArcReactorVisualHost : FrameworkElement
                 {
                     dc.DrawGeometry(null, pal.RayPen, _dynamicStuckBarsGeometry);
                 }
+            }
+
+            // =================================================================
+            // CYBERPUNK MEMORY GLITCH DECRYPTOR
+            // Dynamic running code blocks spawned across the screen during Overdrive.
+            // Monospaced 11-13pt text with 15-20 chars/sec decryption animation,
+            // crimson/cyan neon glow, and smooth fade-out.
+            // Rendered in 1:1 screen pixel space outside _rootScaleTransform.
+            // =================================================================
+            if (EnableMemoryGlitch)
+            {
+                RenderGlitchBlocks(dc, now);
             }
         }
     }
@@ -2024,5 +2503,272 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         dc.DrawEllipse(StaticBiomorphicNodeBrush, null, chin, 1.4, 1.4);
         dc.DrawEllipse(StaticBiomorphicNodeBrush, null, chL, 1.1, 1.1);
         dc.DrawEllipse(StaticBiomorphicNodeBrush, null, chR, 1.1, 1.1);
+    }
+
+    /// <summary>
+    /// Spawns a new Cyberpunk Memory Glitch Decryptor block at random coordinates at least 250 px away from the HUD core center.
+    /// </summary>
+    public bool SpawnGlitchBlock(double boundsW, double boundsH, Point center)
+    {
+        int slot = -1;
+        for (int i = 0; i < MaxGlitchBlocks; i++)
+        {
+            if (!_glitchBlocks[i].Active)
+            {
+                slot = i;
+                break;
+            }
+        }
+        if (slot == -1) return false;
+
+        double cx = center.X;
+        double cy = center.Y;
+        const double minDistance = 250.0;
+        const double minDistanceSq = minDistance * minDistance;
+
+        double marginX = 40.0;
+        double marginY = 40.0;
+        double maxW = Math.Max(marginX + 100.0, boundsW - 420.0);
+        double maxH = Math.Max(marginY + 100.0, boundsH - 140.0);
+
+        double chosenX = marginX;
+        double chosenY = marginY;
+        bool found = false;
+
+        for (int attempt = 0; attempt < 25; attempt++)
+        {
+            double testX = marginX + _rand.NextDouble() * (maxW - marginX);
+            double testY = marginY + _rand.NextDouble() * (maxH - marginY);
+
+            // Bounding box of block is [testX - 10, testX + 370] x [testY - 8, testY + 100]
+            double clampX = Math.Clamp(cx, testX - 10.0, testX + 370.0);
+            double clampY = Math.Clamp(cy, testY - 8.0, testY + 100.0);
+            double dx = cx - clampX;
+            double dy = cy - clampY;
+
+            if (dx * dx + dy * dy >= minDistanceSq)
+            {
+                chosenX = testX;
+                chosenY = testY;
+                found = true;
+                break;
+            }
+        }
+
+        if (!found)
+        {
+            // Deterministic placement in corner furthest from reactor center
+            chosenX = (cx > boundsW / 2.0) ? 60.0 : Math.Max(60.0, boundsW - 420.0);
+            chosenY = (cy > boundsH / 2.0) ? 60.0 : Math.Max(60.0, boundsH - 150.0);
+        }
+
+        int lines = 3 + _rand.Next(3); // 3, 4, or 5 lines
+        int tCount = GlitchCodeTemplates.Length;
+        int t0 = _rand.Next(tCount);
+        int t1 = (t0 + 1 + _rand.Next(tCount - 1)) % tCount;
+        int t2 = (t0 + 2 + _rand.Next(tCount - 2)) % tCount;
+        int t3 = (t0 + 3 + _rand.Next(tCount - 3)) % tCount;
+        int t4 = (t0 + 4 + _rand.Next(tCount - 4)) % tCount;
+
+        _glitchBlocks[slot].Active = true;
+        _glitchBlocks[slot].X = chosenX;
+        _glitchBlocks[slot].Y = chosenY;
+        _glitchBlocks[slot].Age = 0.0;
+        _glitchBlocks[slot].TotalLife = 1.5 + _rand.NextDouble() * 1.0; // 1.5 to 2.5 seconds
+        _glitchBlocks[slot].IsCrimson = _rand.Next(2) == 0;
+        _glitchBlocks[slot].LineCount = lines;
+        _glitchBlocks[slot].Template0 = t0;
+        _glitchBlocks[slot].Template1 = t1;
+        _glitchBlocks[slot].Template2 = t2;
+        _glitchBlocks[slot].Template3 = t3;
+        _glitchBlocks[slot].Template4 = t4;
+        _glitchBlocks[slot].LastDecodedStep = -1;
+        _glitchBlocks[slot].CachedFormattedText = null;
+        _glitchBlocks[slot].CachedGlowFormattedText = null;
+
+        return true;
+    }
+
+    private void UpdateGlitchBlocks(double dt, double now, double boundsW, double boundsH, Point center)
+    {
+        if (EnableMemoryGlitch && IsOverdriveActive)
+        {
+            _glitchSpawnTimer -= dt;
+            int activeCount = 0;
+            for (int i = 0; i < MaxGlitchBlocks; i++)
+            {
+                if (_glitchBlocks[i].Active) activeCount++;
+            }
+
+            if (activeCount == 0 || (_glitchSpawnTimer <= 0.0 && activeCount < 3))
+            {
+                int toSpawn = (activeCount == 0) ? Math.Min(2, MaxGlitchBlocks) : 1;
+                for (int s = 0; s < toSpawn; s++)
+                {
+                    SpawnGlitchBlock(boundsW, boundsH, center);
+                }
+                _glitchSpawnTimer = 0.9 + _rand.NextDouble() * 0.7; // Periodic spawn every 0.9 - 1.6s
+            }
+        }
+        else
+        {
+            _glitchSpawnTimer = 0.0;
+        }
+
+        // Update age, organic fade-out, and decryption string generation
+        for (int i = 0; i < MaxGlitchBlocks; i++)
+        {
+            if (!_glitchBlocks[i].Active) continue;
+
+            _glitchBlocks[i].Age += dt;
+
+            // When Overdrive ends, accelerate smooth fade-out within 0.60s without sudden cuts
+            if (!IsOverdriveActive)
+            {
+                double remaining = _glitchBlocks[i].TotalLife - _glitchBlocks[i].Age;
+                if (remaining > 0.60)
+                {
+                    _glitchBlocks[i].TotalLife = _glitchBlocks[i].Age + 0.60;
+                }
+            }
+
+            if (_glitchBlocks[i].Age >= _glitchBlocks[i].TotalLife)
+            {
+                _glitchBlocks[i].Active = false;
+                _glitchBlocks[i].CachedFormattedText = null;
+                _glitchBlocks[i].CachedGlowFormattedText = null;
+                continue;
+            }
+
+            // Pseudo-decryption at 15-20 characters per second (18 chars/sec)
+            int currentStep = (int)(_glitchBlocks[i].Age * GlitchCharsPerSecond);
+            if (currentStep != _glitchBlocks[i].LastDecodedStep || _glitchBlocks[i].CachedFormattedText == null)
+            {
+                _glitchBlocks[i].LastDecodedStep = currentStep;
+                RebuildGlitchBlockText(ref _glitchBlocks[i], now);
+            }
+        }
+    }
+
+    private void RebuildGlitchBlockText(ref GlitchCodeBlock block, double now)
+    {
+        _glitchTextBuffer.Clear();
+
+        int lines = block.LineCount;
+        for (int l = 0; l < lines; l++)
+        {
+            int tIdx = l switch
+            {
+                0 => block.Template0,
+                1 => block.Template1,
+                2 => block.Template2,
+                3 => block.Template3,
+                _ => block.Template4
+            };
+            string template = GlitchCodeTemplates[tIdx];
+
+            // Cascading line decrypt start (each line offset by 0.12s)
+            double lineElapsed = block.Age - l * 0.12;
+            int revealed = (int)(lineElapsed * GlitchCharsPerSecond);
+
+            if (lineElapsed <= 0.0)
+            {
+                _glitchTextBuffer.Append(">> [SYS_DECRYPT]");
+            }
+            else if (revealed < template.Length)
+            {
+                _glitchTextBuffer.Append(template, 0, Math.Max(0, revealed));
+                // Flickering glitch character at decoding head
+                int gIdx = Math.Abs((int)(now * 40.0) + l * 5 + revealed) % GlitchGlyphs.Length;
+                _glitchTextBuffer.Append(GlitchGlyphs[gIdx]);
+            }
+            else
+            {
+                _glitchTextBuffer.Append(template);
+            }
+
+            if (l < lines - 1)
+            {
+                _glitchTextBuffer.AppendLine();
+            }
+        }
+
+        string text = _glitchTextBuffer.ToString();
+        if (string.IsNullOrWhiteSpace(text)) text = ">> [SYS_DECRYPT]";
+
+        var mainBrush = block.IsCrimson ? StaticGlitchCrimsonBrush : StaticGlitchCyanBrush;
+        var glowBrush = block.IsCrimson ? StaticGlitchCrimsonGlowBrush : StaticGlitchCyanGlowBrush;
+
+        block.CachedFormattedText = new FormattedText(
+            text,
+            System.Globalization.CultureInfo.InvariantCulture,
+            FlowDirection.LeftToRight,
+            StaticGlitchTypeface,
+            14.5, // 11-13 pt equivalent
+            mainBrush,
+            1.0
+        );
+
+        block.CachedGlowFormattedText = new FormattedText(
+            text,
+            System.Globalization.CultureInfo.InvariantCulture,
+            FlowDirection.LeftToRight,
+            StaticGlitchTypeface,
+            14.5,
+            glowBrush,
+            1.0
+        );
+    }
+
+    private void RenderGlitchBlocks(DrawingContext dc, double now)
+    {
+        for (int i = 0; i < MaxGlitchBlocks; i++)
+        {
+            if (!_glitchBlocks[i].Active || _glitchBlocks[i].CachedFormattedText == null) continue;
+
+            double age = _glitchBlocks[i].Age;
+            double totalLife = _glitchBlocks[i].TotalLife;
+            double opacity = 1.0;
+
+            // Fade-in over first 120ms, fade-out over last 600ms
+            if (age < 0.12)
+            {
+                opacity = Math.Clamp(age / 0.12, 0.0, 1.0);
+            }
+            else if (age > totalLife - 0.60)
+            {
+                opacity = Math.Clamp((totalLife - age) / 0.60, 0.0, 1.0);
+            }
+
+            if (opacity <= 0.01) continue;
+
+            var text = _glitchBlocks[i].CachedFormattedText;
+            var glowText = _glitchBlocks[i].CachedGlowFormattedText;
+            if (text == null) continue;
+
+            double bx = _glitchBlocks[i].X;
+            double by = _glitchBlocks[i].Y;
+            double bw = text.Width;
+            double bh = text.Height;
+
+            dc.PushOpacity(opacity);
+
+            // Semi-transparent dark cyber-box with neon border
+            Rect bgRect = new Rect(bx - 10.0, by - 8.0, bw + 20.0, bh + 16.0);
+            Pen borderPen = _glitchBlocks[i].IsCrimson ? StaticGlitchCrimsonBorderPen : StaticGlitchCyanBorderPen;
+            dc.DrawRoundedRectangle(StaticGlitchDarkBackdropBrush, borderPen, bgRect, 3.0, 3.0);
+
+            // Subtle neon glow offset
+            if (glowText != null)
+            {
+                dc.DrawText(glowText, new Point(bx + 1.2, by + 1.2));
+                dc.DrawText(glowText, new Point(bx - 0.8, by - 0.8));
+            }
+
+            // Main sharp text
+            dc.DrawText(text, new Point(bx, by));
+
+            dc.Pop(); // opacity
+        }
     }
 }
