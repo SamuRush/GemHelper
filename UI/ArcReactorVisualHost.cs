@@ -242,6 +242,24 @@ public static class ArcReactorPalettes
     // Retained for backward-compatibility
     public static readonly ReactorPalette[] BeatPalettes = SpectrumGradientPalettes;
 
+    // Pre-computed Overdrive Crimson Neon palettes (64 frozen items, Crimson Neon #FF003C with bright plasma core)
+    public static readonly ReactorPalette[] OverdriveCrimsonPalettes = PrecomputeOverdriveCrimsonPalettes();
+
+    private static ReactorPalette[] PrecomputeOverdriveCrimsonPalettes()
+    {
+        Color crimson = Color.FromRgb(0xFF, 0x00, 0x3C);
+        Color hotCrimson = Color.FromRgb(0xFF, 0x2A, 0x55);
+
+        var palettes = new ReactorPalette[64];
+        for (int i = 0; i < 64; i++)
+        {
+            float t = i / 63.0f;
+            Color c = ColorMath.Lerp(crimson, hotCrimson, t);
+            palettes[i] = new ReactorPalette(c, crimson);
+        }
+        return palettes;
+    }
+
     public static void UpdateCustomPalette(Color core, Color glow, Color rays)
     {
         CustomGradientPalettes = PrecomputeCustomPalettes(core, glow, rays);
@@ -412,10 +430,13 @@ public sealed class ArcReactorVisualHost : FrameworkElement
     private double _bassEnergyAccumulator = 0.0;
 
     public bool EnableShatterOverdrive { get; set; } = true;
+    public bool EnableFullscreenOverdrive { get; set; } = true;
+    public double OverdriveThreshold { get; set; } = 0.85;
     public bool IsOverdriveActive { get; private set; } = false;
     public double OverdriveProgress { get; private set; } = 0.0;
     public int ShardCount => _shards.Length;
     public ShardParticle[] GetShardSnapshot() => (ShardParticle[])_shards.Clone();
+    public event Action<bool, double, float>? OnOverdriveFrame;
 
     // Pre-computed, frozen geometries for orbital rings
     private StreamGeometry _ring1TicksGeometry = null!;
@@ -495,6 +516,8 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         CurrentTheme = ParseTheme(config.ColorPalette);
         EnableColorShiftSetting = config.EnableColorShift;
         EnableShatterOverdrive = config.EnableShatterOverdrive;
+        EnableFullscreenOverdrive = config.EnableFullscreenOverdrive;
+        OverdriveThreshold = config.OverdriveThreshold;
 
         if (CurrentTheme == HudColorTheme.Custom)
         {
@@ -557,40 +580,52 @@ public sealed class ArcReactorVisualHost : FrameworkElement
 
     public void TriggerBassFrame(float subBassEnergy, float beatIntensity, double dt)
     {
-        if (!EnableShatterOverdrive)
+        if (!EnableShatterOverdrive && !EnableFullscreenOverdrive)
         {
             IsOverdriveActive = false;
             _bassEnergyAccumulator = 0.0;
             OverdriveProgress = Math.Max(0.0, OverdriveProgress - dt * 4.0);
             UpdateShardsPhysics(dt, beatIntensity, subBassEnergy);
+            OnOverdriveFrame?.Invoke(false, OverdriveProgress, beatIntensity);
             return;
         }
 
+        float triggerThreshold = (float)Math.Clamp(OverdriveThreshold, 0.40, 1.50);
+        float inputGate = 0.45f * (triggerThreshold / 0.85f);
         float combined = subBassEnergy * 0.6f + beatIntensity * 0.4f;
-        if (combined > 0.45f)
+        if (combined > inputGate)
         {
-            _bassEnergyAccumulator += (combined - 0.35f) * dt * 2.4;
+            _bassEnergyAccumulator += (combined - inputGate * 0.75f) * dt * 2.5;
         }
         else
         {
             _bassEnergyAccumulator -= dt * 1.2;
         }
-        _bassEnergyAccumulator = Math.Clamp(_bassEnergyAccumulator, 0.0, 1.5);
 
-        if (!IsOverdriveActive && _bassEnergyAccumulator >= 0.75)
+        // Sudden drop / peak hit kick
+        if (beatIntensity > 0.90f && subBassEnergy > 0.80f)
+        {
+            _bassEnergyAccumulator = Math.Max(_bassEnergyAccumulator, (double)triggerThreshold);
+        }
+
+        _bassEnergyAccumulator = Math.Clamp(_bassEnergyAccumulator, 0.0, 2.0);
+
+        if (!IsOverdriveActive && _bassEnergyAccumulator >= triggerThreshold)
         {
             IsOverdriveActive = true;
         }
-        else if (IsOverdriveActive && _bassEnergyAccumulator <= 0.25)
+        else if (IsOverdriveActive && _bassEnergyAccumulator <= triggerThreshold * 0.35)
         {
             IsOverdriveActive = false;
         }
 
-        double targetProgress = IsOverdriveActive ? Math.Clamp(_bassEnergyAccumulator / 1.1, 0.4, 1.0) : 0.0;
+        double targetProgress = IsOverdriveActive ? Math.Clamp(_bassEnergyAccumulator / triggerThreshold, 0.4, 1.0) : 0.0;
         double progressSpeed = IsOverdriveActive ? 8.0 : 4.0;
         OverdriveProgress += (targetProgress - OverdriveProgress) * Math.Clamp(dt * progressSpeed, 0.0, 1.0);
 
         UpdateShardsPhysics(dt, beatIntensity, subBassEnergy);
+
+        OnOverdriveFrame?.Invoke(IsOverdriveActive, OverdriveProgress, beatIntensity);
     }
 
     private void UpdateShardsPhysics(double dt, float beatIntensity, float subBassEnergy)
@@ -875,6 +910,12 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         // Zero-allocation frozen palette selection: smooth gradient depending on active theme & color shift
         float effectiveSaturation = EnableColorShiftSetting ? (float)_smoothedSaturation : 0f;
         _currentPalette = ArcReactorPalettes.GetPalette(_currentState, effectiveSaturation, CurrentTheme);
+
+        if (OverdriveProgress > 0.05 && (EnableShatterOverdrive || EnableFullscreenOverdrive))
+        {
+            int oIdx = Math.Clamp((int)(OverdriveProgress * 63.0), 0, 63);
+            _currentPalette = ArcReactorPalettes.OverdriveCrimsonPalettes[oIdx];
+        }
 
         // Retrieve frequency spectrum (zero allocations via Span)
         _analyzer.GetTargetSpectrum(_targetSpectrum.AsSpan(), dt);

@@ -37,6 +37,8 @@ public sealed partial class OverlayWidget : Window
     private IVoiceFeedbackService? _attachedFeedback;
     private NAudio.Wave.WasapiLoopbackCapture? _loopbackCapture;
     private bool _isSpeaking = false;
+    private OverdriveParticleOverlayWindow? _particleOverlay;
+    private bool _isOverdriveGlowApplied = false;
 
     public JarvisState CurrentState => _currentState;
     public bool IgnoreTtsInLoopback { get; set; } = true;
@@ -83,6 +85,18 @@ public sealed partial class OverlayWidget : Window
             SetState(JarvisState.Idle);
             _timerPollingTimer.Start();
             _periodicMemoryTrimTimer.Start();
+
+            try
+            {
+                _particleOverlay = new OverdriveParticleOverlayWindow();
+                _particleOverlay.Owner = this;
+            }
+            catch (Exception ex)
+            {
+                JarvisLog.Warn("HUD", $"Failed to initialize OverdriveParticleOverlayWindow: {ex.Message}");
+            }
+
+            ArcReactor.OnOverdriveFrame += OnArcReactorOverdriveFrame;
 
             if (VoiceListener.Instance != null && _attachedListener == null)
             {
@@ -299,11 +313,56 @@ public sealed partial class OverlayWidget : Window
 
     private void ApplyGlowAnimation(JarvisState state)
     {
+        if (_isOverdriveGlowApplied) return;
         Color targetColor = GetStateGlowColor(state);
         var glowAnim = new ColorAnimation
         {
             To = targetColor,
             Duration = TimeSpan.FromMilliseconds(400),
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+        };
+
+        OuterGlow.BeginAnimation(DropShadowEffect.ColorProperty, glowAnim, HandoffBehavior.SnapshotAndReplace);
+    }
+
+    private void OnArcReactorOverdriveFrame(bool isActive, double progress, float beatIntensity)
+    {
+        Point center;
+        try
+        {
+            center = PointToScreen(new Point(ActualWidth / 2.0, ActualHeight / 2.0));
+        }
+        catch
+        {
+            center = new Point(Left + ActualWidth / 2.0, Top + ActualHeight / 2.0);
+        }
+
+        _particleOverlay?.UpdateOverdrive(center, isActive, progress, beatIntensity);
+
+        if (isActive && progress > 0.1)
+        {
+            if (!_isOverdriveGlowApplied)
+            {
+                _isOverdriveGlowApplied = true;
+                AnimateOverdriveGlow(Color.FromRgb(0xFF, 0x00, 0x3C));
+            }
+        }
+        else if (!isActive && progress <= 0.05)
+        {
+            if (_isOverdriveGlowApplied)
+            {
+                _isOverdriveGlowApplied = false;
+                ApplyGlowAnimation(_currentState);
+            }
+        }
+    }
+
+    private void AnimateOverdriveGlow(Color targetColor)
+    {
+        var glowAnim = new ColorAnimation
+        {
+            To = targetColor,
+            Duration = TimeSpan.FromMilliseconds(250),
             EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
         };
 
@@ -429,6 +488,17 @@ public sealed partial class OverlayWidget : Window
 
         StopLoopbackCapture();
         ArcReactor.StopRendering();
+        ArcReactor.OnOverdriveFrame -= OnArcReactorOverdriveFrame;
+
+        if (_particleOverlay != null)
+        {
+            try
+            {
+                _particleOverlay.Close();
+            }
+            catch { }
+            _particleOverlay = null;
+        }
 
         _actionResetTimer.Stop();
         _actionResetTimer.Tick -= OnActionResetTimerTick;

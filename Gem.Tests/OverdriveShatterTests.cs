@@ -183,4 +183,106 @@ public class OverdriveShatterTests
 
         Assert.True(maxMag > 0.5f, $"Gain 15.0 should provide explosive high magnitude; got {maxMag:F4}");
     }
+
+    [Fact]
+    public void HudSettings_FullscreenOverdriveAndThreshold_DefaultValuesAndPersistence()
+    {
+        var settings = new HudSettingsConfig();
+        Assert.True(settings.EnableFullscreenOverdrive);
+        Assert.Equal(0.85, settings.OverdriveThreshold, precision: 2);
+
+        var custom = new HudSettingsConfig
+        {
+            EnableFullscreenOverdrive = false,
+            OverdriveThreshold = 1.25
+        };
+
+        string tempJsonPath = Path.Combine(Path.GetTempPath(), $"hud_fullscreen_{Guid.NewGuid()}.json");
+        try
+        {
+            HudSettingsStorage.SaveToFile(custom, tempJsonPath);
+            var loaded = HudSettingsStorage.LoadFromFile(tempJsonPath);
+            Assert.NotNull(loaded);
+            Assert.False(loaded.EnableFullscreenOverdrive);
+            Assert.Equal(1.25, loaded.OverdriveThreshold, precision: 2);
+        }
+        finally
+        {
+            if (File.Exists(tempJsonPath)) File.Delete(tempJsonPath);
+        }
+    }
+
+    [Fact]
+    public void ArcReactorVisualHost_OverdriveThreshold_AffectsTriggerSensitivity()
+    {
+        Exception? threadEx = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var hostLow = new ArcReactorVisualHost { OverdriveThreshold = 0.50 };
+                var hostHigh = new ArcReactorVisualHost { OverdriveThreshold = 1.40 };
+
+                // Подаем умеренный бас
+                for (int frame = 0; frame < 10; frame++)
+                {
+                    hostLow.TriggerBassFrame(subBassEnergy: 0.7f, beatIntensity: 0.6f, dt: 0.05);
+                    hostHigh.TriggerBassFrame(subBassEnergy: 0.7f, beatIntensity: 0.6f, dt: 0.05);
+                }
+
+                // При низком пороге овердрайв должен сработать раньше, чем при высоком
+                Assert.True(hostLow.IsOverdriveActive, "Low threshold (0.50) should trigger overdrive on moderate bass");
+                Assert.False(hostHigh.IsOverdriveActive, "High threshold (1.40) should not trigger overdrive on moderate bass");
+            }
+            catch (Exception ex)
+            {
+                threadEx = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        if (threadEx != null) throw threadEx;
+    }
+
+    [Fact]
+    public void OverdriveParticleOverlayWindow_ParticlePoolAndDispersionBetween300And700()
+    {
+        Exception? threadEx = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var overlay = new OverdriveParticleOverlayWindow();
+                int count = OverdriveParticleOverlayWindow.ParticleCount;
+
+                // Требование ТЗ: 30-50 осколков
+                Assert.InRange(count, 30, 50);
+
+                var snapshot = overlay.GetShardSnapshot();
+                Assert.Equal(count, snapshot.Length);
+
+                // Требование ТЗ: разлет на расстояние 300-700 пикселей от центра
+                foreach (var shard in snapshot)
+                {
+                    Assert.InRange(shard.MaxDistance, 300.0, 700.0);
+                }
+
+                // Тестируем обновление координат и овердрайва
+                var center = new System.Windows.Point(500, 400);
+                overlay.UpdateOverdrive(center, isOverdriveActive: true, overdriveProgress: 0.8, beatIntensity: 0.9f);
+                overlay.Close();
+            }
+            catch (Exception ex)
+            {
+                threadEx = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        if (threadEx != null) throw threadEx;
+    }
 }

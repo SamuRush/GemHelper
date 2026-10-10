@@ -165,6 +165,32 @@
 
 ---
 
+### [x] Task-11: Полноэкранный оверлей раскола реактора при перегрузке (Fullscreen Overdrive Shatter Overlay)
+- **Проблема**: Границы фиксированного 220x220 окна HUD обрезают разлетающиеся осколки при перегрузке. Необходим выход за пределы виджета с разлетом красных энергетических кристаллов по всему рабочему столу без перехвата мыши или потери фокуса.
+- **Зона изменений**: `UI/OverdriveParticleOverlayWindow.cs`, `Win32/NativeMethods.cs`, `UI/OverlayWidget.xaml.cs`, `UI/ArcReactorVisualHost.cs`, `UI/SettingsWindow.xaml`, `UI/SettingsWindow.xaml.cs`, `UI/HudSettings.cs`, `Services/AppSettingsService.cs`, `appsettings.json`, `Gem.Tests/OverdriveShatterTests.cs`.
+- **Технические требования**:
+  1. **Легковесный прозрачный кликабельно-прозрачный оверлей (`OverdriveParticleOverlayWindow`)**:
+     - `AllowsTransparency="True"`, `WindowStyle="None"`, `Background="Transparent"`, `Topmost="True"`, `ShowInTaskbar="False"`, `ShowActivated="False"`.
+     - Win32 Click-through стили (`WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE`) через `SetWindowClickThrough()`, гарантирующие нулевую интерференцию с кликами мыши и фокусом пользователя.
+     - Покрытие всей виртуальной зоны экрана `SystemParameters.VirtualScreen`.
+     - Динамический хук рендеринга `CompositionTarget.Rendering` только на время эффекта и автоматический возврат в `Visibility.Hidden` после остывания.
+  2. **Механика вспышки и разлета (Shatter Explosion & Shard Physics)**:
+     - Определение центра виджета в экранных координатах через `PointToScreen` (с поддержкой свободного перемещения `DragMove`).
+     - Пул из 42 кристаллов-осколков (`struct ScreenShardParticle[42]`) с разлетом на расстояние 300–700 px от центра виджета.
+     - Непрерывная пульсация масштаба и яркости частиц в такт входящему басу WASAPI Loopback (`BeatIntensity`).
+     - Плавная цветовая мутация реактора и внешнего свечения в неоновый ярко-красный (`#FF003C` / Crimson Neon) с белым плазменным центром.
+     - Магнитный реверс: стягивание осколков по траекториям обратно в центр виджета при спаде накала и авто-скрытие оверлея.
+  3. **Настройки в SettingsWindow**:
+     - Чекбокс `ChkFullscreenOverdrive` («Полноэкранный раскол при перегрузке (Fullscreen Overdrive)»).
+     - Слайдер `SldOverdriveThreshold` («Порог срабатывания перегрузки (Overdrive Threshold)», от 0.40 до 1.50, по умолчанию 0.85).
+     - Синхронное сохранение в `appsettings.json` и `HudSettings.json`.
+  4. **Zero-GC & Тестирование**:
+     - Пакетная отрисовка в `DrawingVisual` через `StreamGeometryContext` без аллокаций в куче в цикле 60 FPS.
+     - 374 юнит-теста в `Gem.Tests/` успешно пройдены.
+- **Definition of Done**: `dotnet build Gem.csproj` и `dotnet test Gem.sln` завершаются с кодом 0; частицы оверлея свободно разлетаются на 300-700px по экрану и корректно стягиваются обратно при затухании баса.
+
+---
+
 ## 📦 Завершенные фазы
 
 ### Фаза 1. Ядро и голосовой пайплайн [ЗАВЕРШЕНО]

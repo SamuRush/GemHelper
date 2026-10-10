@@ -39,6 +39,8 @@ public sealed class HudSettingsConfig
     public string CustomCoreColor { get; set; } = "#00E5FF";
     public string CustomGlowColor { get; set; } = "#0040FF";
     public string CustomRaysColor { get; set; } = "#00FFAA";
+    public bool EnableFullscreenOverdrive { get; set; } = true;
+    public double OverdriveThreshold { get; set; } = 0.85;
 }
 
 public sealed class AppSettingsData
@@ -195,6 +197,8 @@ public static class AppSettingsService
                     if (target["EnableColorShift"] is { } cs) data.HudSettings.EnableColorShift = cs.GetValue<bool>();
                     if (target["IgnoreTtsInLoopback"] is { } it) data.HudSettings.IgnoreTtsInLoopback = it.GetValue<bool>();
                     if (target["EnableShatterOverdrive"] is { } so) data.HudSettings.EnableShatterOverdrive = so.GetValue<bool>();
+                    if (target["EnableFullscreenOverdrive"] is { } fso) data.HudSettings.EnableFullscreenOverdrive = fso.GetValue<bool>();
+                    if (target["OverdriveThreshold"]?.GetValue<double>() is double ot) data.HudSettings.OverdriveThreshold = ot;
                     if (target["CustomCoreColor"]?.GetValue<string>() is string ccc) data.HudSettings.CustomCoreColor = ccc;
                     if (target["CustomGlowColor"]?.GetValue<string>() is string cgc) data.HudSettings.CustomGlowColor = cgc;
                     if (target["CustomRaysColor"]?.GetValue<string>() is string crc) data.HudSettings.CustomRaysColor = crc;
@@ -286,6 +290,8 @@ public static class AppSettingsService
                     ["EnableColorShift"] = data.HudSettings.EnableColorShift,
                     ["IgnoreTtsInLoopback"] = data.HudSettings.IgnoreTtsInLoopback,
                     ["EnableShatterOverdrive"] = data.HudSettings.EnableShatterOverdrive,
+                    ["EnableFullscreenOverdrive"] = data.HudSettings.EnableFullscreenOverdrive,
+                    ["OverdriveThreshold"] = data.HudSettings.OverdriveThreshold,
                     ["CustomCoreColor"] = data.HudSettings.CustomCoreColor,
                     ["CustomGlowColor"] = data.HudSettings.CustomGlowColor,
                     ["CustomRaysColor"] = data.HudSettings.CustomRaysColor

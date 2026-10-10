@@ -37,6 +37,8 @@ public static class HudSettingsStorage
             ["EnableColorShift"] = config.EnableColorShift,
             ["IgnoreTtsInLoopback"] = config.IgnoreTtsInLoopback,
             ["EnableShatterOverdrive"] = config.EnableShatterOverdrive,
+            ["EnableFullscreenOverdrive"] = config.EnableFullscreenOverdrive,
+            ["OverdriveThreshold"] = config.OverdriveThreshold,
             ["CustomCoreColor"] = config.CustomCoreColor,
             ["CustomGlowColor"] = config.CustomGlowColor,
             ["CustomRaysColor"] = config.CustomRaysColor
@@ -96,6 +98,8 @@ public static class HudSettingsStorage
         if (node["EnableColorShift"] is { } cs) config.EnableColorShift = cs.GetValue<bool>();
         if (node["IgnoreTtsInLoopback"] is { } it) config.IgnoreTtsInLoopback = it.GetValue<bool>();
         if (node["EnableShatterOverdrive"] is { } so) config.EnableShatterOverdrive = so.GetValue<bool>();
+        if (node["EnableFullscreenOverdrive"] is { } fso) config.EnableFullscreenOverdrive = fso.GetValue<bool>();
+        if (node["OverdriveThreshold"]?.GetValue<double>() is double ot) config.OverdriveThreshold = ot;
         if (node["CustomCoreColor"]?.GetValue<string>() is string ccc) config.CustomCoreColor = ccc;
         if (node["CustomGlowColor"]?.GetValue<string>() is string cgc) config.CustomGlowColor = cgc;
         if (node["CustomRaysColor"]?.GetValue<string>() is string crc) config.CustomRaysColor = crc;

@@ -75,6 +75,48 @@ public static class NativeMethods
         }
     }
 
+    public const int GWL_EXSTYLE = -20;
+    public const int WS_EX_LAYERED = 0x00080000;
+    public const int WS_EX_TRANSPARENT = 0x00000020;
+    public const int WS_EX_TOOLWINDOW = 0x00000080;
+    public const int WS_EX_NOACTIVATE = 0x08000000;
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
+    private static extern IntPtr GetWindowLongPtr64(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongW", SetLastError = true)]
+    private static extern int GetWindowLong32(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
+    private static extern IntPtr SetWindowLongPtr64(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongW", SetLastError = true)]
+    private static extern int SetWindowLong32(IntPtr hWnd, int nIndex, int dwNewLong);
+
+    public static void SetWindowClickThrough(IntPtr hWnd)
+    {
+        if (hWnd == IntPtr.Zero) return;
+        try
+        {
+            if (IntPtr.Size == 8)
+            {
+                long style = GetWindowLongPtr64(hWnd, GWL_EXSTYLE).ToInt64();
+                style |= WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+                SetWindowLongPtr64(hWnd, GWL_EXSTYLE, new IntPtr(style));
+            }
+            else
+            {
+                int style = GetWindowLong32(hWnd, GWL_EXSTYLE);
+                style |= WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+                SetWindowLong32(hWnd, GWL_EXSTYLE, style);
+            }
+        }
+        catch
+        {
+            // ignored
+        }
+    }
+
     [DllImport("user32.dll")]
     public static extern bool SetCursorPos(int x, int y);
 
