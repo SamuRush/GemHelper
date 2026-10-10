@@ -32,6 +32,7 @@ public sealed partial class OverlayWidget : Window
     private LlmIntentService? _llmService;
     private VoiceListener? _attachedListener;
     private IVoiceFeedbackService? _attachedFeedback;
+    private NAudio.Wave.WasapiLoopbackCapture? _loopbackCapture;
 
     public JarvisState CurrentState => _currentState;
 
@@ -72,6 +73,8 @@ public sealed partial class OverlayWidget : Window
             {
                 AttachVoiceFeedback(CompositeVoiceFeedbackService.Instance);
             }
+
+            StartLoopbackCapture();
         };
 
         // Subscribe to Edge-TTS decoded audio output chunks
@@ -331,8 +334,52 @@ public sealed partial class OverlayWidget : Window
         }
     }
 
+    private void StartLoopbackCapture()
+    {
+        try
+        {
+            _loopbackCapture = new NAudio.Wave.WasapiLoopbackCapture();
+            _loopbackCapture.DataAvailable += OnLoopbackDataAvailable;
+            _loopbackCapture.StartRecording();
+            JarvisLog.Info("HUD", "WASAPI Loopback capture started successfully for music and beat reactivity.");
+        }
+        catch (Exception ex)
+        {
+            JarvisLog.Warn("HUD", $"WASAPI Loopback capture not available on current audio device: {ex.Message}");
+        }
+    }
+
+    private void OnLoopbackDataAvailable(object? sender, NAudio.Wave.WaveInEventArgs e)
+    {
+        if (_loopbackCapture != null && e.BytesRecorded > 0)
+        {
+            ArcReactor.SpectrumAnalyzer.ProcessLoopback(e.Buffer, e.BytesRecorded, _loopbackCapture.WaveFormat);
+        }
+    }
+
+    private void StopLoopbackCapture()
+    {
+        if (_loopbackCapture != null)
+        {
+            _loopbackCapture.DataAvailable -= OnLoopbackDataAvailable;
+            try
+            {
+                _loopbackCapture.StopRecording();
+            }
+            catch (Exception ex)
+            {
+                JarvisLog.Debug("HUD", $"StopRecording loopback: {ex.Message}");
+            }
+            _loopbackCapture.Dispose();
+            _loopbackCapture = null;
+        }
+    }
+
     protected override void OnClosed(EventArgs e)
     {
+        StopLoopbackCapture();
+        ArcReactor.StopRendering();
+
         _actionResetTimer.Stop();
         _actionResetTimer.Tick -= OnActionResetTimerTick;
         _subtitleFadeTimer.Stop();

@@ -304,19 +304,59 @@ public class MediaSessionService : IMediaSessionService
 
     /// <summary>
     /// Scenario 1: «Включи / поставь музыку»:
-    /// 1. Проверяет через Process.GetProcessesByName, запущено ли целевое музыкальное приложение (Яндекс Музыка / yandexmusic).
-    /// 2. Если не запущено: запускает его через Process.Start (или протокол yandexmusic://, либо в браузере https://music.yandex.ru),
+    /// 1. Изоляция контекста: если в данный момент играет видео (в браузере или медиаплеере), сначала ставит его на паузу (GSMTC / VK_SPACE).
+    /// 2. Проверяет через Process.GetProcessesByName, запущено ли целевое музыкальное приложение (Яндекс Музыка / yandexmusic).
+    /// 3. Если не запущено: запускает его через Process.Start (или протокол yandexmusic://, либо в браузере https://music.yandex.ru),
     ///    ждет инициализацию и начинает воспроизведение.
-    /// 3. Если запущено: фокусирует окно и отправляет сигнал воспроизведения.
+    /// 4. Если запущено: фокусирует окно и отправляет сигнал воспроизведения.
     /// </summary>
     public async Task<bool> PlayMusicAsync(string appOrTarget = "yandexmusic", CancellationToken cancellationToken = default)
     {
+        // 1. Context isolation: If video or browser media is currently playing, pause it first
+        var (videoFound, videoWnd, videoSession) = await FindActiveVideoStreamAsync();
+        if (videoFound)
+        {
+            JarvisLog.Info("MediaSessionService", "Изоляция контекста медиа: Обнаружено активное видео. Ставим его на паузу перед запуском музыки...");
+            if (videoWnd != IntPtr.Zero)
+            {
+                try
+                {
+                    NativeMethods.SetForegroundWindow(videoWnd);
+                    MediaKeyService.SendMediaKey(NativeConstants.VK_SPACE);
+                }
+                catch (Exception ex)
+                {
+                    JarvisLog.Debug("MediaSessionService", $"Ошибка отправки VK_SPACE в окно видео: {ex.Message}");
+                }
+            }
+            else if (videoSession != null)
+            {
+                try
+                {
+                    await videoSession.TryPauseAsync();
+                }
+                catch (Exception ex)
+                {
+                    JarvisLog.Debug("MediaSessionService", $"Ошибка паузы видеосессии GSMTC: {ex.Message}");
+                }
+            }
+            else
+            {
+                await PauseAsync(cancellationToken);
+            }
+
+            // Задержка для применения паузы системой
+            await Task.Delay(250, cancellationToken);
+        }
+
+        // 2. Поиск и фокус существующего музыкального плеера
         var runningProcess = FindRunningMusicProcess();
         if (runningProcess != null)
         {
+            IntPtr hWnd = IntPtr.Zero;
             try
             {
-                IntPtr hWnd = runningProcess.MainWindowHandle;
+                hWnd = runningProcess.MainWindowHandle;
                 if (hWnd == IntPtr.Zero)
                 {
                     hWnd = FindWindowForProcess(runningProcess.Id);
@@ -325,21 +365,28 @@ public class MediaSessionService : IMediaSessionService
                 if (hWnd != IntPtr.Zero)
                 {
                     NativeMethods.SetForegroundWindow(hWnd);
+                    await Task.Delay(150, cancellationToken);
                 }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[MediaSessionService Warning] Error focusing music window: {ex.Message}");
+                JarvisLog.Debug("MediaSessionService", $"Error focusing music window: {ex.Message}");
             }
             finally
             {
                 runningProcess.Dispose();
             }
 
+            if (hWnd != IntPtr.Zero)
+            {
+                MediaKeyService.SendMediaKey(NativeConstants.VK_SPACE);
+                return true;
+            }
+
             return await PlayAsync(cancellationToken);
         }
 
-        // Process is not running: launch via protocol or browser fallback
+        // 3. Process is not running: launch via protocol or browser fallback
         bool launched = false;
         try
         {
@@ -354,7 +401,7 @@ public class MediaSessionService : IMediaSessionService
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[MediaSessionService] Failed to launch yandexmusic://: {ex.Message}");
+            JarvisLog.Debug("MediaSessionService", $"Failed to launch yandexmusic://: {ex.Message}");
         }
 
         if (!launched)
@@ -368,7 +415,7 @@ public class MediaSessionService : IMediaSessionService
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[MediaSessionService] Failed to open music in browser: {ex.Message}");
+                JarvisLog.Debug("MediaSessionService", $"Failed to open music in browser: {ex.Message}");
             }
         }
 
@@ -381,6 +428,31 @@ public class MediaSessionService : IMediaSessionService
             catch (OperationCanceledException)
             {
                 return false;
+            }
+        }
+
+        var newMusicProc = FindRunningMusicProcess();
+        if (newMusicProc != null)
+        {
+            try
+            {
+                IntPtr hWnd = newMusicProc.MainWindowHandle;
+                if (hWnd == IntPtr.Zero) hWnd = FindWindowForProcess(newMusicProc.Id);
+                if (hWnd != IntPtr.Zero)
+                {
+                    NativeMethods.SetForegroundWindow(hWnd);
+                    await Task.Delay(150, cancellationToken);
+                    MediaKeyService.SendMediaKey(NativeConstants.VK_SPACE);
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                JarvisLog.Debug("MediaSessionService", $"Error focusing newly launched music process: {ex.Message}");
+            }
+            finally
+            {
+                newMusicProc.Dispose();
             }
         }
 
@@ -554,8 +626,9 @@ public class MediaSessionService : IMediaSessionService
                                 return false;
                             }
                         }
-                        catch
+                        catch (Exception ex)
                         {
+                            JarvisLog.Debug("MediaSessionService", $"Process lookup error for PID {pid}: {ex.Message}");
                         }
                     }
                 }
@@ -590,8 +663,9 @@ public class MediaSessionService : IMediaSessionService
                             using var proc = Process.GetProcessById((int)pid);
                             procName = proc.ProcessName;
                         }
-                        catch
+                        catch (Exception ex)
                         {
+                            JarvisLog.Debug("MediaSessionService", $"Process lookup error for PID {pid}: {ex.Message}");
                         }
 
                         if (IsBrowserProcessName(procName))
@@ -673,27 +747,42 @@ public class MediaSessionService : IMediaSessionService
         try
         {
             var sessions = AppAudioService.FindSessions("video");
-            foreach (var item in sessions)
+            try
             {
-                bool isPlayingAudio = false;
-                try
+                foreach (var item in sessions)
                 {
-                    if (item.Session.State == NAudio.CoreAudioApi.Interfaces.AudioSessionState.AudioSessionStateActive &&
-                        item.Session.AudioMeterInformation.MasterPeakValue > 0.0001f)
+                    bool isPlayingAudio = false;
+                    try
                     {
-                        isPlayingAudio = true;
+                        if (item.Session.State == NAudio.CoreAudioApi.Interfaces.AudioSessionState.AudioSessionStateActive &&
+                            item.Session.AudioMeterInformation.MasterPeakValue > 0.0001f)
+                        {
+                            isPlayingAudio = true;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        JarvisLog.Debug("MediaSessionService", $"Error querying AudioMeterInformation: {ex.Message}");
+                    }
+
+                    if (isPlayingAudio)
+                    {
+                        IntPtr targetWin = FindWindowForProcess((int)item.Pid);
+                        if (targetWin != IntPtr.Zero)
+                        {
+                            return (true, targetWin, null);
+                        }
                     }
                 }
-                catch
+            }
+            finally
+            {
+                foreach (var item in sessions)
                 {
-                }
-
-                if (isPlayingAudio)
-                {
-                    IntPtr targetWin = FindWindowForProcess((int)item.Pid);
-                    if (targetWin != IntPtr.Zero)
+                    try { item.Session.Dispose(); }
+                    catch (Exception ex)
                     {
-                        return (true, targetWin, null);
+                        JarvisLog.Debug("MediaSessionService", $"Error disposing session: {ex.Message}");
                     }
                 }
             }
@@ -760,8 +849,9 @@ public class MediaSessionService : IMediaSessionService
                     _ = NativeMethods.ClickAtAsync(centerX, centerY);
                     return true;
                 }
-                catch
+                catch (Exception ex)
                 {
+                    JarvisLog.Debug("MediaSessionService", $"Error processing video link element: {ex.Message}");
                 }
             }
         }

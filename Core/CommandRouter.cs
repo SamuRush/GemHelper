@@ -104,30 +104,29 @@ public sealed class CommandRouter
             );
         }
 
-        Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.WriteLine($"[Router: Dispatch] Маршрутизация команды '{request.Command}' -> {handler.GetType().Name}...");
-        Console.ResetColor();
+        JarvisLog.Route("Dispatch", $"Маршрутизация команды '{request.Command}' -> {handler.GetType().Name}...");
 
         try
         {
             var result = await handler.ExecuteAsync(request.Args, cancellationToken);
-            Console.ForegroundColor = result.Success ? ConsoleColor.Green : ConsoleColor.Red;
-            Console.WriteLine($"[Router: Result] Исполнение '{request.Command}': {(result.Success ? "УСПЕШНО" : "ОШИБКА")} (\"{result.Message}\")");
-            Console.ResetColor();
+            if (result.Success)
+            {
+                JarvisLog.Info("Router", $"Исполнение '{request.Command}': УСПЕШНО (\"{result.Message}\")");
+            }
+            else
+            {
+                JarvisLog.Warn("Router", $"Исполнение '{request.Command}': ОШИБКА (\"{result.Message}\")");
+            }
             return result;
         }
         catch (OperationCanceledException)
         {
-            Console.ForegroundColor = ConsoleColor.DarkYellow;
-            Console.WriteLine($"[Router: Result] Команда '{request.Command}' отменена.");
-            Console.ResetColor();
+            JarvisLog.Warn("Router", $"Команда '{request.Command}' отменена.");
             return CommandResult.Fail($"Command '{request.Command}' was canceled.");
         }
         catch (Exception ex)
         {
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"[Router: Error] Исключение при выполнении команды '{request.Command}': {ex.Message}");
-            Console.ResetColor();
+            JarvisLog.Error("Router", $"Исключение при выполнении команды '{request.Command}'", ex);
             return CommandResult.Fail(
                 $"Execution error in command '{request.Command}': {ex.Message}",
                 new { ExceptionType = ex.GetType().FullName, ex.StackTrace }

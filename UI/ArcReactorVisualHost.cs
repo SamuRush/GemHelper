@@ -9,10 +9,11 @@ namespace Gem.UI;
 /// <summary>
 /// High-performance holographic Arc Reactor core element rendered at 60 FPS via DrawingVisual.
 /// Replaces the legacy HUD sphere with Tony Stark / JARVIS Arc Reactor visual architecture:
-/// - Layer 1: Radial audio spectrograph crown (96 procedural rays driven by FFT from microphone and TTS)
+/// - Layer 1: Radial audio spectrograph crown (96 procedural rays driven by FFT from microphone, TTS, and loopback)
 /// - Layer 2: Asynchronously rotating concentric orbital rings, tick scales, dashed arcs and HUD glyphs
-/// - Layer 3: Volumetric plasma energy core with multi-stop radial gradient and sinusoidal idle breathing
-/// Features smooth Lerp interpolation and zero-GC allocations in the render loop.
+/// - Layer 3: Volumetric plasma energy core with sinusoidal breathing, beat scale burst, and dynamic color morphing
+/// - Center: Biomorphic AI cybernetic face & polygonal energy lattice that blinks and deforms in sync with rhythm
+/// Features smooth Lerp interpolation, event lifecycle management, and zero-GC allocations in the render loop.
 /// </summary>
 public sealed class ArcReactorVisualHost : FrameworkElement
 {
@@ -37,6 +38,7 @@ public sealed class ArcReactorVisualHost : FrameworkElement
     private JarvisState _currentState = JarvisState.Idle;
     private Color _currentColor = Color.FromRgb(0x00, 0xE5, 0xFF);
     private Color _targetColor = Color.FromRgb(0x00, 0xE5, 0xFF);
+    private Color _baseStateColor = Color.FromRgb(0x00, 0xE5, 0xFF);
 
     // Audio spectrum & Lerp arrays
     private readonly AudioSpectrumAnalyzer _analyzer = new();
@@ -73,6 +75,11 @@ public sealed class ArcReactorVisualHost : FrameworkElement
     private Pen _penContainment = null!;
     private Pen _coreGlyphPen = null!;
 
+    // Biomorphic AI Face pens & brushes
+    private Pen _biomorphicPen = null!;
+    private Pen _biomorphicThickPen = null!;
+    private SolidColorBrush _biomorphicNodeBrush = null!;
+
     public AudioSpectrumAnalyzer SpectrumAnalyzer => _analyzer;
     public JarvisState CurrentState => _currentState;
     public Color CurrentColor => _currentColor;
@@ -88,6 +95,7 @@ public sealed class ArcReactorVisualHost : FrameworkElement
 
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
+        IsVisibleChanged += OnIsVisibleChanged;
     }
 
     protected override int VisualChildrenCount => 1;
@@ -337,9 +345,19 @@ public sealed class ArcReactorVisualHost : FrameworkElement
 
         _coreGlyphPen = new Pen(new SolidColorBrush(Color.FromArgb(220, 255, 255, 255)), 1.0);
         _coreGlyphPen.Freeze();
+
+        // Biomorphic AI Face Pens
+        _biomorphicPen = new Pen(new SolidColorBrush(Color.FromArgb(220, color.R, color.G, color.B)), 1.2);
+        _biomorphicPen.Freeze();
+
+        _biomorphicThickPen = new Pen(new SolidColorBrush(Color.FromArgb(240, 255, 255, 255)), 1.5);
+        _biomorphicThickPen.Freeze();
+
+        _biomorphicNodeBrush = new SolidColorBrush(Color.FromArgb(255, 255, 255, 255));
+        _biomorphicNodeBrush.Freeze();
     }
 
-    private void OnLoaded(object sender, RoutedEventArgs e)
+    public void StartRendering()
     {
         if (!_isRenderingHooked)
         {
@@ -349,7 +367,7 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         }
     }
 
-    private void OnUnloaded(object sender, RoutedEventArgs e)
+    public void StopRendering()
     {
         if (_isRenderingHooked)
         {
@@ -358,10 +376,33 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         }
     }
 
+    private void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        StartRendering();
+    }
+
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        StopRendering();
+    }
+
+    private void OnIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if ((bool)e.NewValue)
+        {
+            StartRendering();
+        }
+        else
+        {
+            StopRendering();
+        }
+    }
+
     public void SetState(JarvisState state)
     {
         _currentState = state;
-        _targetColor = OverlayWidget.GetStateGlowColor(state);
+        _baseStateColor = OverlayWidget.GetStateGlowColor(state);
+        _targetColor = _baseStateColor;
     }
 
     private void OnRendering(object? sender, EventArgs e)
@@ -387,11 +428,15 @@ public sealed class ArcReactorVisualHost : FrameworkElement
             _ => 1.0
         };
 
-        _angleRing1 = (_angleRing1 + 14.0 * speedMult * dt) % 360.0;
-        _angleRing2 = (_angleRing2 - 28.0 * speedMult * dt) % 360.0;
-        _angleRing3 = (_angleRing3 + 22.0 * speedMult * dt) % 360.0;
-        _angleRing4 = (_angleRing4 - 42.0 * speedMult * dt) % 360.0;
-        _angleRing5 = (_angleRing5 + 8.0 * speedMult * dt) % 360.0;
+        // Accellerate rings slightly on music beat
+        float beat = _analyzer.BeatIntensity;
+        double dynamicSpeed = speedMult + beat * 1.2;
+
+        _angleRing1 = (_angleRing1 + 14.0 * dynamicSpeed * dt) % 360.0;
+        _angleRing2 = (_angleRing2 - 28.0 * dynamicSpeed * dt) % 360.0;
+        _angleRing3 = (_angleRing3 + 22.0 * dynamicSpeed * dt) % 360.0;
+        _angleRing4 = (_angleRing4 - 42.0 * dynamicSpeed * dt) % 360.0;
+        _angleRing5 = (_angleRing5 + 8.0 * dynamicSpeed * dt) % 360.0;
 
         // 2. Continuous sinusoidal breathing in Idle (2.4s cycle)
         double breathSpeed = _currentState switch
@@ -403,10 +448,24 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         };
         _breathPhase += dt * breathSpeed;
 
-        // 3. Smooth color morphing towards target state color
+        // 3. Dynamic color morphing:
+        // When beats hit: Neon Cyan (#00E5FF) -> Ultramarine (#1E40FF) -> Purple (#D500F9)
+        Color computedTarget = _baseStateColor;
+        if (beat > 0.02f)
+        {
+            Color ultramarine = Color.FromRgb(0x1E, 0x40, 0xFF);
+            Color purple = Color.FromRgb(0xD5, 0x00, 0xF9);
+            Color rhythmColor = beat > 0.5f
+                ? LerpColor(ultramarine, purple, (beat - 0.5f) * 2.0f)
+                : LerpColor(_baseStateColor, ultramarine, beat * 2.0f);
+
+            computedTarget = LerpColor(_baseStateColor, rhythmColor, Math.Min(1.0f, beat * 1.2f));
+        }
+        _targetColor = computedTarget;
+
         if (_currentColor != _targetColor)
         {
-            float colorFactor = (float)Math.Clamp(dt * 6.5, 0.0, 1.0);
+            float colorFactor = (float)Math.Clamp(dt * 7.5, 0.0, 1.0);
             _currentColor = LerpColor(_currentColor, _targetColor, colorFactor);
             UpdateCachedBrushes(_currentColor);
         }
@@ -432,18 +491,22 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         double cy = height / 2.0;
         Point center = new Point(cx, cy);
 
-        double scale = Math.Min(width, height) / 220.0;
-        if (scale <= 0.01) scale = 1.0;
+        double baseScale = Math.Min(width, height) / 220.0;
+        if (baseScale <= 0.01) baseScale = 1.0;
+
+        // Impulsive scale burst driven by beat detection (kick drum/bass)
+        float beat = _analyzer.BeatIntensity;
+        double beatScaleBurst = 1.0 + 0.14 * beat;
+        double finalScale = baseScale * beatScaleBurst;
 
         using (DrawingContext dc = _drawingVisual.RenderOpen())
         {
-            dc.PushTransform(new ScaleTransform(scale, scale, cx, cy));
+            dc.PushTransform(new ScaleTransform(finalScale, finalScale, cx, cy));
 
             // =================================================================
             // LAYER 3: PLASMA ENERGY CORE (Volumetric Glow & Sinusoidal Breath)
             // =================================================================
-            double breathScale = 1.0 + 0.08 * Math.Sin(_breathPhase);
-            double breathOpacity = 0.82 + 0.16 * Math.Sin(_breathPhase);
+            double breathScale = 1.0 + 0.08 * Math.Sin(_breathPhase) + 0.10 * beat;
 
             // 3a. Soft atmospheric aura
             double auraRadius = 48.0 * breathScale;
@@ -454,13 +517,13 @@ public sealed class ArcReactorVisualHost : FrameworkElement
             dc.DrawEllipse(_plasmaBrush, null, center, plasmaRadius, plasmaRadius);
 
             // 3c. Nuclear focal node
-            double nuclearRadius = 13.0 * (1.0 + 0.04 * Math.Sin(_breathPhase));
+            double nuclearRadius = 13.0 * (1.0 + 0.04 * Math.Sin(_breathPhase) + 0.08 * beat);
             dc.DrawEllipse(_nuclearBrush, null, center, nuclearRadius, nuclearRadius);
 
-            // 3d. Central tri-reactor micro-nodes
-            dc.PushTransform(new TranslateTransform(cx, cy));
-            dc.DrawGeometry(null, _coreGlyphPen, _coreGlyphGeometry);
-            dc.Pop();
+            // =================================================================
+            // BIOMORPHIC AI CENTER ("Face of AI" / Digital Polygonal Cyber-Mesh)
+            // =================================================================
+            RenderBiomorphicFace(dc, center, now, beat);
 
             // =================================================================
             // LAYER 2: ORBITAL RINGS & HUD GLYPHS (Concentric Rotating Scales)
@@ -532,6 +595,96 @@ public sealed class ArcReactorVisualHost : FrameworkElement
 
             dc.Pop(); // ScaleTransform
         }
+    }
+
+    /// <summary>
+    /// Renders procedural biomorphic AI face & polygonal energy lattice in the reactor core.
+    /// Features:
+    /// - Eye contours that periodically blink smoothly (3.6s cycle, 160ms blink duration)
+    /// - Dynamic polygonal geometry flexing and expanding in rhythm to bass/kick beats
+    /// - Digital cyber-mask nodes and glowing neural lines
+    /// </summary>
+    private void RenderBiomorphicFace(DrawingContext dc, Point center, double now, float beat)
+    {
+        double cx = center.X;
+        double cy = center.Y;
+
+        // 1. Natural blink cycle (occurs every 3.6 seconds, 160ms duration)
+        double blinkPeriod = 3.6;
+        double blinkPhase = now % blinkPeriod;
+        double blinkScale = 1.0;
+        if (blinkPhase < 0.16)
+        {
+            double p = blinkPhase / 0.16;
+            blinkScale = Math.Max(0.08, 1.0 - Math.Sin(p * Math.PI));
+        }
+
+        // 2. Rhythm geometric deformation: vertices expand radially on peak bass beats
+        double deform = 1.0 + 0.18 * beat;
+
+        // Left Eye Contour
+        Point eL1 = new Point(cx - 12.0 * deform, cy - 2.5 * deform);
+        Point eL2 = new Point(cx - 7.0 * deform, cy - 5.5 * deform * blinkScale);
+        Point eL3 = new Point(cx - 2.5 * deform, cy - 2.5 * deform);
+        Point eL4 = new Point(cx - 7.0 * deform, cy - 0.2 * deform * blinkScale);
+
+        // Right Eye Contour
+        Point eR1 = new Point(cx + 2.5 * deform, cy - 2.5 * deform);
+        Point eR2 = new Point(cx + 7.0 * deform, cy - 5.5 * deform * blinkScale);
+        Point eR3 = new Point(cx + 12.0 * deform, cy - 2.5 * deform);
+        Point eR4 = new Point(cx + 7.0 * deform, cy - 0.2 * deform * blinkScale);
+
+        // Forehead & Brow Arch
+        Point b0 = new Point(cx, cy - 13.0 * deform);
+        Point bL = new Point(cx - 8.0 * deform, cy - 9.0 * deform);
+        Point bR = new Point(cx + 8.0 * deform, cy - 9.0 * deform);
+
+        // Nose Bridge & Cheekbones
+        Point n0 = new Point(cx, cy + 1.5 * deform);
+        Point chL = new Point(cx - 14.0 * deform, cy + 5.0 * deform);
+        Point chR = new Point(cx + 14.0 * deform, cy + 5.0 * deform);
+
+        // Jawline & Chin
+        Point jL = new Point(cx - 8.0 * deform, cy + 12.0 * deform);
+        Point jR = new Point(cx + 8.0 * deform, cy + 12.0 * deform);
+        Point chin = new Point(cx, cy + 15.5 * deform);
+
+        // Draw Left Eye
+        dc.DrawLine(_biomorphicThickPen, eL1, eL2);
+        dc.DrawLine(_biomorphicThickPen, eL2, eL3);
+        dc.DrawLine(_biomorphicPen, eL3, eL4);
+        dc.DrawLine(_biomorphicPen, eL4, eL1);
+
+        // Draw Right Eye
+        dc.DrawLine(_biomorphicThickPen, eR1, eR2);
+        dc.DrawLine(_biomorphicThickPen, eR2, eR3);
+        dc.DrawLine(_biomorphicPen, eR3, eR4);
+        dc.DrawLine(_biomorphicPen, eR4, eR1);
+
+        // Pupil / Retina glints inside eyes
+        dc.DrawEllipse(_biomorphicNodeBrush, null, new Point(cx - 7.0 * deform, cy - 2.5 * deform), 1.1, 1.1 * blinkScale);
+        dc.DrawEllipse(_biomorphicNodeBrush, null, new Point(cx + 7.0 * deform, cy - 2.5 * deform), 1.1, 1.1 * blinkScale);
+
+        // Forehead & Brow Lattice
+        dc.DrawLine(_biomorphicPen, bL, b0);
+        dc.DrawLine(_biomorphicPen, b0, bR);
+        dc.DrawLine(_biomorphicPen, b0, n0);
+
+        // Cheek & Jaw Wireframe
+        dc.DrawLine(_biomorphicPen, eL1, chL);
+        dc.DrawLine(_biomorphicPen, eR3, chR);
+        dc.DrawLine(_biomorphicPen, chL, jL);
+        dc.DrawLine(_biomorphicPen, chR, jR);
+        dc.DrawLine(_biomorphicPen, jL, chin);
+        dc.DrawLine(_biomorphicPen, jR, chin);
+        dc.DrawLine(_biomorphicPen, n0, chin);
+
+        // Digital Neural Lattice Nodes
+        dc.DrawEllipse(_biomorphicNodeBrush, null, b0, 1.2, 1.2);
+        dc.DrawEllipse(_biomorphicNodeBrush, null, n0, 1.2, 1.2);
+        dc.DrawEllipse(_biomorphicNodeBrush, null, chin, 1.4, 1.4);
+        dc.DrawEllipse(_biomorphicNodeBrush, null, chL, 1.1, 1.1);
+        dc.DrawEllipse(_biomorphicNodeBrush, null, chR, 1.1, 1.1);
     }
 
     private static Color LerpColor(Color a, Color b, float t)

@@ -128,8 +128,9 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
 
                         return (preferred.VoiceInfo.Name, false);
                     }
-                    catch
+                    catch (Exception ex)
                     {
+                        JarvisLog.Debug("SystemSpeechTtsEngine", $"Failed to select preferred voice: {ex.Message}");
                     }
                 }
 
@@ -137,7 +138,8 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
                 var comVoice = TryBindSapiComVoiceToken(preferredVoice);
                 if (comVoice != null)
                 {
-                    try { Marshal.ReleaseComObject(comVoice); } catch { }
+                    try { Marshal.ReleaseComObject(comVoice); }
+                    catch (Exception ex) { JarvisLog.Debug("SystemSpeechTtsEngine", $"Error releasing comVoice: {ex.Message}"); }
                     return (preferredVoice, false);
                 }
             }
@@ -168,7 +170,8 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
                     if (comVoice != null)
                     {
                         bound = true;
-                        try { Marshal.ReleaseComObject(comVoice); } catch { }
+                        try { Marshal.ReleaseComObject(comVoice); }
+                        catch (Exception ex) { JarvisLog.Debug("SystemSpeechTtsEngine", $"Error releasing comVoice: {ex.Message}"); }
                     }
                 }
 
@@ -208,7 +211,8 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
                     if (comVoice != null)
                     {
                         bound = true;
-                        try { Marshal.ReleaseComObject(comVoice); } catch { }
+                        try { Marshal.ReleaseComObject(comVoice); }
+                        catch (Exception ex) { JarvisLog.Debug("SystemSpeechTtsEngine", $"Error releasing comVoice: {ex.Message}"); }
                     }
                 }
 
@@ -406,7 +410,10 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
             {
                 Marshal.ReleaseComObject(_spVoice);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                JarvisLog.Debug("SystemSpeechTtsEngine", $"Error releasing _spVoice: {ex.Message}");
+            }
             _spVoice = null;
         }
 

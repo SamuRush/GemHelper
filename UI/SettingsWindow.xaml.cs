@@ -313,7 +313,11 @@ public sealed partial class SettingsWindow : Window
                         }
                     }
                 }
-                try { Marshal.ReleaseComObject(spVoice); } catch { }
+                try { Marshal.ReleaseComObject(spVoice); }
+                catch (Exception ex)
+                {
+                    JarvisLog.Debug("SettingsWindow", $"ReleaseComObject error: {ex.Message}");
+                }
             }
         }
         catch (Exception ex)
@@ -355,11 +359,7 @@ public sealed partial class SettingsWindow : Window
                     BufferMilliseconds = 40,
                     NumberOfBuffers = 2
                 };
-                _previewWaveIn.DataAvailable += (s, e) =>
-                {
-                    double rms = VoiceListener.CalculateRms(e.Buffer, e.BytesRecorded);
-                    OnRmsLevelChanged((float)rms);
-                };
+                _previewWaveIn.DataAvailable += OnPreviewWaveInDataAvailable;
                 _previewWaveIn.StartRecording();
             }
         }
@@ -367,6 +367,12 @@ public sealed partial class SettingsWindow : Window
         {
             Console.WriteLine($"[SettingsWindow] Ошибка тест-мониторинга микрофона: {ex.Message}");
         }
+    }
+
+    private void OnPreviewWaveInDataAvailable(object? sender, WaveInEventArgs e)
+    {
+        double rms = VoiceListener.CalculateRms(e.Buffer, e.BytesRecorded);
+        OnRmsLevelChanged((float)rms);
     }
 
     private void StopAudioMonitoring()
@@ -378,7 +384,12 @@ public sealed partial class SettingsWindow : Window
 
         if (_previewWaveIn != null)
         {
-            try { _previewWaveIn.StopRecording(); } catch { }
+            _previewWaveIn.DataAvailable -= OnPreviewWaveInDataAvailable;
+            try { _previewWaveIn.StopRecording(); }
+            catch (Exception ex)
+            {
+                JarvisLog.Debug("SettingsWindow", $"StopRecording error: {ex.Message}");
+            }
             _previewWaveIn.Dispose();
             _previewWaveIn = null;
         }

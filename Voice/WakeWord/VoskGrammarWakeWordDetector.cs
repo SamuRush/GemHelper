@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Reflection;
@@ -334,9 +335,19 @@ public sealed class VoskGrammarWakeWordDetector : IWakeWordDetector
         _lastActiveFrameTicks = currentTicks;
 
         var sw = Stopwatch.StartNew();
-        byte[] buffer = pcmData.ToArray();
-        bool isFinal = _recognizer.AcceptWaveform(buffer, buffer.Length);
-        string json = isFinal ? _recognizer.Result() : _recognizer.PartialResult();
+        byte[] rented = ArrayPool<byte>.Shared.Rent(pcmData.Length);
+        bool isFinal;
+        string json;
+        try
+        {
+            pcmData.CopyTo(rented);
+            isFinal = _recognizer.AcceptWaveform(rented, pcmData.Length);
+            json = isFinal ? _recognizer.Result() : _recognizer.PartialResult();
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rented);
+        }
         string text = ExtractText(json, isFinal).Trim();
         sw.Stop();
         LastDetectionLatencyMs = sw.ElapsedMilliseconds;

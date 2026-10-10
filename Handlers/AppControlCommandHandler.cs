@@ -378,14 +378,27 @@ public sealed class AppControlCommandHandler : ICommandHandler
         }
 
         var searchResult = Steam.SearchGame(target);
-        if (searchResult != null && searchResult.RequiresConfirmation && searchResult.Game != null)
+        if (searchResult != null && searchResult.Game != null)
         {
-            Orchestrator.SetPendingConfirmation(Gem.Services.PendingGameAction.Install, searchResult.Game);
-            if (VoiceFeedback != null)
+            if (Steam.IsGameInstalled(searchResult.Game))
             {
-                await VoiceFeedback.SpeakAsync($"Вы имели в виду {searchResult.Game.Name}, сэр?", cancellationToken);
+                Orchestrator.SetPendingConfirmation(Gem.Services.PendingGameAction.Start, searchResult.Game);
+                if (VoiceFeedback != null)
+                {
+                    await VoiceFeedback.SpeakAsync("Эта игра уже установлена, сэр. Запустить её?", cancellationToken);
+                }
+                return CommandResult.Ok("Эта игра уже установлена, сэр. Запустить её?", new { Game = searchResult.Game.Title, AppId = searchResult.Game.AppId, AlreadyInstalled = true, Pending = true });
             }
-            return CommandResult.Ok($"Запрошено подтверждение для установки '{searchResult.Game.Name}'.", new { Pending = true, Game = searchResult.Game.Name });
+
+            if (searchResult.RequiresConfirmation)
+            {
+                Orchestrator.SetPendingConfirmation(Gem.Services.PendingGameAction.Install, searchResult.Game);
+                if (VoiceFeedback != null)
+                {
+                    await VoiceFeedback.SpeakAsync($"Вы имели в виду {searchResult.Game.Name}, сэр?", cancellationToken);
+                }
+                return CommandResult.Ok($"Запрошено подтверждение для установки '{searchResult.Game.Name}'.", new { Pending = true, Game = searchResult.Game.Name });
+            }
         }
 
         string resolvedTitle = target;

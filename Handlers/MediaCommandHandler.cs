@@ -59,6 +59,8 @@ public sealed class MediaCommandHandler : ICommandHandler
         bool success;
         string detail;
 
+        JarvisLog.Info("MediaCommandHandler", $"Запуск действия '{action}' (цель: '{targetApp}')");
+
         switch (action)
         {
             case "pause_video":

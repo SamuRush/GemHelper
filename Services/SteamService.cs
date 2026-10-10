@@ -1289,11 +1289,79 @@ public sealed class SteamService
     }
 
     /// <summary>
+    /// Checks whether a Steam game is already fully installed in the local library
+    /// (StateFlags == 4, or files present on disk, or appmanifest_<AppID>.acf with state 4).
+    /// </summary>
+    public bool IsGameInstalled(SteamGameInfo? game)
+    {
+        if (game == null) return false;
+
+        // 1. Direct StateFlags check (StateFlags == 4 is StateFullyInstalled)
+        if (game.IsInstalled && game.StateFlags == 4) return true;
+        if (game.IsFromManifest && (game.StateFlags == 4 || (game.StateFlags & 4) != 0)) return true;
+
+        // 2. Read physical appmanifest_<AppID>.acf on disk
+        lock (_lock)
+        {
+            string manifestName = $"appmanifest_{game.AppId}.acf";
+            foreach (var library in _libraryFolders)
+            {
+                string manifestPath = Path.Combine(library, "steamapps", manifestName);
+                if (File.Exists(manifestPath))
+                {
+                    try
+                    {
+                        string content = File.ReadAllText(manifestPath);
+                        var match = Regex.Match(content, @"""StateFlags""\s+""(\d+)""", RegexOptions.IgnoreCase);
+                        if (match.Success && int.TryParse(match.Groups[1].Value, out int flags))
+                        {
+                            if (flags == 4 || (flags & 4) != 0)
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        JarvisLog.Debug("SteamService", $"Error reading manifest {manifestPath}: {ex.Message}");
+                    }
+                }
+            }
+        }
+
+        // 3. Check physical game directory on disk
+        if (!string.IsNullOrWhiteSpace(game.InstallPath) && Directory.Exists(game.InstallPath))
+        {
+            try
+            {
+                if (Directory.EnumerateFileSystemEntries(game.InstallPath).Any())
+                {
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                JarvisLog.Debug("SteamService", $"Error inspecting install directory '{game.InstallPath}': {ex.Message}");
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Installs a game by its <see cref="SteamGameInfo"/> record.
     /// Launches steam://install/{appId} and starts the AutoClicker confirmation routine.
     /// </summary>
     public Task InstallGameAsync(SteamGameInfo game)
     {
+        if (IsGameInstalled(game))
+        {
+            JarvisLog.Info("SteamService", $"Игра '{game.Title}' уже установлена (StateFlags == 4 / файлы присутствуют на диске). Отмена установки.");
+            JarvisOrchestrator.Instance.SetPendingConfirmation(PendingGameAction.Start, game);
+            VoiceFeedbackService.Instance?.SpeakAsync("Эта игра уже установлена, сэр. Запустить её?");
+            return Task.CompletedTask;
+        }
+
         LaunchInstallation(game);
         return Task.CompletedTask;
     }
@@ -1505,6 +1573,14 @@ public sealed class SteamService
             return false;
         }
 
+        if (IsGameInstalled(search.Game))
+        {
+            JarvisLog.Info("SteamService", $"Игра '{search.Game.Title}' уже установлена (StateFlags == 4 / файлы присутствуют на диске). Отмена установки.");
+            JarvisOrchestrator.Instance.SetPendingConfirmation(PendingGameAction.Start, search.Game);
+            VoiceFeedbackService.Instance?.SpeakAsync("Эта игра уже установлена, сэр. Запустить её?");
+            return false;
+        }
+
         // Notify caller that game is found
         onFound(search.Game.Title);
 
@@ -1664,12 +1740,127 @@ public sealed class SteamService
     }
 
     /// <summary>
+    /// Checks whether the window title strictly corresponds to a License Agreement / EULA dialog.
+    /// </summary>
+    public static bool IsEulaDialogTitle(string? windowTitle)
+    {
+        if (string.IsNullOrWhiteSpace(windowTitle)) return false;
+        string t = windowTitle.Trim();
+        return t.Contains("лицензион", StringComparison.OrdinalIgnoreCase) ||
+               t.Contains("соглашен", StringComparison.OrdinalIgnoreCase) ||
+               t.Contains("eula", StringComparison.OrdinalIgnoreCase) ||
+               t.Contains("license", StringComparison.OrdinalIgnoreCase) ||
+               t.Contains("terms", StringComparison.OrdinalIgnoreCase) ||
+               t.Contains("agreement", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static readonly string[] AllowedEulaButtonTexts =
+    [
+        "Принять", "Согласен", "Accept", "I Agree", "Я принимаю", "Я согласен"
+    ];
+
+    /// <summary>
+    /// Validates whether the button text deterministically matches EULA confirmation.
+    /// </summary>
+    public static bool IsEulaButtonName(string? buttonText)
+    {
+        if (string.IsNullOrWhiteSpace(buttonText)) return false;
+        string trimmed = buttonText.Trim();
+        foreach (var allowed in AllowedEulaButtonTexts)
+        {
+            if (trimmed.Equals(allowed, StringComparison.OrdinalIgnoreCase) ||
+                trimmed.IndexOf(allowed, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Deterministically searches for an EULA confirmation button via Win32 UI Automation (AutomationElement).
+    /// Strictly requires window title confirmation and button text validation.
+    /// Under no circumstances falls back to pixel scanning (strictly blocks pixel-only matching).
+    /// </summary>
+    public static Point? FindEulaButtonViaUiAutomation(IntPtr hWnd)
+    {
+        if (hWnd == IntPtr.Zero) return null;
+
+        try
+        {
+            var element = AutomationElement.FromHandle(hWnd);
+            if (element == null) return null;
+
+            string windowTitle = element.Current.Name ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(windowTitle))
+            {
+                var sb = new StringBuilder(512);
+                NativeMethods.GetWindowText(hWnd, sb, sb.Capacity);
+                windowTitle = sb.ToString();
+            }
+
+            if (!IsEulaDialogTitle(windowTitle))
+            {
+                JarvisLog.Warn("SteamService UI Automation", $"Окно ('{windowTitle}') не подтверждено как EULA/лицензионное соглашение. Клик строго заблокирован.");
+                return null;
+            }
+
+            var buttonCondition = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button);
+            var buttons = element.FindAll(TreeScope.Descendants, buttonCondition);
+
+            foreach (AutomationElement btn in buttons)
+            {
+                string btnName = btn.Current.Name;
+                if (IsEulaButtonName(btnName))
+                {
+                    var rect = btn.Current.BoundingRectangle;
+                    if (!rect.IsEmpty && rect.Width > 0 && rect.Height > 0)
+                    {
+                        int centerX = (int)(rect.Left + rect.Width / 2);
+                        int centerY = (int)(rect.Top + rect.Height / 2);
+
+                        JarvisLog.Info("SteamService UI Automation", $"Кнопка согласия EULA '{btnName}' подтверждена через UI Automation: ({centerX}, {centerY}) в окне '{windowTitle}'.");
+                        return new Point(centerX, centerY);
+                    }
+                }
+            }
+
+            JarvisLog.Warn("SteamService UI Automation", $"В окне '{windowTitle}' не найдена валидная кнопка соглашения EULA через UI Automation. Попиксельный клик заблокирован.");
+        }
+        catch (Exception ex)
+        {
+            JarvisLog.Warn("SteamService UI Automation", $"Ошибка UI Automation при проверке EULA: {ex.Message}. Клик заблокирован.");
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Executes safe EULA confirmation strictly through UI Automation.
+    /// Zero pixel-matching fallback.
+    /// </summary>
+    public static async Task<Point?> TryConfirmEulaViaUiAutomationAsync(IntPtr hWnd)
+    {
+        Point? pt = FindEulaButtonViaUiAutomation(hWnd);
+        if (!pt.HasValue)
+        {
+            JarvisLog.Warn("SteamService UI Automation", "Подтверждение EULA отклонено системой безопасности.");
+            return null;
+        }
+
+        await ClickMouseAtAsync(pt.Value);
+        JarvisLog.Info("SteamService UI Automation", $"EULA успешно подтверждено (X={pt.Value.X}, Y={pt.Value.Y}).");
+        return pt;
+    }
+
+    /// <summary>
     /// Ищет синюю кнопку Steam в окне <paramref name="hWnd"/> и выполняет клик мышью.
     /// Возвращает экранные координаты клика <see cref="Point"/>, если кнопка найдена и клик выполнен, иначе <c>null</c>.
     /// </summary>
     private static async Task<Point?> TryClickBlueButtonAsync(IntPtr hWnd, string? actionLabel = null)
     {
-        Point? buttonPos = FindSteamButtonViaUiAutomation(hWnd, ["Установить", "Install", "Принять", "Далее", "Next", "Accept"]) ?? FindSteamBlueButton(hWnd);
+        // Не включаем кнопки EULA ("Принять", "Accept"), так как EULA подтверждается строго через TryConfirmEulaViaUiAutomationAsync
+        Point? buttonPos = FindSteamButtonViaUiAutomation(hWnd, ["Установить", "Install", "Далее", "Next"]) ?? FindSteamBlueButton(hWnd);
         if (buttonPos.HasValue)
         {
             SetCursorPos(buttonPos.Value.X, buttonPos.Value.Y);
@@ -1677,12 +1868,10 @@ public sealed class SteamService
             mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
             await Task.Delay(80);
             mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-            Console.ForegroundColor = ConsoleColor.Green;
             string label = !string.IsNullOrWhiteSpace(actionLabel)
                 ? actionLabel
                 : "Клик по кнопке выполнен";
-            Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [SteamService Scanner] {label} (X={buttonPos.Value.X}, Y={buttonPos.Value.Y}).");
-            Console.ResetColor();
+            JarvisLog.Info("SteamService Scanner", $"{label} (X={buttonPos.Value.X}, Y={buttonPos.Value.Y}).");
             return buttonPos;
         }
         return null;
@@ -1890,9 +2079,7 @@ public sealed class SteamService
     /// </summary>
     public static async Task<bool> PollAndConfirmInstallDialogAsync()
     {
-        Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [SteamService Scanner] Поиск главного видимого окна процесса 'steam'...");
-        Console.ResetColor();
+        JarvisLog.Debug("SteamService Scanner", "Поиск главного видимого окна процесса 'steam'...");
 
         const int maxAttempts = 10;
         for (int attempt = 1; attempt <= maxAttempts; attempt++)
@@ -1908,26 +2095,36 @@ public sealed class SteamService
                 Point? installBtnPos = await TryClickBlueButtonAsync(hWnd, "Клик по кнопке 'Установить'");
                 if (!installBtnPos.HasValue)
                 {
-                    Console.ForegroundColor = ConsoleColor.DarkYellow;
-                    Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [SteamService Scanner] Синяя кнопка 'Установить' не найдена.");
-                    Console.ResetColor();
+                    JarvisLog.Warn("SteamService Scanner", "Синяя кнопка 'Установить' не найдена.");
                     return false;
                 }
 
-                // 3. Шаг 2 — подтверждение параметров установки / EULA (если синяя кнопка обнаружена повторно ниже)
+                // 3. Шаг 2 — подтверждение параметров установки / EULA
                 await Task.Delay(1200);
-                Point? secondBtnPos = await TryClickBlueButtonAsync(hWnd, "Подтверждение параметров установки / EULA");
-                if (secondBtnPos.HasValue)
+
+                var sb = new StringBuilder(512);
+                NativeMethods.GetWindowText(hWnd, sb, sb.Capacity);
+                string currentTitle = sb.ToString();
+
+                Point? secondBtnPos = null;
+                if (IsEulaDialogTitle(currentTitle))
                 {
-                    Console.ForegroundColor = ConsoleColor.Cyan;
-                    Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [SteamService Scanner] Параметры установки / соглашение подтверждены (X={secondBtnPos.Value.X}, Y={secondBtnPos.Value.Y}). Установка успешно запущена.");
-                    Console.ResetColor();
+                    // Для EULA — строго UI Automation без пиксельного сканирования
+                    secondBtnPos = await TryConfirmEulaViaUiAutomationAsync(hWnd);
                 }
                 else
                 {
-                    Console.ForegroundColor = ConsoleColor.DarkGray;
-                    Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [SteamService Scanner] Дополнительное подтверждение не требуется. Установка успешно запущена.");
-                    Console.ResetColor();
+                    // Для параметров установки (ярлыки/путь)
+                    secondBtnPos = await TryClickBlueButtonAsync(hWnd, "Подтверждение параметров установки");
+                }
+
+                if (secondBtnPos.HasValue)
+                {
+                    JarvisLog.Info("SteamService Scanner", $"Параметры установки / соглашение подтверждены (X={secondBtnPos.Value.X}, Y={secondBtnPos.Value.Y}). Установка успешно запущена.");
+                }
+                else
+                {
+                    JarvisLog.Debug("SteamService Scanner", "Дополнительное подтверждение не требуется или завершено. Установка успешно запущена.");
                 }
 
                 return true;
@@ -1936,9 +2133,7 @@ public sealed class SteamService
             await Task.Delay(500);
         }
 
-        Console.ForegroundColor = ConsoleColor.DarkYellow;
-        Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [SteamService Scanner] Главное видимое окно процесса 'steam' не найдено.");
-        Console.ResetColor();
+        JarvisLog.Warn("SteamService Scanner", "Главное видимое окно процесса 'steam' не найдено.");
         return false;
     }
 

@@ -173,7 +173,10 @@ public class AppAudioService : IAppAudioService
                             rootPids.Add((uint)proc.Id);
                         }
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        JarvisLog.Debug("AppAudioService", $"Error examining process for target '{target}': {ex.Message}");
+                    }
                     finally
                     {
                         proc.Dispose();
@@ -330,6 +333,14 @@ public class AppAudioService : IAppAudioService
                     string label = !string.IsNullOrEmpty(procName) ? procName : (!string.IsNullOrEmpty(displayName) ? displayName : target);
                     matched.Add((session, label, pid));
                 }
+                else
+                {
+                    try { session.Dispose(); }
+                    catch (Exception ex)
+                    {
+                        JarvisLog.Debug("AppAudioService", $"Error disposing non-matching session: {ex.Message}");
+                    }
+                }
             }
         }
         catch (Exception ex)
@@ -363,7 +374,10 @@ public class AppAudioService : IAppAudioService
                 using var p = Process.GetProcessById((int)pid);
                 fgProcName = p.ProcessName;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                JarvisLog.Debug("AppAudioService", $"Error getting process for foreground window PID {pid}: {ex.Message}");
+            }
 
             if (IsMusicProcessName(fgProcName) ||
                 fgTitle.Contains("Яндекс Музыка", StringComparison.OrdinalIgnoreCase) ||
@@ -393,7 +407,10 @@ public class AppAudioService : IAppAudioService
                     using var p = Process.GetProcessById((int)pid);
                     procName = p.ProcessName;
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    JarvisLog.Debug("AppAudioService", $"Error getting process for window PID {pid}: {ex.Message}");
+                }
 
                 if (IsMusicProcessName(procName) ||
                     title.Contains("Яндекс Музыка", StringComparison.OrdinalIgnoreCase) ||
@@ -499,11 +516,22 @@ public class AppAudioService : IAppAudioService
         string matchedName = sessions[0].ProcessName;
         bool isMuted = false;
 
-        // Apply volume to ALL child and worker sessions of the target application
-        foreach (var (session, _, _) in sessions)
+        try
         {
-            session.SimpleAudioVolume.Volume = clamped;
-            isMuted = session.SimpleAudioVolume.Mute;
+            // Apply volume to ALL child and worker sessions of the target application
+            foreach (var (session, _, _) in sessions)
+            {
+                session.SimpleAudioVolume.Volume = clamped;
+                isMuted = session.SimpleAudioVolume.Mute;
+            }
+        }
+        finally
+        {
+            foreach (var (session, _, _) in sessions)
+            {
+                try { session.Dispose(); }
+                catch (Exception ex) { JarvisLog.Debug("AppAudioService", $"Dispose session: {ex.Message}"); }
+            }
         }
 
         // Synchronously shift Electron UI slider if window is found
@@ -563,11 +591,22 @@ public class AppAudioService : IAppAudioService
         float newScalar = Math.Clamp(currentScalar + deltaScalar, 0.0f, 1.0f);
         bool isMuted = false;
 
-        // Apply volume to ALL child and worker sessions of the target application
-        foreach (var (session, _, _) in sessions)
+        try
         {
-            session.SimpleAudioVolume.Volume = newScalar;
-            isMuted = session.SimpleAudioVolume.Mute;
+            // Apply volume to ALL child and worker sessions of the target application
+            foreach (var (session, _, _) in sessions)
+            {
+                session.SimpleAudioVolume.Volume = newScalar;
+                isMuted = session.SimpleAudioVolume.Mute;
+            }
+        }
+        finally
+        {
+            foreach (var (session, _, _) in sessions)
+            {
+                try { session.Dispose(); }
+                catch (Exception ex) { JarvisLog.Debug("AppAudioService", $"Dispose session: {ex.Message}"); }
+            }
         }
 
         // Synchronously shift Electron UI slider if window is found
@@ -633,9 +672,20 @@ public class AppAudioService : IAppAudioService
         bool newMuteState = isMuted ?? !sessions[0].Session.SimpleAudioVolume.Mute;
         float currentScalar = sessions[0].Session.SimpleAudioVolume.Volume;
 
-        foreach (var (session, _, _) in sessions)
+        try
         {
-            session.SimpleAudioVolume.Mute = newMuteState;
+            foreach (var (session, _, _) in sessions)
+            {
+                session.SimpleAudioVolume.Mute = newMuteState;
+            }
+        }
+        finally
+        {
+            foreach (var (session, _, _) in sessions)
+            {
+                try { session.Dispose(); }
+                catch (Exception ex) { JarvisLog.Debug("AppAudioService", $"Dispose session: {ex.Message}"); }
+            }
         }
 
         int percentage = (int)Math.Round(currentScalar * 100.0f);
@@ -666,8 +716,23 @@ public class AppAudioService : IAppAudioService
         }
 
         string matchedName = sessions[0].ProcessName;
-        float currentScalar = sessions[0].Session.SimpleAudioVolume.Volume;
-        bool isMuted = sessions[0].Session.SimpleAudioVolume.Mute;
+        float currentScalar;
+        bool isMuted;
+
+        try
+        {
+            currentScalar = sessions[0].Session.SimpleAudioVolume.Volume;
+            isMuted = sessions[0].Session.SimpleAudioVolume.Mute;
+        }
+        finally
+        {
+            foreach (var (session, _, _) in sessions)
+            {
+                try { session.Dispose(); }
+                catch (Exception ex) { JarvisLog.Debug("AppAudioService", $"Dispose session: {ex.Message}"); }
+            }
+        }
+
         int percentage = (int)Math.Round(currentScalar * 100.0f);
 
         return Task.FromResult(new AppVolumeResult(

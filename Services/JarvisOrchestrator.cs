@@ -290,6 +290,17 @@ public sealed class JarvisOrchestrator
             // Exact match — install or launch immediately
             if (isInstallCommand)
             {
+                if (steamService.IsGameInstalled(result.Game))
+                {
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [JARVIS] Игра '{result.Game.Name}' уже установлена. Запрос подтверждения запуска.");
+                    Console.ResetColor();
+
+                    SetPendingConfirmation(PendingGameAction.Start, result.Game, ttsService);
+                    await ttsService.SpeakAsync("Эта игра уже установлена, сэр. Запустить её?");
+                    return true;
+                }
+
                 Console.ForegroundColor = ConsoleColor.Green;
                 Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [JARVIS] Точное совпадение: '{result.Game.Name}'. Начинаю установку.");
                 Console.ResetColor();

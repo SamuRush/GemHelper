@@ -986,6 +986,7 @@ public sealed class VoiceListener : IDisposable
             _voiceDetectedInCommand = false;
 
             ChangeState(VoiceListenerState.WaitingForWakeWord, reason);
+            GC.Collect(1, GCCollectionMode.Optimized);
         }
     }
 
@@ -1218,5 +1219,9 @@ public sealed class VoiceListener : IDisposable
         OnWakeWordDetected = null;
         OnCommandSpoken = null;
         OnStatusChanged = null;
+        OnRmsLevelChanged = null;
+        OnAudioBufferAvailable = null;
+        OnPartialResult = null;
+        OnFinalResult = null;
     }
 }

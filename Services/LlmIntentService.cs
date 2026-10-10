@@ -270,30 +270,21 @@ public sealed class LlmIntentService
         }
 
         // Fast-path pattern matching: instantly executes clear deterministic commands (0ms latency, zero hallucinations)
-        Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.WriteLine($"[Router: FastMatch] Анализ фразы: \"{cleanedSpokenText}\"...");
-        Console.ResetColor();
+        JarvisLog.Route("FastMatch", $"Анализ фразы: \"{cleanedSpokenText}\"...");
 
         var fastMatch = TryFastMatch(cleanedSpokenText);
         if (fastMatch != null)
         {
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"[Router: FastMatch] HIT -> Команда: '{fastMatch.CommandRequest?.Command ?? "dialog"}', Ответ: '{fastMatch.Reply}'");
-            Console.ResetColor();
+            JarvisLog.Info("Router: FastMatch", $"HIT -> Команда: '{fastMatch.CommandRequest?.Command ?? "dialog"}', Ответ: '{fastMatch.Reply}'");
             return fastMatch;
         }
 
-        Console.ForegroundColor = ConsoleColor.DarkYellow;
-        Console.WriteLine("[Router: FastMatch] MISS -> Перенаправление в LLM (InterpretAsync)...");
-        Console.ResetColor();
+        JarvisLog.Warn("Router: FastMatch", "MISS -> Перенаправление в LLM (InterpretAsync)...");
 
         // Check if API key is placeholder
         if (_apiKey.Equals("YOUR_OPENAI_API_KEY", StringComparison.OrdinalIgnoreCase))
         {
-            Console.ForegroundColor = ConsoleColor.DarkYellow;
-            Console.WriteLine("[LLM] Предупреждение: ApiKey содержит плейсхолдер. Использую локальный резервный парсер.");
-            Console.ResetColor();
-
+            JarvisLog.Warn("LLM", "ApiKey содержит плейсхолдер. Использую локальный резервный парсер.");
             return OfflineFallbackInterpreter(cleanedSpokenText);
         }
 
@@ -303,9 +294,7 @@ public sealed class LlmIntentService
         {
             if (_debugMode)
             {
-                Console.ForegroundColor = ConsoleColor.DarkGray;
-                Console.WriteLine($"[LLM Request] URL: {_endpointUrl} | Model: {_model}");
-                Console.ResetColor();
+                JarvisLog.Debug("LLM", $"Request URL: {_endpointUrl} | Model: {_model}");
             }
 
             // Request to LM Studio / LLM (without response_format to prevent HTTP 400)
@@ -314,7 +303,7 @@ public sealed class LlmIntentService
 
             if (!success)
             {
-                LogRawResponse(responseBody, $"[LLM API Error] HTTP {statusCode}");
+                JarvisLog.Error("LLM", $"API Error HTTP {statusCode}");
                 return OfflineFallbackInterpreter(cleanedSpokenText);
             }
 

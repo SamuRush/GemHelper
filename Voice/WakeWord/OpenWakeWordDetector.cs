@@ -136,7 +136,8 @@ public sealed class OpenWakeWordDetector : IWakeWordDetector
                 var tempInfo = new FileInfo(tempPath);
                 if (tempInfo.Length < 50 * 1024)
                 {
-                    try { File.Delete(tempPath); } catch { }
+                    try { File.Delete(tempPath); }
+                    catch (Exception ex) { JarvisLog.Debug("OpenWakeWordDetector", $"Error deleting temp file: {ex.Message}"); }
                     Console.ForegroundColor = ConsoleColor.DarkYellow;
                     Console.WriteLine($"[WakeWord Warning] Файл из {url} слишком мал ({tempInfo.Length} байт). Пропуск источника.");
                     Console.ResetColor();
