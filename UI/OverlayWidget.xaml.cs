@@ -28,6 +28,7 @@ public sealed partial class OverlayWidget : Window
     private readonly DispatcherTimer _actionResetTimer;
     private readonly DispatcherTimer _subtitleFadeTimer;
     private readonly DispatcherTimer _timerPollingTimer;
+    private readonly DispatcherTimer _periodicMemoryTrimTimer;
     private SettingsWindow? _settingsWindow;
     private LlmIntentService? _llmService;
     private VoiceListener? _attachedListener;
@@ -58,11 +59,18 @@ public sealed partial class OverlayWidget : Window
         };
         _timerPollingTimer.Tick += OnTimerPollingTick;
 
+        _periodicMemoryTrimTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(60)
+        };
+        _periodicMemoryTrimTimer.Tick += (s, e) => MemoryTrimmer.TrimMemory("HUD Periodic", 45.0);
+
         Loaded += (s, e) =>
         {
             PositionInBottomRightCorner();
             SetState(JarvisState.Idle);
             _timerPollingTimer.Start();
+            _periodicMemoryTrimTimer.Start();
 
             if (VoiceListener.Instance != null && _attachedListener == null)
             {
@@ -349,11 +357,22 @@ public sealed partial class OverlayWidget : Window
         }
     }
 
+    /// <summary>
+    /// Processes incoming WASAPI Loopback system audio bytes strictly in-place with zero queue allocations.
+    /// Bytes are read immediately into SpectrumAnalyzer and discarded without persisting in any List or unbounded Queue.
+    /// </summary>
     private void OnLoopbackDataAvailable(object? sender, NAudio.Wave.WaveInEventArgs e)
     {
         if (_loopbackCapture != null && e.BytesRecorded > 0)
         {
-            ArcReactor.SpectrumAnalyzer.ProcessLoopback(e.Buffer, e.BytesRecorded, _loopbackCapture.WaveFormat);
+            try
+            {
+                ArcReactor.SpectrumAnalyzer.ProcessLoopback(e.Buffer, e.BytesRecorded, _loopbackCapture.WaveFormat);
+            }
+            catch (Exception ex)
+            {
+                JarvisLog.Debug("HUD", $"OnLoopbackDataAvailable handling exception: {ex.Message}");
+            }
         }
     }
 
@@ -386,6 +405,7 @@ public sealed partial class OverlayWidget : Window
         _subtitleFadeTimer.Tick -= OnSubtitleFadeTimerTick;
         _timerPollingTimer.Stop();
         _timerPollingTimer.Tick -= OnTimerPollingTick;
+        _periodicMemoryTrimTimer.Stop();
 
         EdgeTtsEngine.OnAudioPlaybackChunk -= OnTtsAudioPlaybackChunk;
 

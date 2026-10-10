@@ -259,4 +259,42 @@ public class OptimizationAndSafetyTests
 
         public void Dispose() { }
     }
+
+    // =========================================================================
+    // 6. Memory Optimization & Trimming Tests
+    // =========================================================================
+
+    [Fact]
+    public void MemoryTrimmer_TrimMemory_ExecutesWithoutExceptions()
+    {
+        var ex = Record.Exception(() => MemoryTrimmer.TrimMemory("Unit Test Trim", 0.0));
+        Assert.Null(ex);
+    }
+
+    [Fact]
+    public void VoskConfig_Defaults_IncludeSmallModelSupport()
+    {
+        var config = new VoskConfig();
+        Assert.True(config.UseSmallModel);
+        Assert.Contains("small", config.SmallModelPath, StringComparison.OrdinalIgnoreCase);
+
+        var settings = new AppSettingsData();
+        Assert.True(settings.Vosk.UseSmallModel);
+        Assert.Equal(settings.Vosk.SmallModelPath, settings.VoskModelPath);
+    }
+
+    [Fact]
+    public void AudioSpectrumAnalyzer_SpanOverload_PopulatesSpectrum()
+    {
+        var analyzer = new AudioSpectrumAnalyzer();
+        Span<float> span = stackalloc float[AudioSpectrumAnalyzer.RayCount];
+        analyzer.GetTargetSpectrum(span, 0.016);
+
+        // Array overload check
+        float[] array = new float[AudioSpectrumAnalyzer.RayCount];
+        analyzer.GetTargetSpectrum(array, 0.016);
+
+        Assert.Equal(AudioSpectrumAnalyzer.RayCount, span.Length);
+        Assert.Equal(AudioSpectrumAnalyzer.RayCount, array.Length);
+    }
 }

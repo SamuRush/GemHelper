@@ -21,9 +21,6 @@ public sealed class VoskGrammarWakeWordDetector : IWakeWordDetector
     public const int DefaultMinDurationMs = 150;
     public const double DefaultNoiseGateRms = 450.0;
 
-    private static Model? _smallModelSingleton;
-    private static readonly object _modelLock = new();
-
     private readonly string _modelPath;
     private readonly string _customName;
     private readonly int _minDurationMs;
@@ -171,25 +168,8 @@ public sealed class VoskGrammarWakeWordDetector : IWakeWordDetector
 
     private static Model GetOrInitSmallModel(string path)
     {
-        if (_smallModelSingleton != null) return _smallModelSingleton;
-
-        lock (_modelLock)
-        {
-            if (_smallModelSingleton == null)
-            {
-                bool isPathValid = Directory.Exists(path) &&
-                    (Directory.Exists(Path.Combine(path, "am")) || File.Exists(Path.Combine(path, "am", "final.mdl")) || Directory.Exists(Path.Combine(path, "conf")));
-                string modelToUse = isPathValid ? path : VoskModelHelper.DefaultModelFolder;
-                if (!Directory.Exists(modelToUse))
-                {
-                    throw new DirectoryNotFoundException($"Каталог модели Vosk '{modelToUse}' не найден.");
-                }
-
-                Vosk.Vosk.SetLogLevel(-1);
-                _smallModelSingleton = new Model(modelToUse);
-            }
-            return _smallModelSingleton;
-        }
+        string? resolved = VoskModelHelper.FindModelDirectory(path) ?? path;
+        return VoskModelManager.GetOrInitModel(resolved);
     }
 
     private static class NativeMethods
@@ -205,10 +185,28 @@ public sealed class VoskGrammarWakeWordDetector : IWakeWordDetector
         new[] { typeof(IntPtr) },
         null);
 
+    private void DisposeRecognizer()
+    {
+        if (_recognizer != null)
+        {
+            try
+            {
+                _recognizer.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[VoskGrammarWakeWordDetector] Dispose recognizer error: {ex.Message}");
+            }
+            _recognizer = null;
+        }
+    }
+
     private void InitializeRecognizer()
     {
         try
         {
+            DisposeRecognizer();
+
             var model = GetOrInitSmallModel(_modelPath);
 
             // Set strictly constrained grammar: [ "{customName}", "[unk]" ] without Unicode escaping (\uXXXX)
@@ -417,7 +415,6 @@ public sealed class VoskGrammarWakeWordDetector : IWakeWordDetector
     {
         if (_disposed) return;
         _disposed = true;
-        _recognizer?.Dispose();
-        _recognizer = null;
+        DisposeRecognizer();
     }
 }

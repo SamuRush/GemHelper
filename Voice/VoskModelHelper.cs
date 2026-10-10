@@ -6,6 +6,8 @@ public static class VoskModelHelper
 {
     public const string DefaultModelUrl = "https://alphacephei.com/vosk/models/vosk-model-ru-0.42.zip";
     public const string DefaultModelFolder = "model";
+    public const string DefaultSmallModelUrl = "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip";
+    public const string DefaultSmallModelFolder = "Models/VoskSmall/vosk-model-small-ru";
 
     /// <summary>
     /// Checks if a valid Vosk model directory exists.
@@ -28,9 +30,10 @@ public static class VoskModelHelper
     /// <summary>
     /// Searches for a valid Vosk model directory across standard search locations:
     /// 1. Specified preferred path (if non-empty) relative to CWD and AppContext.BaseDirectory
-    /// 2. "Models/Vosk" relative to CWD and AppContext.BaseDirectory
-    /// 3. "model" relative to CWD and AppContext.BaseDirectory
-    /// Also inspects direct subdirectories (e.g. Models/Vosk/vosk-model-ru-0.42).
+    /// 2. "Models/VoskSmall/vosk-model-small-ru", "vosk-model-small-ru-0.22"
+    /// 3. "Models/Vosk" relative to CWD and AppContext.BaseDirectory
+    /// 4. "model" relative to CWD and AppContext.BaseDirectory
+    /// Also inspects direct subdirectories (e.g. Models/Vosk/vosk-model-ru-0.42 or Models/VoskSmall/vosk-model-small-ru).
     /// </summary>
     public static string? FindModelDirectory(string? preferredPath = null)
     {
@@ -45,6 +48,14 @@ public static class VoskModelHelper
             }
         }
 
+        candidates.Add(DefaultSmallModelFolder);
+        candidates.Add(Path.Combine(AppContext.BaseDirectory, DefaultSmallModelFolder));
+        candidates.Add("Models/VoskSmall");
+        candidates.Add(Path.Combine(AppContext.BaseDirectory, "Models", "VoskSmall"));
+        candidates.Add("vosk-model-small-ru-0.22");
+        candidates.Add(Path.Combine(AppContext.BaseDirectory, "vosk-model-small-ru-0.22"));
+        candidates.Add("vosk-model-small-ru");
+        candidates.Add(Path.Combine(AppContext.BaseDirectory, "vosk-model-small-ru"));
         candidates.Add("Models/Vosk");
         candidates.Add(Path.Combine(AppContext.BaseDirectory, "Models", "Vosk"));
         candidates.Add(DefaultModelFolder);

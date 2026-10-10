@@ -20,13 +20,25 @@ public sealed class WakeWordConfig
     public int MinDurationMs { get; set; } = 150;
 }
 
+public sealed class VoskConfig
+{
+    public string ModelPath { get; set; } = "./model";
+    public bool UseSmallModel { get; set; } = true;
+    public string SmallModelPath { get; set; } = "Models/VoskSmall/vosk-model-small-ru";
+}
+
 public sealed class AppSettingsData
 {
     public AudioConfig Audio { get; set; } = new();
     public string LlmBaseUrl { get; set; } = "http://127.0.0.1:1234/v1";
     public string LlmModel { get; set; } = "qwen2.5-1.5b-instruct";
     public string LlmApiKey { get; set; } = "lm";
-    public string VoskModelPath { get; set; } = "./model";
+    public VoskConfig Vosk { get; set; } = new();
+    public string VoskModelPath
+    {
+        get => Vosk.UseSmallModel && !string.IsNullOrWhiteSpace(Vosk.SmallModelPath) ? Vosk.SmallModelPath : Vosk.ModelPath;
+        set => Vosk.ModelPath = value;
+    }
     public string CityName { get; set; } = "Санкт-Петербург";
     public double Latitude { get; set; } = 59.9386;
     public double Longitude { get; set; } = 30.3141;
@@ -108,7 +120,9 @@ public static class AppSettingsService
 
             if (node["Vosk"] is JsonObject vosk)
             {
-                if (vosk["ModelPath"]?.GetValue<string>() is string modelPath) data.VoskModelPath = modelPath;
+                if (vosk["ModelPath"]?.GetValue<string>() is string modelPath) data.Vosk.ModelPath = modelPath;
+                if (vosk["UseSmallModel"] is { } useSmallNode) data.Vosk.UseSmallModel = useSmallNode.GetValue<bool>();
+                if (vosk["SmallModelPath"]?.GetValue<string>() is string smallPath) data.Vosk.SmallModelPath = smallPath;
             }
 
             if (node["Tts"] is JsonObject tts)
@@ -206,7 +220,9 @@ public static class AppSettingsService
                 },
                 ["Vosk"] = new JsonObject
                 {
-                    ["ModelPath"] = data.VoskModelPath
+                    ["ModelPath"] = data.Vosk.ModelPath,
+                    ["UseSmallModel"] = data.Vosk.UseSmallModel,
+                    ["SmallModelPath"] = data.Vosk.SmallModelPath
                 },
                 ["Tts"] = new JsonObject
                 {

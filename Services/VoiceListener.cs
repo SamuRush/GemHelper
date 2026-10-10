@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Gem.Core;
 using NAudio.Wave;
 using Vosk;
 
@@ -36,79 +37,15 @@ public sealed class VoiceListener : IDisposable
     }
 
     // =========================================================================
-    // 1. SINGLETON VOSK MODEL (Loaded strictly ONCE for the app lifetime)
+    // 1. SINGLETON VOSK MODEL (Managed strictly ONCE via VoskModelManager)
     // =========================================================================
-    private static Model? _sharedModel;
-    private static readonly object _modelLock = new();
 
     /// <summary>
     /// Thread-safe singleton accessor for Vosk.Model.
-    /// Ensures the heavy acoustic model (~45MB-3.5GB unmanaged memory) is loaded
-    /// strictly ONCE across the entire application lifecycle.
+    /// Ensures the acoustic model is loaded strictly ONCE across the entire application lifecycle.
+    /// Never re-creates or unloads the model on microphone resets or state transitions.
     /// </summary>
-    public static Model GetOrInitModel(string modelPath)
-    {
-        if (_sharedModel != null)
-        {
-            return _sharedModel;
-        }
-
-        lock (_modelLock)
-        {
-            if (_sharedModel == null)
-            {
-                if (!Directory.Exists(modelPath))
-                {
-                    throw new DirectoryNotFoundException(
-                        $"Vosk model directory not found at '{modelPath}'. Please download a Vosk model (e.g. vosk-model-small-ru) or run model setup."
-                    );
-                }
-
-                // Suppress verbose Vosk C-library logs
-                Vosk.Vosk.SetLogLevel(-1);
-
-                // Optimization: disable heavy offline rescorers (rescore/rnnlm) if present
-                // to maintain memory footprint strictly under 1.5 GB RAM while keeping full speech accuracy
-                OptimizeModelDirectoryForRealtime(modelPath);
-
-                Console.ForegroundColor = ConsoleColor.DarkGray;
-                Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [VoiceListener] [Vosk Singleton] Загрузка модели из '{modelPath}' (выполняется 1 раз за жизнь приложения)...");
-                Console.ResetColor();
-
-                _sharedModel = new Model(modelPath);
-            }
-            return _sharedModel;
-        }
-    }
-
-    /// <summary>
-    /// Optimizes model directory for real-time streaming:
-    /// Isolates heavy offline rescoring graphs (rescore/rnnlm ~2.3GB), reducing RAM usage
-    /// from ~3GB down to ~1.2GB while maintaining full recognition accuracy.
-    /// </summary>
-    private static void OptimizeModelDirectoryForRealtime(string modelPath)
-    {
-        try
-        {
-            string rescoreDir = Path.Combine(modelPath, "rescore");
-            string rescoreDisabled = Path.Combine(modelPath, "rescore.disabled");
-            if (Directory.Exists(rescoreDir) && !Directory.Exists(rescoreDisabled))
-            {
-                Directory.Move(rescoreDir, rescoreDisabled);
-            }
-
-            string rnnlmDir = Path.Combine(modelPath, "rnnlm");
-            string rnnlmDisabled = Path.Combine(modelPath, "rnnlm.disabled");
-            if (Directory.Exists(rnnlmDir) && !Directory.Exists(rnnlmDisabled))
-            {
-                Directory.Move(rnnlmDir, rnnlmDisabled);
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[VoiceListener Warning] Ошибка оптимизации каталога модели Vosk: {ex.Message}");
-        }
-    }
+    public static Model GetOrInitModel(string modelPath) => VoskModelManager.GetOrInitModel(modelPath);
 
     private readonly string _modelPath;
     private readonly string[] _wakeWords;
@@ -986,7 +923,7 @@ public sealed class VoiceListener : IDisposable
             _voiceDetectedInCommand = false;
 
             ChangeState(VoiceListenerState.WaitingForWakeWord, reason);
-            GC.Collect(1, GCCollectionMode.Optimized);
+            MemoryTrimmer.TrimMemory("VoiceListener Idle", minIntervalSeconds: 15.0);
         }
     }
 

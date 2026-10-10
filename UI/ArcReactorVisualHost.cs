@@ -7,13 +7,181 @@ using Gem.Core;
 namespace Gem.UI;
 
 /// <summary>
+/// Pre-computed and frozen visual palette containing all pens and brushes for a state or color.
+/// All brushes, pens, and gradients are frozen strictly once at creation to guarantee zero allocations at 60 FPS.
+/// </summary>
+public sealed class ReactorPalette
+{
+    public Color Color { get; }
+    public SolidColorBrush PrimaryBrush { get; }
+    public Pen PrimaryPen { get; }
+    public Pen RayPen { get; }
+    public RadialGradientBrush AuraBrush { get; }
+    public RadialGradientBrush PlasmaBrush { get; }
+    public RadialGradientBrush NuclearBrush { get; }
+    public Pen PenRing1Track { get; }
+    public Pen PenRing1Ticks { get; }
+    public Pen PenRing2Dashed { get; }
+    public Pen PenRing3Sectors { get; }
+    public Pen PenRing4Dashed { get; }
+    public Pen PenRing4Ticks { get; }
+    public Pen PenRing5Coils { get; }
+    public Pen PenContainment { get; }
+    public Pen BiomorphicPen { get; }
+
+    public ReactorPalette(Color color)
+    {
+        Color = color;
+
+        PrimaryBrush = new SolidColorBrush(color);
+        PrimaryBrush.Freeze();
+
+        PrimaryPen = new Pen(PrimaryBrush, 1.2);
+        PrimaryPen.Freeze();
+
+        RayPen = new Pen(new SolidColorBrush(Color.FromArgb(230, color.R, color.G, color.B)), 1.5);
+        RayPen.Freeze();
+
+        AuraBrush = new RadialGradientBrush
+        {
+            GradientOrigin = new Point(0.5, 0.5),
+            Center = new Point(0.5, 0.5),
+            RadiusX = 0.5,
+            RadiusY = 0.5
+        };
+        AuraBrush.GradientStops.Add(new GradientStop(Color.FromArgb(80, color.R, color.G, color.B), 0.0));
+        AuraBrush.GradientStops.Add(new GradientStop(Color.FromArgb(25, color.R, color.G, color.B), 0.65));
+        AuraBrush.GradientStops.Add(new GradientStop(Color.FromArgb(0, color.R, color.G, color.B), 1.0));
+        AuraBrush.Freeze();
+
+        PlasmaBrush = new RadialGradientBrush
+        {
+            GradientOrigin = new Point(0.5, 0.5),
+            Center = new Point(0.5, 0.5),
+            RadiusX = 0.5,
+            RadiusY = 0.5
+        };
+        PlasmaBrush.GradientStops.Add(new GradientStop(Color.FromArgb(255, 255, 255, 255), 0.0));
+        PlasmaBrush.GradientStops.Add(new GradientStop(Color.FromArgb(235, 220, 255, 255), 0.22));
+        PlasmaBrush.GradientStops.Add(new GradientStop(Color.FromArgb(220, color.R, color.G, color.B), 0.55));
+        PlasmaBrush.GradientStops.Add(new GradientStop(Color.FromArgb(160, (byte)(color.R * 0.3), (byte)(color.G * 0.5), (byte)(color.B * 0.8)), 0.82));
+        PlasmaBrush.GradientStops.Add(new GradientStop(Color.FromArgb(0, 0, 10, 30), 1.0));
+        PlasmaBrush.Freeze();
+
+        NuclearBrush = new RadialGradientBrush
+        {
+            GradientOrigin = new Point(0.5, 0.5),
+            Center = new Point(0.5, 0.5),
+            RadiusX = 0.5,
+            RadiusY = 0.5
+        };
+        NuclearBrush.GradientStops.Add(new GradientStop(Color.FromArgb(255, 255, 255, 255), 0.0));
+        NuclearBrush.GradientStops.Add(new GradientStop(Color.FromArgb(200, 220, 255, 255), 0.5));
+        NuclearBrush.GradientStops.Add(new GradientStop(Color.FromArgb(0, color.R, color.G, color.B), 1.0));
+        NuclearBrush.Freeze();
+
+        PenRing1Track = new Pen(new SolidColorBrush(Color.FromArgb(80, color.R, color.G, color.B)), 0.8);
+        PenRing1Track.Freeze();
+
+        PenRing1Ticks = new Pen(new SolidColorBrush(Color.FromArgb(220, color.R, color.G, color.B)), 1.1);
+        PenRing1Ticks.Freeze();
+
+        PenRing2Dashed = new Pen(new SolidColorBrush(Color.FromArgb(200, color.R, color.G, color.B)), 1.4)
+        {
+            DashStyle = new DashStyle(new double[] { 8, 5, 3, 5 }, 0)
+        };
+        PenRing2Dashed.Freeze();
+
+        PenRing3Sectors = new Pen(new SolidColorBrush(Color.FromArgb(235, color.R, color.G, color.B)), 1.6);
+        PenRing3Sectors.Freeze();
+
+        PenRing4Dashed = new Pen(new SolidColorBrush(Color.FromArgb(150, color.R, color.G, color.B)), 0.9)
+        {
+            DashStyle = new DashStyle(new double[] { 2, 3 }, 0)
+        };
+        PenRing4Dashed.Freeze();
+
+        PenRing4Ticks = new Pen(new SolidColorBrush(Color.FromArgb(180, color.R, color.G, color.B)), 0.8);
+        PenRing4Ticks.Freeze();
+
+        PenRing5Coils = new Pen(new SolidColorBrush(Color.FromArgb(240, color.R, color.G, color.B)), 1.4);
+        PenRing5Coils.Freeze();
+
+        PenContainment = new Pen(new SolidColorBrush(Color.FromArgb(60, color.R, color.G, color.B)), 0.7)
+        {
+            DashStyle = new DashStyle(new double[] { 1, 6 }, 0)
+        };
+        PenContainment.Freeze();
+
+        BiomorphicPen = new Pen(new SolidColorBrush(Color.FromArgb(220, color.R, color.G, color.B)), 1.2);
+        BiomorphicPen.Freeze();
+    }
+}
+
+/// <summary>
+/// Static registry of pre-computed, frozen palettes for all JARVIS states and beat gradients.
+/// </summary>
+public static class ArcReactorPalettes
+{
+    public static readonly ReactorPalette Idle = new(Color.FromRgb(0x00, 0xE5, 0xFF));
+    public static readonly ReactorPalette Listening = new(Color.FromRgb(0xFF, 0xD6, 0x00));
+    public static readonly ReactorPalette Thinking = new(Color.FromRgb(0xD5, 0x00, 0xF9));
+    public static readonly ReactorPalette Action = new(Color.FromRgb(0x00, 0xE6, 0x76));
+
+    // Pre-computed discrete beat palettes (8 quantization levels)
+    public static readonly ReactorPalette[] BeatPalettes = PrecomputeBeatPalettes();
+
+    private static ReactorPalette[] PrecomputeBeatPalettes()
+    {
+        Color baseColor = Color.FromRgb(0x00, 0xE5, 0xFF);
+        Color ultramarine = Color.FromRgb(0x1E, 0x40, 0xFF);
+        Color purple = Color.FromRgb(0xD5, 0x00, 0xF9);
+
+        var palettes = new ReactorPalette[8];
+        for (int i = 0; i < 8; i++)
+        {
+            float t = i / 7.0f;
+            Color c = t < 0.5f
+                ? Lerp(baseColor, ultramarine, t * 2.0f)
+                : Lerp(ultramarine, purple, (t - 0.5f) * 2.0f);
+            palettes[i] = new ReactorPalette(c);
+        }
+        return palettes;
+    }
+
+    private static Color Lerp(Color a, Color b, float t) =>
+        Color.FromRgb(
+            (byte)(a.R + (b.R - a.R) * t),
+            (byte)(a.G + (b.G - a.G) * t),
+            (byte)(a.B + (b.B - a.B) * t));
+
+    public static ReactorPalette GetPalette(JarvisState state, float beat)
+    {
+        if (state == JarvisState.Idle && beat > 0.05f)
+        {
+            int index = Math.Clamp((int)(beat * 7.99f), 0, 7);
+            return BeatPalettes[index];
+        }
+
+        return state switch
+        {
+            JarvisState.Listening => Listening,
+            JarvisState.Thinking => Thinking,
+            JarvisState.Action => Action,
+            _ => Idle
+        };
+    }
+}
+
+/// <summary>
 /// High-performance holographic Arc Reactor core element rendered at 60 FPS via DrawingVisual.
 /// Replaces the legacy HUD sphere with Tony Stark / JARVIS Arc Reactor visual architecture:
 /// - Layer 1: Radial audio spectrograph crown (96 procedural rays driven by FFT from microphone, TTS, and loopback)
 /// - Layer 2: Asynchronously rotating concentric orbital rings, tick scales, dashed arcs and HUD glyphs
 /// - Layer 3: Volumetric plasma energy core with sinusoidal breathing, beat scale burst, and dynamic color morphing
 /// - Center: Biomorphic AI cybernetic face & polygonal energy lattice that blinks and deforms in sync with rhythm
-/// Features smooth Lerp interpolation, event lifecycle management, and zero-GC allocations in the render loop.
+/// Features smooth Lerp interpolation, event lifecycle management, and zero-GC allocations in the render loop:
+/// reusable StreamGeometryContexts, frozen static resource palettes, and reusable transforms.
 /// </summary>
 public sealed class ArcReactorVisualHost : FrameworkElement
 {
@@ -36,9 +204,7 @@ public sealed class ArcReactorVisualHost : FrameworkElement
     // Breathing pulsation & state
     private double _breathPhase = 0;
     private JarvisState _currentState = JarvisState.Idle;
-    private Color _currentColor = Color.FromRgb(0x00, 0xE5, 0xFF);
-    private Color _targetColor = Color.FromRgb(0x00, 0xE5, 0xFF);
-    private Color _baseStateColor = Color.FromRgb(0x00, 0xE5, 0xFF);
+    private ReactorPalette _currentPalette = ArcReactorPalettes.Idle;
 
     // Audio spectrum & Lerp arrays
     private readonly AudioSpectrumAnalyzer _analyzer = new();
@@ -56,33 +222,47 @@ public sealed class ArcReactorVisualHost : FrameworkElement
     private StreamGeometry _ring5CoilsGeometry = null!;
     private StreamGeometry _coreGlyphGeometry = null!;
 
-    // Cached brushes & pens
-    private SolidColorBrush _primaryBrush = null!;
-    private Pen _primaryPen = null!;
-    private Pen _rayPen = null!;
-    private SolidColorBrush _tipBrush = null!;
-    private RadialGradientBrush _auraBrush = null!;
-    private RadialGradientBrush _plasmaBrush = null!;
-    private RadialGradientBrush _nuclearBrush = null!;
+    // Reusable dynamic StreamGeometry instances (re-opened every frame via StreamGeometryContext with zero heap allocations)
+    private readonly StreamGeometry _dynamicRaysGeometry = new();
+    private readonly StreamGeometry _dynamicTipsGeometry = new();
+    private readonly StreamGeometry _biomorphicFaceThickGeometry = new();
+    private readonly StreamGeometry _biomorphicFaceGeometry = new();
 
-    private Pen _penRing1Track = null!;
-    private Pen _penRing1Ticks = null!;
-    private Pen _penRing2Dashed = null!;
-    private Pen _penRing3Sectors = null!;
-    private Pen _penRing4Dashed = null!;
-    private Pen _penRing4Ticks = null!;
-    private Pen _penRing5Coils = null!;
-    private Pen _penContainment = null!;
-    private Pen _coreGlyphPen = null!;
+    // Reusable transform objects (updated every frame in-place without new allocations)
+    private readonly ScaleTransform _rootScaleTransform = new();
+    private readonly RotateTransform _rotRing1 = new();
+    private readonly RotateTransform _rotRing2 = new();
+    private readonly RotateTransform _rotRing3 = new();
+    private readonly RotateTransform _rotRing4 = new();
+    private readonly RotateTransform _rotRing5 = new();
+    private readonly TranslateTransform _transCenter = new();
 
-    // Biomorphic AI Face pens & brushes
-    private Pen _biomorphicPen = null!;
-    private Pen _biomorphicThickPen = null!;
-    private SolidColorBrush _biomorphicNodeBrush = null!;
+    // Static frozen resources shared across all instances
+    private static readonly SolidColorBrush StaticWhiteBrush;
+    private static readonly SolidColorBrush StaticTipBrush;
+    private static readonly Pen StaticCoreGlyphPen;
+    private static readonly Pen StaticBiomorphicThickPen;
+    private static readonly SolidColorBrush StaticBiomorphicNodeBrush;
+
+    static ArcReactorVisualHost()
+    {
+        StaticWhiteBrush = new SolidColorBrush(Color.FromArgb(255, 255, 255, 255));
+        StaticWhiteBrush.Freeze();
+
+        StaticTipBrush = StaticWhiteBrush;
+
+        StaticCoreGlyphPen = new Pen(new SolidColorBrush(Color.FromArgb(220, 255, 255, 255)), 1.0);
+        StaticCoreGlyphPen.Freeze();
+
+        StaticBiomorphicThickPen = new Pen(new SolidColorBrush(Color.FromArgb(240, 255, 255, 255)), 1.5);
+        StaticBiomorphicThickPen.Freeze();
+
+        StaticBiomorphicNodeBrush = StaticWhiteBrush;
+    }
 
     public AudioSpectrumAnalyzer SpectrumAnalyzer => _analyzer;
     public JarvisState CurrentState => _currentState;
-    public Color CurrentColor => _currentColor;
+    public Color CurrentColor => _currentPalette.Color;
 
     public ArcReactorVisualHost()
     {
@@ -91,7 +271,6 @@ public sealed class ArcReactorVisualHost : FrameworkElement
 
         PrecomputeTrigonometry();
         BuildStaticGeometries();
-        UpdateCachedBrushes(_currentColor);
 
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
@@ -254,109 +433,6 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         _coreGlyphGeometry.Freeze();
     }
 
-    private void UpdateCachedBrushes(Color color)
-    {
-        _primaryBrush = new SolidColorBrush(color);
-        _primaryBrush.Freeze();
-
-        _primaryPen = new Pen(_primaryBrush, 1.2);
-        _primaryPen.Freeze();
-
-        _rayPen = new Pen(new SolidColorBrush(Color.FromArgb(230, color.R, color.G, color.B)), 1.5);
-        _rayPen.Freeze();
-
-        _tipBrush = new SolidColorBrush(Color.FromArgb(255, 255, 255, 255));
-        _tipBrush.Freeze();
-
-        // Volumetric aura gradient
-        _auraBrush = new RadialGradientBrush
-        {
-            GradientOrigin = new Point(0.5, 0.5),
-            Center = new Point(0.5, 0.5),
-            RadiusX = 0.5,
-            RadiusY = 0.5
-        };
-        _auraBrush.GradientStops.Add(new GradientStop(Color.FromArgb(80, color.R, color.G, color.B), 0.0));
-        _auraBrush.GradientStops.Add(new GradientStop(Color.FromArgb(25, color.R, color.G, color.B), 0.65));
-        _auraBrush.GradientStops.Add(new GradientStop(Color.FromArgb(0, color.R, color.G, color.B), 1.0));
-        _auraBrush.Freeze();
-
-        // Plasma energy core
-        _plasmaBrush = new RadialGradientBrush
-        {
-            GradientOrigin = new Point(0.5, 0.5),
-            Center = new Point(0.5, 0.5),
-            RadiusX = 0.5,
-            RadiusY = 0.5
-        };
-        _plasmaBrush.GradientStops.Add(new GradientStop(Color.FromArgb(255, 255, 255, 255), 0.0));
-        _plasmaBrush.GradientStops.Add(new GradientStop(Color.FromArgb(235, 220, 255, 255), 0.22));
-        _plasmaBrush.GradientStops.Add(new GradientStop(Color.FromArgb(220, color.R, color.G, color.B), 0.55));
-        _plasmaBrush.GradientStops.Add(new GradientStop(Color.FromArgb(160, (byte)(color.R * 0.3), (byte)(color.G * 0.5), (byte)(color.B * 0.8)), 0.82));
-        _plasmaBrush.GradientStops.Add(new GradientStop(Color.FromArgb(0, 0, 10, 30), 1.0));
-        _plasmaBrush.Freeze();
-
-        // Nuclear hotspot
-        _nuclearBrush = new RadialGradientBrush
-        {
-            GradientOrigin = new Point(0.5, 0.5),
-            Center = new Point(0.5, 0.5),
-            RadiusX = 0.5,
-            RadiusY = 0.5
-        };
-        _nuclearBrush.GradientStops.Add(new GradientStop(Color.FromArgb(255, 255, 255, 255), 0.0));
-        _nuclearBrush.GradientStops.Add(new GradientStop(Color.FromArgb(200, 220, 255, 255), 0.5));
-        _nuclearBrush.GradientStops.Add(new GradientStop(Color.FromArgb(0, color.R, color.G, color.B), 1.0));
-        _nuclearBrush.Freeze();
-
-        // Specialized pens
-        _penRing1Track = new Pen(new SolidColorBrush(Color.FromArgb(80, color.R, color.G, color.B)), 0.8);
-        _penRing1Track.Freeze();
-
-        _penRing1Ticks = new Pen(new SolidColorBrush(Color.FromArgb(220, color.R, color.G, color.B)), 1.1);
-        _penRing1Ticks.Freeze();
-
-        _penRing2Dashed = new Pen(new SolidColorBrush(Color.FromArgb(200, color.R, color.G, color.B)), 1.4)
-        {
-            DashStyle = new DashStyle(new double[] { 8, 5, 3, 5 }, 0)
-        };
-        _penRing2Dashed.Freeze();
-
-        _penRing3Sectors = new Pen(new SolidColorBrush(Color.FromArgb(235, color.R, color.G, color.B)), 1.6);
-        _penRing3Sectors.Freeze();
-
-        _penRing4Dashed = new Pen(new SolidColorBrush(Color.FromArgb(150, color.R, color.G, color.B)), 0.9)
-        {
-            DashStyle = new DashStyle(new double[] { 2, 3 }, 0)
-        };
-        _penRing4Dashed.Freeze();
-
-        _penRing4Ticks = new Pen(new SolidColorBrush(Color.FromArgb(180, color.R, color.G, color.B)), 0.8);
-        _penRing4Ticks.Freeze();
-
-        _penRing5Coils = new Pen(new SolidColorBrush(Color.FromArgb(240, color.R, color.G, color.B)), 1.4);
-        _penRing5Coils.Freeze();
-
-        _penContainment = new Pen(new SolidColorBrush(Color.FromArgb(60, color.R, color.G, color.B)), 0.7)
-        {
-            DashStyle = new DashStyle(new double[] { 1, 6 }, 0)
-        };
-        _penContainment.Freeze();
-
-        _coreGlyphPen = new Pen(new SolidColorBrush(Color.FromArgb(220, 255, 255, 255)), 1.0);
-        _coreGlyphPen.Freeze();
-
-        // Biomorphic AI Face Pens
-        _biomorphicPen = new Pen(new SolidColorBrush(Color.FromArgb(220, color.R, color.G, color.B)), 1.2);
-        _biomorphicPen.Freeze();
-
-        _biomorphicThickPen = new Pen(new SolidColorBrush(Color.FromArgb(240, 255, 255, 255)), 1.5);
-        _biomorphicThickPen.Freeze();
-
-        _biomorphicNodeBrush = new SolidColorBrush(Color.FromArgb(255, 255, 255, 255));
-        _biomorphicNodeBrush.Freeze();
-    }
-
     public void StartRendering()
     {
         if (!_isRenderingHooked)
@@ -401,8 +477,7 @@ public sealed class ArcReactorVisualHost : FrameworkElement
     public void SetState(JarvisState state)
     {
         _currentState = state;
-        _baseStateColor = OverlayWidget.GetStateGlowColor(state);
-        _targetColor = _baseStateColor;
+        _currentPalette = ArcReactorPalettes.GetPalette(state, 0f);
     }
 
     private void OnRendering(object? sender, EventArgs e)
@@ -422,62 +497,47 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         // 1. Orbital ring rotation speeds (asynchronous opposite directions)
         double speedMult = _currentState switch
         {
-            JarvisState.Thinking => 2.5,
-            JarvisState.Action => 1.9,
+            JarvisState.Thinking  => 2.5,
+            JarvisState.Action    => 1.9,
             JarvisState.Listening => 1.3,
             _ => 1.0
         };
 
-        // Accellerate rings slightly on music beat
+        // On a beat impulse the rings get a short acceleration burst that decays
+        // with beat intensity — no continuous jitter from residual mids/highs.
         float beat = _analyzer.BeatIntensity;
-        double dynamicSpeed = speedMult + beat * 1.2;
+        double dynamicSpeed = speedMult + beat * 2.0; // stronger burst on the exact beat frame
 
         _angleRing1 = (_angleRing1 + 14.0 * dynamicSpeed * dt) % 360.0;
         _angleRing2 = (_angleRing2 - 28.0 * dynamicSpeed * dt) % 360.0;
         _angleRing3 = (_angleRing3 + 22.0 * dynamicSpeed * dt) % 360.0;
         _angleRing4 = (_angleRing4 - 42.0 * dynamicSpeed * dt) % 360.0;
-        _angleRing5 = (_angleRing5 + 8.0 * dynamicSpeed * dt) % 360.0;
+        _angleRing5 = (_angleRing5 +  8.0 * dynamicSpeed * dt) % 360.0;
 
-        // 2. Continuous sinusoidal breathing in Idle (2.4s cycle)
+        // 2. Continuous sinusoidal breathing — speed is state-dependent only,
+        //    NOT driven by beat so the core breathes calmly between hits.
         double breathSpeed = _currentState switch
         {
-            JarvisState.Thinking => 4.5,
-            JarvisState.Action => 5.5,
+            JarvisState.Thinking  => 4.5,
+            JarvisState.Action    => 5.5,
             JarvisState.Listening => 3.2,
             _ => 2.6
         };
         _breathPhase += dt * breathSpeed;
 
-        // 3. Dynamic color morphing:
-        // When beats hit: Neon Cyan (#00E5FF) -> Ultramarine (#1E40FF) -> Purple (#D500F9)
-        Color computedTarget = _baseStateColor;
-        if (beat > 0.02f)
-        {
-            Color ultramarine = Color.FromRgb(0x1E, 0x40, 0xFF);
-            Color purple = Color.FromRgb(0xD5, 0x00, 0xF9);
-            Color rhythmColor = beat > 0.5f
-                ? LerpColor(ultramarine, purple, (beat - 0.5f) * 2.0f)
-                : LerpColor(_baseStateColor, ultramarine, beat * 2.0f);
+        // 3. Zero-allocation frozen palette selection (hue shifts on beat impulse)
+        _currentPalette = ArcReactorPalettes.GetPalette(_currentState, beat);
 
-            computedTarget = LerpColor(_baseStateColor, rhythmColor, Math.Min(1.0f, beat * 1.2f));
-        }
-        _targetColor = computedTarget;
-
-        if (_currentColor != _targetColor)
-        {
-            float colorFactor = (float)Math.Clamp(dt * 7.5, 0.0, 1.0);
-            _currentColor = LerpColor(_currentColor, _targetColor, colorFactor);
-            UpdateCachedBrushes(_currentColor);
-        }
-
-        // 4. Retrieve frequency spectrum & apply smooth Lerp interpolation
-        _analyzer.GetTargetSpectrum(_targetSpectrum, dt);
+        // 4. Retrieve frequency spectrum using Span (zero allocations) & smooth Lerp.
+        //    The LPF upstream ensures only bass energy drives the ray heights;
+        //    the organic idle wave fills the visual gap between beats.
+        _analyzer.GetTargetSpectrum(_targetSpectrum.AsSpan(), dt);
 
         for (int i = 0; i < RayCount; i++)
         {
             float target = _targetSpectrum[i];
             float current = _currentSpectrum[i];
-            // Fast attack, smooth decay filter
+            // Fast attack (0.42), smooth decay (0.12) — prevents jitter on transients
             float lerpFactor = target > current ? 0.42f : 0.12f;
             _currentSpectrum[i] = current + (target - current) * lerpFactor;
         }
@@ -494,117 +554,175 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         double baseScale = Math.Min(width, height) / 220.0;
         if (baseScale <= 0.01) baseScale = 1.0;
 
-        // Impulsive scale burst driven by beat detection (kick drum/bass)
+        // Impulsive scale burst driven by beat detection.
+        // Uses Ease-Out Exponential: beatEase = 1 - exp(-beat × 6) for a sharp onset
+        // and smooth tail that mirrors a real kick-drum transient envelope.
         float beat = _analyzer.BeatIntensity;
-        double beatScaleBurst = 1.0 + 0.14 * beat;
+        double beatEaseScale = 1.0 - Math.Exp(-beat * 6.0);
+        double beatScaleBurst = 1.0 + 0.12 * beatEaseScale; // up to +12% root expansion
         double finalScale = baseScale * beatScaleBurst;
+
+        var pal = _currentPalette;
+
+        // Update pre-allocated transform fields in-place (0 allocations)
+        _rootScaleTransform.ScaleX = finalScale;
+        _rootScaleTransform.ScaleY = finalScale;
+        _rootScaleTransform.CenterX = cx;
+        _rootScaleTransform.CenterY = cy;
+
+        _rotRing1.Angle = _angleRing1; _rotRing1.CenterX = cx; _rotRing1.CenterY = cy;
+        _rotRing2.Angle = _angleRing2; _rotRing2.CenterX = cx; _rotRing2.CenterY = cy;
+        _rotRing3.Angle = _angleRing3; _rotRing3.CenterX = cx; _rotRing3.CenterY = cy;
+        _rotRing4.Angle = _angleRing4; _rotRing4.CenterX = cx; _rotRing4.CenterY = cy;
+        _rotRing5.Angle = _angleRing5; _rotRing5.CenterX = cx; _rotRing5.CenterY = cy;
+
+        _transCenter.X = cx;
+        _transCenter.Y = cy;
 
         using (DrawingContext dc = _drawingVisual.RenderOpen())
         {
-            dc.PushTransform(new ScaleTransform(finalScale, finalScale, cx, cy));
+            dc.PushTransform(_rootScaleTransform);
 
             // =================================================================
             // LAYER 3: PLASMA ENERGY CORE (Volumetric Glow & Sinusoidal Breath)
             // =================================================================
-            double breathScale = 1.0 + 0.08 * Math.Sin(_breathPhase) + 0.10 * beat;
 
-            // 3a. Soft atmospheric aura
-            double auraRadius = 48.0 * breathScale;
-            dc.DrawEllipse(_auraBrush, null, center, auraRadius, auraRadius);
+            // Pure sinusoidal idle breath (state-speed driven, NOT coupled to beat jitter)
+            double idleBreath = Math.Sin(_breathPhase);
 
-            // 3b. Mid plasma energy sphere
-            double plasmaRadius = 30.0 * breathScale;
-            dc.DrawEllipse(_plasmaBrush, null, center, plasmaRadius, plasmaRadius);
+            // Beat impulse uses an Ease-Out Exponential curve:
+            //   beatEase = 1 - exp(-beat × 6)  maps [0,1] → [0,~0.998]
+            //   Fast initial rise then asymptotic tail — matches a real kick-drum envelope.
+            //   Between beats, beat = 0 so beatEase = 0 and only idleBreath drives the radius.
+            double beatEase = 1.0 - Math.Exp(-beat * 6.0);
 
-            // 3c. Nuclear focal node
-            double nuclearRadius = 13.0 * (1.0 + 0.04 * Math.Sin(_breathPhase) + 0.08 * beat);
-            dc.DrawEllipse(_nuclearBrush, null, center, nuclearRadius, nuclearRadius);
+            // 3a. Outer atmospheric aura — expands sharply on beat, breathes gently in idle
+            double auraBreath    = 1.0 + 0.06 * idleBreath;   // ±6% idle breath
+            double auraBeatBurst = 1.0 + 0.32 * beatEase;     // up to +32% beat burst
+            double auraRadius    = 48.0 * auraBreath * auraBeatBurst;
+            dc.DrawEllipse(pal.AuraBrush, null, center, auraRadius, auraRadius);
+
+            // 3b. Mid plasma energy sphere — moderate beat response
+            double plasmaBreath    = 1.0 + 0.08 * idleBreath;
+            double plasmaBeatBurst = 1.0 + 0.18 * beatEase;
+            double plasmaRadius    = 30.0 * plasmaBreath * plasmaBeatBurst;
+            dc.DrawEllipse(pal.PlasmaBrush, null, center, plasmaRadius, plasmaRadius);
+
+            // 3c. Nuclear focal node — brief white-hot flash at beat peak, then back to breath
+            double nuclearBreath    = 1.0 + 0.04 * idleBreath;
+            double nuclearBeatFlash = 1.0 + 0.22 * beatEase;
+            double nuclearRadius    = 13.0 * nuclearBreath * nuclearBeatFlash;
+            dc.DrawEllipse(pal.NuclearBrush, null, center, nuclearRadius, nuclearRadius);
 
             // =================================================================
             // BIOMORPHIC AI CENTER ("Face of AI" / Digital Polygonal Cyber-Mesh)
             // =================================================================
-            RenderBiomorphicFace(dc, center, now, beat);
+            RenderBiomorphicFace(dc, center, now, beat, pal);
 
             // =================================================================
             // LAYER 2: ORBITAL RINGS & HUD GLYPHS (Concentric Rotating Scales)
             // =================================================================
 
             // Ring 5 (Coil Bracket Ring, R = 34, angleRing5)
-            dc.PushTransform(new RotateTransform(_angleRing5, cx, cy));
-            dc.DrawEllipse(null, _penRing5Coils, center, 34.0, 34.0);
-            dc.PushTransform(new TranslateTransform(cx, cy));
-            dc.DrawGeometry(_primaryBrush, null, _ring5CoilsGeometry);
+            dc.PushTransform(_rotRing5);
+            dc.DrawEllipse(null, pal.PenRing5Coils, center, 34.0, 34.0);
+            dc.PushTransform(_transCenter);
+            dc.DrawGeometry(pal.PrimaryBrush, null, _ring5CoilsGeometry);
             dc.Pop();
             dc.Pop();
 
             // Ring 4 (Inner Fine Dashed Vernier Scale, R = 44, angleRing4)
-            dc.PushTransform(new RotateTransform(_angleRing4, cx, cy));
-            dc.DrawEllipse(null, _penRing4Dashed, center, 44.0, 44.0);
-            dc.PushTransform(new TranslateTransform(cx, cy));
-            dc.DrawGeometry(null, _penRing4Ticks, _ring4TicksGeometry);
+            dc.PushTransform(_rotRing4);
+            dc.DrawEllipse(null, pal.PenRing4Dashed, center, 44.0, 44.0);
+            dc.PushTransform(_transCenter);
+            dc.DrawGeometry(null, pal.PenRing4Ticks, _ring4TicksGeometry);
             dc.Pop();
             dc.Pop();
 
             // Ring 3 (HUD Chevrons & Calibrated Sectors, R = 54, angleRing3)
-            dc.PushTransform(new RotateTransform(_angleRing3, cx, cy));
-            dc.PushTransform(new TranslateTransform(cx, cy));
-            dc.DrawGeometry(null, _penRing3Sectors, _ring3SectorsGeometry);
-            dc.DrawGeometry(_primaryBrush, null, _ring3ChevronsGeometry);
+            dc.PushTransform(_rotRing3);
+            dc.PushTransform(_transCenter);
+            dc.DrawGeometry(null, pal.PenRing3Sectors, _ring3SectorsGeometry);
+            dc.DrawGeometry(pal.PrimaryBrush, null, _ring3ChevronsGeometry);
             dc.Pop();
             dc.Pop();
 
             // Ring 2 (Segmented Dashed Arc Ring, R = 64, angleRing2)
-            dc.PushTransform(new RotateTransform(_angleRing2, cx, cy));
-            dc.DrawEllipse(null, _penRing2Dashed, center, 64.0, 64.0);
-            dc.PushTransform(new TranslateTransform(cx, cy));
-            dc.DrawGeometry(null, _primaryPen, _ring2AccentsGeometry);
+            dc.PushTransform(_rotRing2);
+            dc.DrawEllipse(null, pal.PenRing2Dashed, center, 64.0, 64.0);
+            dc.PushTransform(_transCenter);
+            dc.DrawGeometry(null, pal.PrimaryPen, _ring2AccentsGeometry);
             dc.Pop();
             dc.Pop();
 
             // Ring 1 (Outer Calibrated Tick Ring, R = 72, angleRing1)
-            dc.PushTransform(new RotateTransform(_angleRing1, cx, cy));
-            dc.DrawEllipse(null, _penRing1Track, center, 72.0, 72.0);
-            dc.PushTransform(new TranslateTransform(cx, cy));
-            dc.DrawGeometry(null, _penRing1Ticks, _ring1TicksGeometry);
+            dc.PushTransform(_rotRing1);
+            dc.DrawEllipse(null, pal.PenRing1Track, center, 72.0, 72.0);
+            dc.PushTransform(_transCenter);
+            dc.DrawGeometry(null, pal.PenRing1Ticks, _ring1TicksGeometry);
             dc.Pop();
             dc.Pop();
 
             // =================================================================
             // LAYER 1: RADIAL AUDIO SPECTROGRAPH (Procedural Crown of 96 Rays)
+            // Batch rendering via StreamGeometry & StreamGeometryContext (0 allocations)
             // =================================================================
-            for (int i = 0; i < RayCount; i++)
+            using (var rayCtx = _dynamicRaysGeometry.Open())
             {
-                double cos = _cosTable[i];
-                double sin = _sinTable[i];
-                double theta = i * (2.0 * Math.PI / RayCount);
+                for (int i = 0; i < RayCount; i++)
+                {
+                    double cos = _cosTable[i];
+                    double sin = _sinTable[i];
+                    double theta = i * (2.0 * Math.PI / RayCount);
 
-                // Subtle organic idle wave when silent
-                double idleWave = 1.3 * Math.Sin(4.0 * theta + 2.5 * now) * Math.Cos(2.0 * theta - 1.8 * now);
-                double audioHeight = _currentSpectrum[i] * MaxRayHeight;
-                double h = Math.Clamp(2.5 + idleWave + audioHeight, 1.8, MaxRayHeight + 4.0);
+                    // Subtle organic idle wave when silent
+                    double idleWave = 1.3 * Math.Sin(4.0 * theta + 2.5 * now) * Math.Cos(2.0 * theta - 1.8 * now);
+                    double audioHeight = _currentSpectrum[i] * MaxRayHeight;
+                    double h = Math.Clamp(2.5 + idleWave + audioHeight, 1.8, MaxRayHeight + 4.0);
 
-                Point p0 = new Point(cx + BaseRadius * cos, cy + BaseRadius * sin);
-                Point p1 = new Point(cx + (BaseRadius + h) * cos, cy + (BaseRadius + h) * sin);
+                    Point p0 = new Point(cx + BaseRadius * cos, cy + BaseRadius * sin);
+                    Point p1 = new Point(cx + (BaseRadius + h) * cos, cy + (BaseRadius + h) * sin);
 
-                dc.DrawLine(_rayPen, p0, p1);
-                dc.DrawEllipse(_tipBrush, null, p1, 1.0, 1.0);
+                    rayCtx.BeginFigure(p0, false, false);
+                    rayCtx.LineTo(p1, true, false);
+                }
             }
+            dc.DrawGeometry(null, pal.RayPen, _dynamicRaysGeometry);
+
+            // Ray tips batched in StreamGeometry
+            using (var tipCtx = _dynamicTipsGeometry.Open())
+            {
+                for (int i = 0; i < RayCount; i++)
+                {
+                    double cos = _cosTable[i];
+                    double sin = _sinTable[i];
+                    double theta = i * (2.0 * Math.PI / RayCount);
+
+                    double idleWave = 1.3 * Math.Sin(4.0 * theta + 2.5 * now) * Math.Cos(2.0 * theta - 1.8 * now);
+                    double audioHeight = _currentSpectrum[i] * MaxRayHeight;
+                    double h = Math.Clamp(2.5 + idleWave + audioHeight, 1.8, MaxRayHeight + 4.0);
+
+                    Point p1 = new Point(cx + (BaseRadius + h) * cos, cy + (BaseRadius + h) * sin);
+
+                    tipCtx.BeginFigure(new Point(p1.X - 1.0, p1.Y), true, true);
+                    tipCtx.ArcTo(new Point(p1.X + 1.0, p1.Y), new Size(1.0, 1.0), 0, false, SweepDirection.Clockwise, true, false);
+                    tipCtx.ArcTo(new Point(p1.X - 1.0, p1.Y), new Size(1.0, 1.0), 0, false, SweepDirection.Clockwise, true, false);
+                }
+            }
+            dc.DrawGeometry(StaticTipBrush, null, _dynamicTipsGeometry);
 
             // Outer containment dotted circle (R = 98)
-            dc.DrawEllipse(null, _penContainment, center, BaseRadius + MaxRayHeight, BaseRadius + MaxRayHeight);
+            dc.DrawEllipse(null, pal.PenContainment, center, BaseRadius + MaxRayHeight, BaseRadius + MaxRayHeight);
 
-            dc.Pop(); // ScaleTransform
+            dc.Pop(); // _rootScaleTransform
         }
     }
 
     /// <summary>
     /// Renders procedural biomorphic AI face & polygonal energy lattice in the reactor core.
-    /// Features:
-    /// - Eye contours that periodically blink smoothly (3.6s cycle, 160ms blink duration)
-    /// - Dynamic polygonal geometry flexing and expanding in rhythm to bass/kick beats
-    /// - Digital cyber-mask nodes and glowing neural lines
+    /// Batches wireframe lines through StreamGeometryContext for zero heap allocation.
     /// </summary>
-    private void RenderBiomorphicFace(DrawingContext dc, Point center, double now, float beat)
+    private void RenderBiomorphicFace(DrawingContext dc, Point center, double now, float beat, ReactorPalette pal)
     {
         double cx = center.X;
         double cy = center.Y;
@@ -649,49 +767,40 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         Point jR = new Point(cx + 8.0 * deform, cy + 12.0 * deform);
         Point chin = new Point(cx, cy + 15.5 * deform);
 
-        // Draw Left Eye
-        dc.DrawLine(_biomorphicThickPen, eL1, eL2);
-        dc.DrawLine(_biomorphicThickPen, eL2, eL3);
-        dc.DrawLine(_biomorphicPen, eL3, eL4);
-        dc.DrawLine(_biomorphicPen, eL4, eL1);
+        // Batch thick eye contours into _biomorphicFaceThickGeometry
+        using (var ctx = _biomorphicFaceThickGeometry.Open())
+        {
+            ctx.BeginFigure(eL1, false, false); ctx.LineTo(eL2, true, false); ctx.LineTo(eL3, true, false);
+            ctx.BeginFigure(eR1, false, false); ctx.LineTo(eR2, true, false); ctx.LineTo(eR3, true, false);
+        }
+        dc.DrawGeometry(null, StaticBiomorphicThickPen, _biomorphicFaceThickGeometry);
 
-        // Draw Right Eye
-        dc.DrawLine(_biomorphicThickPen, eR1, eR2);
-        dc.DrawLine(_biomorphicThickPen, eR2, eR3);
-        dc.DrawLine(_biomorphicPen, eR3, eR4);
-        dc.DrawLine(_biomorphicPen, eR4, eR1);
+        // Batch standard lines into _biomorphicFaceGeometry
+        using (var ctx = _biomorphicFaceGeometry.Open())
+        {
+            // Left eye lower
+            ctx.BeginFigure(eL3, false, false); ctx.LineTo(eL4, true, false); ctx.LineTo(eL1, true, false);
+            // Right eye lower
+            ctx.BeginFigure(eR3, false, false); ctx.LineTo(eR4, true, false); ctx.LineTo(eR1, true, false);
+            // Forehead
+            ctx.BeginFigure(bL, false, false); ctx.LineTo(b0, true, false); ctx.LineTo(bR, true, false);
+            ctx.BeginFigure(b0, false, false); ctx.LineTo(n0, true, false);
+            // Cheek & Jaw
+            ctx.BeginFigure(eL1, false, false); ctx.LineTo(chL, true, false); ctx.LineTo(jL, true, false); ctx.LineTo(chin, true, false);
+            ctx.BeginFigure(eR3, false, false); ctx.LineTo(chR, true, false); ctx.LineTo(jR, true, false); ctx.LineTo(chin, true, false);
+            ctx.BeginFigure(n0, false, false); ctx.LineTo(chin, true, false);
+        }
+        dc.DrawGeometry(null, pal.BiomorphicPen, _biomorphicFaceGeometry);
 
         // Pupil / Retina glints inside eyes
-        dc.DrawEllipse(_biomorphicNodeBrush, null, new Point(cx - 7.0 * deform, cy - 2.5 * deform), 1.1, 1.1 * blinkScale);
-        dc.DrawEllipse(_biomorphicNodeBrush, null, new Point(cx + 7.0 * deform, cy - 2.5 * deform), 1.1, 1.1 * blinkScale);
-
-        // Forehead & Brow Lattice
-        dc.DrawLine(_biomorphicPen, bL, b0);
-        dc.DrawLine(_biomorphicPen, b0, bR);
-        dc.DrawLine(_biomorphicPen, b0, n0);
-
-        // Cheek & Jaw Wireframe
-        dc.DrawLine(_biomorphicPen, eL1, chL);
-        dc.DrawLine(_biomorphicPen, eR3, chR);
-        dc.DrawLine(_biomorphicPen, chL, jL);
-        dc.DrawLine(_biomorphicPen, chR, jR);
-        dc.DrawLine(_biomorphicPen, jL, chin);
-        dc.DrawLine(_biomorphicPen, jR, chin);
-        dc.DrawLine(_biomorphicPen, n0, chin);
+        dc.DrawEllipse(StaticBiomorphicNodeBrush, null, new Point(cx - 7.0 * deform, cy - 2.5 * deform), 1.1, 1.1 * blinkScale);
+        dc.DrawEllipse(StaticBiomorphicNodeBrush, null, new Point(cx + 7.0 * deform, cy - 2.5 * deform), 1.1, 1.1 * blinkScale);
 
         // Digital Neural Lattice Nodes
-        dc.DrawEllipse(_biomorphicNodeBrush, null, b0, 1.2, 1.2);
-        dc.DrawEllipse(_biomorphicNodeBrush, null, n0, 1.2, 1.2);
-        dc.DrawEllipse(_biomorphicNodeBrush, null, chin, 1.4, 1.4);
-        dc.DrawEllipse(_biomorphicNodeBrush, null, chL, 1.1, 1.1);
-        dc.DrawEllipse(_biomorphicNodeBrush, null, chR, 1.1, 1.1);
-    }
-
-    private static Color LerpColor(Color a, Color b, float t)
-    {
-        byte r = (byte)(a.R + (b.R - a.R) * t);
-        byte g = (byte)(a.G + (b.G - a.G) * t);
-        byte bl = (byte)(a.B + (b.B - a.B) * t);
-        return Color.FromRgb(r, g, bl);
+        dc.DrawEllipse(StaticBiomorphicNodeBrush, null, b0, 1.2, 1.2);
+        dc.DrawEllipse(StaticBiomorphicNodeBrush, null, n0, 1.2, 1.2);
+        dc.DrawEllipse(StaticBiomorphicNodeBrush, null, chin, 1.4, 1.4);
+        dc.DrawEllipse(StaticBiomorphicNodeBrush, null, chL, 1.1, 1.1);
+        dc.DrawEllipse(StaticBiomorphicNodeBrush, null, chR, 1.1, 1.1);
     }
 }

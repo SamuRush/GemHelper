@@ -509,4 +509,63 @@ public static class CliRunner
             return Task.CompletedTask;
         }
     }
+
+    public static async Task RunDemoSuiteAsync(
+        CommandRouter router,
+        LlmIntentService llmService,
+        IVoiceFeedbackService feedbackService,
+        Gem.UI.OverlayWidget overlay,
+        WeatherService? weatherService,
+        Func<string, LlmIntentService, CommandRouter, IVoiceFeedbackService, Gem.UI.OverlayWidget?, WeatherService?, Task> pipelineRunner)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("\n--- ЗАПУСК ДЕМОНСТРАЦИОННОГО ТЕСТИРОВАНИЯ КОМАНД ---\n");
+        Console.ResetColor();
+
+        await ExecuteAndLogAsync(router, "1. Запрос текущей громкости", """{ "command": "volume", "args": { "action": "get" } }""");
+        await ExecuteAndLogAsync(router, "2. Установка громкости на 40%", """{ "command": "volume", "args": { "action": "set", "level": 40 } }""");
+        await ExecuteAndLogAsync(router, "3. Изменение громкости на +5%", """{ "command": "volume", "args": { "action": "change", "delta": 5 } }""");
+        await ExecuteAndLogAsync(router, "4. Запуск приложения 'notepad'", """{ "command": "app", "args": { "action": "start", "name": "notepad" } }""");
+        await Task.Delay(1000);
+        await ExecuteAndLogAsync(router, "5. Проверка статуса 'notepad'", """{ "command": "app", "args": { "action": "status", "name": "notepad" } }""");
+        await ExecuteAndLogAsync(router, "6. Закрытие приложения 'notepad'", """{ "command": "app", "args": { "action": "close", "name": "notepad", "force": false } }""");
+        await ExecuteAndLogAsync(router, "7. Симуляция горячей клавиши (SendInput)", """{ "command": "hotkey", "args": { "keys": ["shift"], "delayMs": 50 } }""");
+
+        Console.ForegroundColor = ConsoleColor.DarkCyan;
+        Console.WriteLine("[TEST] 8. Тест естественного языка JARVIS (LLM -> Router -> TTS): \"прибавь звук\"");
+        Console.ResetColor();
+        await pipelineRunner("прибавь звук", llmService, router, feedbackService, overlay, weatherService);
+
+        Console.ForegroundColor = ConsoleColor.DarkCyan;
+        Console.WriteLine("[TEST] 9. Тест погоды JARVIS: \"какая погода\"");
+        Console.ResetColor();
+        await pipelineRunner("какая погода", llmService, router, feedbackService, overlay, weatherService);
+
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("\n--- ДЕМОНСТРАЦИЯ ЗАВЕРШЕНА ---\n");
+        Console.ResetColor();
+    }
+
+    private static async Task ExecuteAndLogAsync(CommandRouter router, string description, string json)
+    {
+        Console.ForegroundColor = ConsoleColor.DarkCyan;
+        Console.WriteLine($"[TEST] {description}:");
+        Console.ForegroundColor = ConsoleColor.Gray;
+        Console.WriteLine($"  JSON: {json}");
+        Console.ResetColor();
+
+        var result = await router.RouteAsync(json);
+        if (result.Success)
+        {
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.Write("  [OK] ");
+        }
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.Write("  [FAIL] ");
+        }
+        Console.WriteLine(result.Message);
+        Console.ResetColor();
+    }
 }

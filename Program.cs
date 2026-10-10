@@ -102,11 +102,21 @@ public static class Program
 
         // 4. Initialize background voice listener (Vosk)
         VoiceListener? voiceListener = null;
-        string? resolvedModelPath = VoskModelHelper.FindModelDirectory(settingsData.VoskModelPath);
+        string preferredPath = settingsData.Vosk.UseSmallModel && !string.IsNullOrWhiteSpace(settingsData.Vosk.SmallModelPath)
+            ? settingsData.Vosk.SmallModelPath
+            : settingsData.Vosk.ModelPath;
+
+        string? resolvedModelPath = VoskModelHelper.FindModelDirectory(preferredPath)
+            ?? VoskModelHelper.FindModelDirectory(settingsData.Vosk.SmallModelPath)
+            ?? VoskModelHelper.FindModelDirectory(settingsData.Vosk.ModelPath);
+
         string voskModelPath = resolvedModelPath
-            ?? (Directory.Exists(settingsData.VoskModelPath)
-                ? settingsData.VoskModelPath
-                : VoskModelHelper.DefaultModelFolder);
+            ?? (Directory.Exists(preferredPath) ? preferredPath : VoskModelHelper.DefaultSmallModelFolder);
+
+        bool isSmallModel = voskModelPath.Contains("small", StringComparison.OrdinalIgnoreCase);
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine($"[Vosk] Конфигурация модели: путь='{voskModelPath}', тип={(isSmallModel ? "Легковесная (vosk-model-small-ru)" : "Полноразмерная")}");
+        Console.ResetColor();
 
         if (Directory.Exists(voskModelPath) && VoskModelHelper.IsModelAvailable(voskModelPath))
         {
@@ -126,7 +136,7 @@ public static class Program
         {
             Console.ForegroundColor = ConsoleColor.DarkYellow;
             Console.WriteLine($"[i] Папка модели Vosk '{voskModelPath}' не найдена или не содержит файлов модели. Фоновый микрофон ожидает загрузки модели.");
-            Console.WriteLine("    Чтобы загрузить полноразмерную русскую модель Vosk vosk-model-ru-0.42 (~1.5 ГБ), выполните: QuickStart.bat или Gem.exe --download-model");
+            Console.WriteLine("    Чтобы загрузить русскую модель Vosk, выполните: QuickStart.bat или Gem.exe --download-model");
             Console.ResetColor();
         }
 
@@ -192,6 +202,23 @@ public static class Program
         // 7. Оповещение о готовности всех систем
         Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [JARVIS] Все системы инициализированы. Готов к работе.");
 
+        var startupProc = Process.GetCurrentProcess();
+        startupProc.Refresh();
+        long privateBytes = startupProc.PrivateMemorySize64;
+        long workingSetBytes = startupProc.WorkingSet64;
+        long gcBytes = GC.GetTotalMemory(false);
+
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine(
+            $"[{DateTime.Now:HH:mm:ss.fff}] [Memory Audit] Память при старте: " +
+            $"Private Memory = {privateBytes / (1024 * 1024)} МБ | " +
+            $"Working Set = {workingSetBytes / (1024 * 1024)} МБ | " +
+            $"GC Heap = {gcBytes / (1024 * 1024)} МБ");
+        Console.ResetColor();
+
+        // 7b. Forced post-initialization memory trim (GC.Collect + SetProcessWorkingSetSize(-1, -1))
+        MemoryTrimmer.TrimMemory("Startup Post-Init");
+
         _ = Task.Run(async () =>
         {
             await Task.Delay(500);
@@ -206,7 +233,7 @@ public static class Program
                 bool isDemo = args.Contains("--demo", StringComparer.OrdinalIgnoreCase);
                 if (isDemo)
                 {
-                    await RunDemoSuiteAsync(router, llmService, voiceFeedback, overlay, weatherService);
+                    await CliRunner.RunDemoSuiteAsync(router, llmService, voiceFeedback, overlay, weatherService, ProcessJarvisPipelineAsync);
                 }
 
                 await RunConsoleLoopAsync(router, llmService, voiceFeedback, overlay, weatherService);
@@ -364,77 +391,6 @@ public static class Program
         Console.WriteLine("║   - Voice Feedback (Hybrid: Edge-TTS -> System.Speech SAPI5) ║");
         Console.WriteLine("╚══════════════════════════════════════════════════════════════╝\n");
         Console.ResetColor();
-    }
-
-    private static async Task RunDemoSuiteAsync(
-        CommandRouter router,
-        LlmIntentService llmService,
-        IVoiceFeedbackService feedbackService,
-        OverlayWidget overlay,
-        WeatherService? weatherService = null)
-    {
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine("\n--- ЗАПУСК ДЕМОНСТРАЦИОННОГО ТЕСТИРОВАНИЯ КОМАНД ---\n");
-        Console.ResetColor();
-
-        await ExecuteAndLogAsync(router,
-            "1. Запрос текущей громкости",
-            """{ "command": "volume", "args": { "action": "get" } }""");
-
-        await ExecuteAndLogAsync(router,
-            "2. Установка громкости на 40%",
-            """{ "command": "volume", "args": { "action": "set", "level": 40 } }""");
-
-        await ExecuteAndLogAsync(router,
-            "3. Изменение громкости на +5%",
-            """{ "command": "volume", "args": { "action": "change", "delta": 5 } }""");
-
-        await ExecuteAndLogAsync(router,
-            "4. Запуск приложения 'notepad'",
-            """{ "command": "app", "args": { "action": "start", "name": "notepad" } }""");
-
-        await Task.Delay(1000);
-
-        await ExecuteAndLogAsync(router,
-            "5. Проверка статуса 'notepad'",
-            """{ "command": "app", "args": { "action": "status", "name": "notepad" } }""");
-
-        await ExecuteAndLogAsync(router,
-            "6. Закрытие приложения 'notepad'",
-            """{ "command": "app", "args": { "action": "close", "name": "notepad", "force": false } }""");
-
-        await ExecuteAndLogAsync(router,
-            "7. Симуляция горячей клавиши (SendInput)",
-            """{ "command": "hotkey", "args": { "keys": ["shift"], "delayMs": 50 } }""");
-
-        Console.ForegroundColor = ConsoleColor.DarkCyan;
-        Console.WriteLine("[TEST] 8. Тест естественного языка JARVIS (LLM -> Router -> TTS):");
-        Console.WriteLine("  Фраза: \"прибавь звук\"");
-        Console.ResetColor();
-        await ProcessJarvisPipelineAsync("прибавь звук", llmService, router, feedbackService, overlay, weatherService);
-
-        Console.ForegroundColor = ConsoleColor.DarkCyan;
-        Console.WriteLine("[TEST] 9. Тест погоды JARVIS:");
-        Console.WriteLine("  Фраза: \"какая погода\"");
-        Console.ResetColor();
-        await ProcessJarvisPipelineAsync("какая погода", llmService, router, feedbackService, overlay, weatherService);
-
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine("\n--- ДЕМОНСТРАЦИЯ ЗАВЕРШЕНА ---\n");
-        Console.ResetColor();
-    }
-
-    private static async Task ExecuteAndLogAsync(CommandRouter router, string description, string json)
-    {
-        Console.ForegroundColor = ConsoleColor.DarkCyan;
-        Console.WriteLine($"[TEST] {description}:");
-        Console.ForegroundColor = ConsoleColor.Gray;
-        Console.WriteLine($"  JSON: {json}");
-        Console.ResetColor();
-
-        var result = await router.RouteAsync(json);
-        PrintResult(result);
-        Console.WriteLine();
     }
 
     private static void PrintResult(CommandResult result)
