@@ -14,6 +14,7 @@ namespace Gem.UI;
 public sealed class ReactorPalette
 {
     public Color Color { get; }
+    public Color RayPenColor { get; }
     public SolidColorBrush PrimaryBrush { get; }
     public Pen PrimaryPen { get; }
     public Pen RayPen { get; }
@@ -30,9 +31,10 @@ public sealed class ReactorPalette
     public Pen PenContainment { get; }
     public Pen BiomorphicPen { get; }
 
-    public ReactorPalette(Color color)
+    public ReactorPalette(Color color, Color? rayPenColor = null)
     {
         Color = color;
+        RayPenColor = rayPenColor ?? Color.FromArgb(230, color.R, color.G, color.B);
 
         PrimaryBrush = new SolidColorBrush(color);
         PrimaryBrush.Freeze();
@@ -40,7 +42,7 @@ public sealed class ReactorPalette
         PrimaryPen = new Pen(PrimaryBrush, 1.2);
         PrimaryPen.Freeze();
 
-        RayPen = new Pen(new SolidColorBrush(Color.FromArgb(230, color.R, color.G, color.B)), 1.4);
+        RayPen = new Pen(new SolidColorBrush(RayPenColor), 1.4);
         RayPen.Freeze();
 
         AuraBrush = new RadialGradientBrush
@@ -175,6 +177,35 @@ public static class ColorMath
             (byte)Math.Round(a.G + (b.G - a.G) * t),
             (byte)Math.Round(a.B + (b.B - a.B) * t));
     }
+
+    public static Color ParseHex(string? hex, Color fallback)
+    {
+        if (string.IsNullOrWhiteSpace(hex)) return fallback;
+        try
+        {
+            string clean = hex.Trim().TrimStart('#');
+            if (clean.Length == 6)
+            {
+                byte r = Convert.ToByte(clean.Substring(0, 2), 16);
+                byte g = Convert.ToByte(clean.Substring(2, 2), 16);
+                byte b = Convert.ToByte(clean.Substring(4, 2), 16);
+                return Color.FromRgb(r, g, b);
+            }
+            if (clean.Length == 8)
+            {
+                byte a = Convert.ToByte(clean.Substring(0, 2), 16);
+                byte r = Convert.ToByte(clean.Substring(2, 2), 16);
+                byte g = Convert.ToByte(clean.Substring(4, 2), 16);
+                byte b = Convert.ToByte(clean.Substring(6, 2), 16);
+                return Color.FromArgb(a, r, g, b);
+            }
+        }
+        catch
+        {
+            // fallback
+        }
+        return fallback;
+    }
 }
 
 /// <summary>
@@ -184,7 +215,8 @@ public enum HudColorTheme
 {
     ArcReactor,
     CyberpunkFlow,
-    SolarFlare
+    SolarFlare,
+    Custom
 }
 
 /// <summary>
@@ -201,9 +233,31 @@ public static class ArcReactorPalettes
     public static readonly ReactorPalette[] SpectrumGradientPalettes = PrecomputeSpectrumPalettes();
     public static readonly ReactorPalette[] CyberpunkGradientPalettes = PrecomputeCyberpunkPalettes();
     public static readonly ReactorPalette[] SolarFlareGradientPalettes = PrecomputeSolarFlarePalettes();
+    public static ReactorPalette[] CustomGradientPalettes { get; private set; } = PrecomputeCustomPalettes(
+        Color.FromRgb(0x00, 0xE5, 0xFF),
+        Color.FromRgb(0x00, 0x40, 0xFF),
+        Color.FromRgb(0x00, 0xFF, 0xAA)
+    );
 
     // Retained for backward-compatibility
     public static readonly ReactorPalette[] BeatPalettes = SpectrumGradientPalettes;
+
+    public static void UpdateCustomPalette(Color core, Color glow, Color rays)
+    {
+        CustomGradientPalettes = PrecomputeCustomPalettes(core, glow, rays);
+    }
+
+    private static ReactorPalette[] PrecomputeCustomPalettes(Color core, Color glow, Color rays)
+    {
+        var palettes = new ReactorPalette[64];
+        for (int i = 0; i < 64; i++)
+        {
+            float t = i / 63.0f;
+            Color c = ColorMath.Lerp(core, glow, t);
+            palettes[i] = new ReactorPalette(c, rays);
+        }
+        return palettes;
+    }
 
     private static ReactorPalette[] PrecomputeSpectrumPalettes()
     {
@@ -265,6 +319,7 @@ public static class ArcReactorPalettes
         {
             HudColorTheme.CyberpunkFlow => CyberpunkGradientPalettes[index],
             HudColorTheme.SolarFlare => SolarFlareGradientPalettes[index],
+            HudColorTheme.Custom => CustomGradientPalettes[index],
             _ => SpectrumGradientPalettes[index]
         };
     }
@@ -287,6 +342,26 @@ public static class ArcReactorPalettes
 }
 
 /// <summary>
+/// Lightweight struct representing a single energy shard in the reactor overdrive shatter particle system.
+/// Fixed-size pool in ArcReactorVisualHost guarantees 0 allocations in the render loop.
+/// </summary>
+public struct ShardParticle
+{
+    public double X;
+    public double Y;
+    public double Vx;
+    public double Vy;
+    public double BaseAngle;
+    public double BaseRadius;
+    public double CurrentRadius;
+    public double Size;
+    public double Rotation;
+    public double RotSpeed;
+    public float Life;
+    public bool Active;
+}
+
+/// <summary>
 /// High-performance holographic Arc Reactor core element rendered at 60 FPS via DrawingVisual.
 /// Replaces the legacy HUD sphere with Tony Stark / JARVIS Arc Reactor visual architecture:
 /// - Layer 1: Radial audio spectrograph crown (128 bilateral procedural rays driven by honest FFT)
@@ -301,6 +376,7 @@ public sealed class ArcReactorVisualHost : FrameworkElement
     private const int RayCount = AudioSpectrumAnalyzer.RayCount;
     private const double BaseRadius = 76.0;
     private const double MaxRayHeight = 22.0;
+    private const int DefaultShardCount = 32;
 
     private readonly DrawingVisual _drawingVisual = new();
     private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
@@ -329,6 +405,17 @@ public sealed class ArcReactorVisualHost : FrameworkElement
     private readonly float[] _currentSpectrum = new float[RayCount];
     private readonly double[] _cosTable = new double[RayCount];
     private readonly double[] _sinTable = new double[RayCount];
+
+    // Overdrive Shatter particle system state (fixed pool, zero allocations at 60 FPS)
+    private readonly ShardParticle[] _shards = new ShardParticle[DefaultShardCount];
+    private readonly StreamGeometry _dynamicShardsGeometry = new();
+    private double _bassEnergyAccumulator = 0.0;
+
+    public bool EnableShatterOverdrive { get; set; } = true;
+    public bool IsOverdriveActive { get; private set; } = false;
+    public double OverdriveProgress { get; private set; } = 0.0;
+    public int ShardCount => _shards.Length;
+    public ShardParticle[] GetShardSnapshot() => (ShardParticle[])_shards.Clone();
 
     // Pre-computed, frozen geometries for orbital rings
     private StreamGeometry _ring1TicksGeometry = null!;
@@ -407,11 +494,23 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         FalloffSetting = config.Falloff;
         CurrentTheme = ParseTheme(config.ColorPalette);
         EnableColorShiftSetting = config.EnableColorShift;
+        EnableShatterOverdrive = config.EnableShatterOverdrive;
+
+        if (CurrentTheme == HudColorTheme.Custom)
+        {
+            Color core = ColorMath.ParseHex(config.CustomCoreColor, Color.FromRgb(0x00, 0xE5, 0xFF));
+            Color glow = ColorMath.ParseHex(config.CustomGlowColor, Color.FromRgb(0x00, 0x40, 0xFF));
+            Color rays = ColorMath.ParseHex(config.CustomRaysColor, Color.FromRgb(0x00, 0xFF, 0xAA));
+            ArcReactorPalettes.UpdateCustomPalette(core, glow, rays);
+        }
     }
 
     public static HudColorTheme ParseTheme(string? palette)
     {
         if (string.IsNullOrWhiteSpace(palette)) return HudColorTheme.ArcReactor;
+        if (palette.Contains("Custom", StringComparison.OrdinalIgnoreCase) ||
+            palette.Contains("Пользователь", StringComparison.OrdinalIgnoreCase))
+            return HudColorTheme.Custom;
         if (palette.Contains("Cyberpunk", StringComparison.OrdinalIgnoreCase)) return HudColorTheme.CyberpunkFlow;
         if (palette.Contains("Solar", StringComparison.OrdinalIgnoreCase)) return HudColorTheme.SolarFlare;
         return HudColorTheme.ArcReactor;
@@ -424,10 +523,96 @@ public sealed class ArcReactorVisualHost : FrameworkElement
 
         PrecomputeTrigonometry();
         BuildStaticGeometries();
+        InitShards();
 
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
         IsVisibleChanged += OnIsVisibleChanged;
+    }
+
+    private void InitShards()
+    {
+        for (int i = 0; i < DefaultShardCount; i++)
+        {
+            double angle = i * (2.0 * Math.PI / DefaultShardCount);
+            double baseRadius = 26.0 + (i % 4) * 8.0;
+            double size = 3.2 + (i % 3) * 1.6;
+            double rotSpeed = ((i % 2 == 0) ? 1.0 : -1.0) * (1.6 + (i % 5) * 0.35);
+
+            _shards[i] = new ShardParticle
+            {
+                BaseAngle = angle,
+                BaseRadius = baseRadius,
+                CurrentRadius = baseRadius,
+                X = baseRadius * Math.Cos(angle),
+                Y = baseRadius * Math.Sin(angle),
+                Size = size,
+                Rotation = angle,
+                RotSpeed = rotSpeed,
+                Life = 0f,
+                Active = false
+            };
+        }
+    }
+
+    public void TriggerBassFrame(float subBassEnergy, float beatIntensity, double dt)
+    {
+        if (!EnableShatterOverdrive)
+        {
+            IsOverdriveActive = false;
+            _bassEnergyAccumulator = 0.0;
+            OverdriveProgress = Math.Max(0.0, OverdriveProgress - dt * 4.0);
+            UpdateShardsPhysics(dt, beatIntensity, subBassEnergy);
+            return;
+        }
+
+        float combined = subBassEnergy * 0.6f + beatIntensity * 0.4f;
+        if (combined > 0.45f)
+        {
+            _bassEnergyAccumulator += (combined - 0.35f) * dt * 2.4;
+        }
+        else
+        {
+            _bassEnergyAccumulator -= dt * 1.2;
+        }
+        _bassEnergyAccumulator = Math.Clamp(_bassEnergyAccumulator, 0.0, 1.5);
+
+        if (!IsOverdriveActive && _bassEnergyAccumulator >= 0.75)
+        {
+            IsOverdriveActive = true;
+        }
+        else if (IsOverdriveActive && _bassEnergyAccumulator <= 0.25)
+        {
+            IsOverdriveActive = false;
+        }
+
+        double targetProgress = IsOverdriveActive ? Math.Clamp(_bassEnergyAccumulator / 1.1, 0.4, 1.0) : 0.0;
+        double progressSpeed = IsOverdriveActive ? 8.0 : 4.0;
+        OverdriveProgress += (targetProgress - OverdriveProgress) * Math.Clamp(dt * progressSpeed, 0.0, 1.0);
+
+        UpdateShardsPhysics(dt, beatIntensity, subBassEnergy);
+    }
+
+    private void UpdateShardsPhysics(double dt, float beatIntensity, float subBassEnergy)
+    {
+        for (int i = 0; i < DefaultShardCount; i++)
+        {
+            double baseRad = _shards[i].BaseRadius;
+            double targetDist = baseRad + OverdriveProgress * (34.0 + (i % 6) * 9.0);
+            double beatKick = beatIntensity * 14.0 * OverdriveProgress;
+            double targetRadius = targetDist + beatKick;
+
+            double speed = IsOverdriveActive ? 9.5 : 5.0;
+            _shards[i].CurrentRadius += (targetRadius - _shards[i].CurrentRadius) * Math.Clamp(dt * speed, 0.0, 1.0);
+
+            _shards[i].Rotation += _shards[i].RotSpeed * dt * (1.0 + beatIntensity * 2.2);
+            _shards[i].Life = (float)Math.Clamp(OverdriveProgress * (0.65f + beatIntensity * 0.35f), 0.0, 1.0);
+            _shards[i].Active = OverdriveProgress > 0.02;
+
+            double rad = _shards[i].BaseAngle + (OverdriveProgress * ((i % 2 == 0) ? 0.3 : -0.3));
+            _shards[i].X = _shards[i].CurrentRadius * Math.Cos(rad);
+            _shards[i].Y = _shards[i].CurrentRadius * Math.Sin(rad);
+        }
     }
 
     protected override int VisualChildrenCount => 1;
@@ -684,6 +869,9 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         };
         _breathPhase += dt * breathSpeed;
 
+        // Overdrive & shatter particle physics update
+        TriggerBassFrame(_analyzer.SubBassEnergy, _analyzer.BeatIntensity, dt);
+
         // Zero-allocation frozen palette selection: smooth gradient depending on active theme & color shift
         float effectiveSaturation = EnableColorShiftSetting ? (float)_smoothedSaturation : 0f;
         _currentPalette = ArcReactorPalettes.GetPalette(_currentState, effectiveSaturation, CurrentTheme);
@@ -719,9 +907,9 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         double baseScale = Math.Min(width, height) / 220.0;
         if (baseScale <= 0.01) baseScale = 1.0;
 
-        // Central core radius smoothly modulated by sub-bass energy (20-150 Hz) via Lerp and BassScale setting
+        // Central core radius smoothly modulated by sub-bass energy (20-150 Hz) via Lerp and BassScale setting (up to 3.0)
         double bassScaleMultiplier = BassScaleSetting / 1.4;
-        double subBassScale = 1.0 + (0.12 * bassScaleMultiplier) * _smoothedSubBass;
+        double subBassScale = 1.0 + (0.15 * bassScaleMultiplier) * _smoothedSubBass;
         double finalScale = baseScale * subBassScale;
 
         var pal = _currentPalette;
@@ -741,6 +929,9 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         _transCenter.X = cx;
         _transCenter.Y = cy;
 
+        // Shatter impulse: when overdrive triggers, core and orbital rings disperse outward
+        double shatterImpulse = OverdriveProgress * 14.0;
+
         using (DrawingContext dc = _drawingVisual.RenderOpen())
         {
             dc.PushTransform(_rootScaleTransform);
@@ -753,18 +944,18 @@ public sealed class ArcReactorVisualHost : FrameworkElement
 
             // Sinusoidal idle breath smoothly modulated by sub-bass energy (no binary beat flashes)
             double auraBreath    = 1.0 + 0.05 * idleBreath;
-            double auraSubBass   = 1.0 + (0.22 * bassScaleMultiplier) * _smoothedSubBass;
-            double auraRadius    = 48.0 * auraBreath * auraSubBass;
+            double auraSubBass   = 1.0 + (0.24 * bassScaleMultiplier) * _smoothedSubBass;
+            double auraRadius    = (48.0 + shatterImpulse * 0.8) * auraBreath * auraSubBass;
             dc.DrawEllipse(pal.AuraBrush, null, center, auraRadius, auraRadius);
 
             double plasmaBreath  = 1.0 + 0.07 * idleBreath;
-            double plasmaSubBass = 1.0 + (0.15 * bassScaleMultiplier) * _smoothedSubBass;
-            double plasmaRadius  = 30.0 * plasmaBreath * plasmaSubBass;
+            double plasmaSubBass = 1.0 + (0.18 * bassScaleMultiplier) * _smoothedSubBass;
+            double plasmaRadius  = (30.0 + shatterImpulse * 0.5) * plasmaBreath * plasmaSubBass;
             dc.DrawEllipse(pal.PlasmaBrush, null, center, plasmaRadius, plasmaRadius);
 
             double nuclearBreath  = 1.0 + 0.04 * idleBreath;
-            double nuclearSubBass = 1.0 + (0.10 * bassScaleMultiplier) * _smoothedSubBass;
-            double nuclearRadius  = 13.0 * nuclearBreath * nuclearSubBass;
+            double nuclearSubBass = 1.0 + (0.12 * bassScaleMultiplier) * _smoothedSubBass;
+            double nuclearRadius  = (13.0 + shatterImpulse * 0.2) * nuclearBreath * nuclearSubBass;
             dc.DrawEllipse(pal.NuclearBrush, null, center, nuclearRadius, nuclearRadius);
 
             // =================================================================
@@ -776,23 +967,25 @@ public sealed class ArcReactorVisualHost : FrameworkElement
             // LAYER 2: ORBITAL RINGS & HUD GLYPHS (Concentric Rotating Scales)
             // =================================================================
 
-            // Ring 5 (Coil Bracket Ring, R = 34, angleRing5)
+            // Ring 5 (Coil Bracket Ring, R = 34 + shatter, angleRing5)
+            double r5 = 34.0 + shatterImpulse * 0.3;
             dc.PushTransform(_rotRing5);
-            dc.DrawEllipse(null, pal.PenRing5Coils, center, 34.0, 34.0);
+            dc.DrawEllipse(null, pal.PenRing5Coils, center, r5, r5);
             dc.PushTransform(_transCenter);
             dc.DrawGeometry(pal.PrimaryBrush, null, _ring5CoilsGeometry);
             dc.Pop();
             dc.Pop();
 
-            // Ring 4 (Inner Fine Dashed Vernier Scale, R = 44, angleRing4)
+            // Ring 4 (Inner Fine Dashed Vernier Scale, R = 44 + shatter, angleRing4)
+            double r4 = 44.0 + shatterImpulse * 0.5;
             dc.PushTransform(_rotRing4);
-            dc.DrawEllipse(null, pal.PenRing4Dashed, center, 44.0, 44.0);
+            dc.DrawEllipse(null, pal.PenRing4Dashed, center, r4, r4);
             dc.PushTransform(_transCenter);
             dc.DrawGeometry(null, pal.PenRing4Ticks, _ring4TicksGeometry);
             dc.Pop();
             dc.Pop();
 
-            // Ring 3 (HUD Chevrons & Calibrated Sectors, R = 54, angleRing3)
+            // Ring 3 (HUD Chevrons & Calibrated Sectors, R = 54 + shatter, angleRing3)
             dc.PushTransform(_rotRing3);
             dc.PushTransform(_transCenter);
             dc.DrawGeometry(null, pal.PenRing3Sectors, _ring3SectorsGeometry);
@@ -800,26 +993,70 @@ public sealed class ArcReactorVisualHost : FrameworkElement
             dc.Pop();
             dc.Pop();
 
-            // Ring 2 (Segmented Dashed Arc Ring, R = 64, angleRing2)
+            // Ring 2 (Segmented Dashed Arc Ring, R = 64 + shatter, angleRing2)
+            double r2 = 64.0 + shatterImpulse * 0.9;
             dc.PushTransform(_rotRing2);
-            dc.DrawEllipse(null, pal.PenRing2Dashed, center, 64.0, 64.0);
+            dc.DrawEllipse(null, pal.PenRing2Dashed, center, r2, r2);
             dc.PushTransform(_transCenter);
             dc.DrawGeometry(null, pal.PrimaryPen, _ring2AccentsGeometry);
             dc.Pop();
             dc.Pop();
 
-            // Ring 1 (Outer Calibrated Tick Ring, R = 72, angleRing1)
+            // Ring 1 (Outer Calibrated Tick Ring, R = 72 + shatter, angleRing1)
+            double r1 = 72.0 + shatterImpulse * 1.1;
             dc.PushTransform(_rotRing1);
-            dc.DrawEllipse(null, pal.PenRing1Track, center, 72.0, 72.0);
+            dc.DrawEllipse(null, pal.PenRing1Track, center, r1, r1);
             dc.PushTransform(_transCenter);
             dc.DrawGeometry(null, pal.PenRing1Ticks, _ring1TicksGeometry);
             dc.Pop();
             dc.Pop();
 
             // =================================================================
+            // OVERDRIVE SHATTER SHARD PARTICLE SYSTEM
+            // 32 energetic crystalline shards flying outward with drag physics,
+            // pulsating in scale and brightness in sync with incoming audio beat.
+            // Batched in dynamic StreamGeometry (0 GC allocations)
+            // =================================================================
+            if (OverdriveProgress > 0.02)
+            {
+                using (var sCtx = _dynamicShardsGeometry.Open())
+                {
+                    for (int i = 0; i < DefaultShardCount; i++)
+                    {
+                        if (!_shards[i].Active) continue;
+
+                        double sx = cx + _shards[i].X;
+                        double sy = cy + _shards[i].Y;
+                        double size = _shards[i].Size * (1.0 + 0.35 * _analyzer.BeatIntensity);
+                        double rot = _shards[i].Rotation;
+
+                        double cosR = Math.Cos(rot);
+                        double sinR = Math.Sin(rot);
+                        double tanX = -sinR;
+                        double tanY = cosR;
+
+                        Point sp0 = new Point(sx + size * cosR, sy + size * sinR);
+                        Point sp1 = new Point(sx + size * 0.45 * tanX, sy + size * 0.45 * tanY);
+                        Point sp2 = new Point(sx - size * 0.75 * cosR, sy - size * 0.75 * sinR);
+                        Point sp3 = new Point(sx - size * 0.45 * tanX, sy - size * 0.45 * tanY);
+
+                        sCtx.BeginFigure(sp0, true, true);
+                        sCtx.LineTo(sp1, true, false);
+                        sCtx.LineTo(sp2, true, false);
+                        sCtx.LineTo(sp3, true, false);
+                    }
+                }
+                dc.DrawGeometry(pal.PrimaryBrush, pal.PrimaryPen, _dynamicShardsGeometry);
+            }
+
+            // =================================================================
             // LAYER 1: RADIAL AUDIO SPECTROGRAPH (Procedural Crown of 128 Rays)
             // Batch rendering via StreamGeometry & StreamGeometryContext (0 allocations)
+            // Exponential non-linear shaping ensures quiet sounds are visible while loud hits blast upward.
+            // Dynamic max height scales with user Gain (1.0 - 15.0).
             // =================================================================
+            double dynamicMaxRayHeight = 22.0 + Math.Max(0.0, GainSetting - 1.0) * 2.5;
+
             using (var rayCtx = _dynamicRaysGeometry.Open())
             {
                 for (int i = 0; i < RayCount; i++)
@@ -830,9 +1067,11 @@ public sealed class ArcReactorVisualHost : FrameworkElement
 
                     // Subtle organic idle wave when silent, smoothly blended with audio
                     double idleWave = 1.2 * Math.Sin(4.0 * theta + 2.5 * now) * Math.Cos(2.0 * theta - 1.8 * now);
-                    double audioHeight = _currentSpectrum[i] * MaxRayHeight;
-                    double waveBlend = Math.Max(0.0, 1.0 - _currentSpectrum[i] * 3.0);
-                    double h = Math.Clamp(2.0 + idleWave * waveBlend + audioHeight, 1.5, MaxRayHeight + 4.0);
+                    double s = _currentSpectrum[i];
+                    double shaped = Math.Pow(s, 0.75) * (0.45 + 0.55 * Math.Pow(s, 1.6));
+                    double audioHeight = shaped * dynamicMaxRayHeight;
+                    double waveBlend = Math.Max(0.0, 1.0 - s * 3.0);
+                    double h = Math.Clamp(2.0 + idleWave * waveBlend + audioHeight, 1.5, dynamicMaxRayHeight + 6.0);
 
                     Point p0 = new Point(cx + BaseRadius * cos, cy + BaseRadius * sin);
                     Point p1 = new Point(cx + (BaseRadius + h) * cos, cy + (BaseRadius + h) * sin);
@@ -853,9 +1092,11 @@ public sealed class ArcReactorVisualHost : FrameworkElement
                     double theta = i * (2.0 * Math.PI / RayCount);
 
                     double idleWave = 1.2 * Math.Sin(4.0 * theta + 2.5 * now) * Math.Cos(2.0 * theta - 1.8 * now);
-                    double audioHeight = _currentSpectrum[i] * MaxRayHeight;
-                    double waveBlend = Math.Max(0.0, 1.0 - _currentSpectrum[i] * 3.0);
-                    double h = Math.Clamp(2.0 + idleWave * waveBlend + audioHeight, 1.5, MaxRayHeight + 4.0);
+                    double s = _currentSpectrum[i];
+                    double shaped = Math.Pow(s, 0.75) * (0.45 + 0.55 * Math.Pow(s, 1.6));
+                    double audioHeight = shaped * dynamicMaxRayHeight;
+                    double waveBlend = Math.Max(0.0, 1.0 - s * 3.0);
+                    double h = Math.Clamp(2.0 + idleWave * waveBlend + audioHeight, 1.5, dynamicMaxRayHeight + 6.0);
 
                     Point p1 = new Point(cx + (BaseRadius + h) * cos, cy + (BaseRadius + h) * sin);
 
@@ -866,8 +1107,8 @@ public sealed class ArcReactorVisualHost : FrameworkElement
             }
             dc.DrawGeometry(StaticTipBrush, null, _dynamicTipsGeometry);
 
-            // Outer containment dotted circle (R = 98)
-            dc.DrawEllipse(null, pal.PenContainment, center, BaseRadius + MaxRayHeight, BaseRadius + MaxRayHeight);
+            // Outer containment dotted circle
+            dc.DrawEllipse(null, pal.PenContainment, center, BaseRadius + dynamicMaxRayHeight * 0.85, BaseRadius + dynamicMaxRayHeight * 0.85);
 
             dc.Pop(); // _rootScaleTransform
         }

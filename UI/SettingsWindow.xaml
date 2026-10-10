@@ -625,10 +625,10 @@
                             <TextBlock Text="Чувствительность спектра (Gain):" Style="{StaticResource FieldLabelStyle}" Grid.Column="0"/>
                             <TextBlock x:Name="TxtHudGainVal" Text="3.5x" Foreground="#00E5FF" FontWeight="Bold" FontSize="13" Grid.Column="1"/>
                         </Grid>
-                        <Slider x:Name="SldHudGain" Minimum="1.0" Maximum="8.0" Value="3.5"
+                        <Slider x:Name="SldHudGain" Minimum="1.0" Maximum="15.0" Value="3.5"
                                 TickFrequency="0.5" IsSnapToTickEnabled="False"
                                 Margin="0,2,0,4" ValueChanged="HudSetting_ValueChanged"/>
-                        <TextBlock Text="Масштабирует логарифмические полосы FFT, чтобы лучи эквалайзера колебались выразительно и высоко даже на средней громкости музыки."
+                        <TextBlock Text="Масштабирует логарифмические полосы FFT, чтобы лучи эквалайзера колебались выразительно и высоко (до 15.0x на максимум окна)."
                                    FontSize="11" Foreground="#88889C" TextWrapping="Wrap" Margin="0,0,0,12"/>
 
                         <!-- Bass Scale Slider -->
@@ -640,10 +640,10 @@
                             <TextBlock Text="Реакция ядра на бас (Bass Scale):" Style="{StaticResource FieldLabelStyle}" Grid.Column="0"/>
                             <TextBlock x:Name="TxtHudBassVal" Text="1.40x" Foreground="#00E5FF" FontWeight="Bold" FontSize="13" Grid.Column="1"/>
                         </Grid>
-                        <Slider x:Name="SldHudBassScale" Minimum="1.0" Maximum="2.0" Value="1.4"
+                        <Slider x:Name="SldHudBassScale" Minimum="1.0" Maximum="3.0" Value="1.4"
                                 TickFrequency="0.1" IsSnapToTickEnabled="False"
                                 Margin="0,2,0,4" ValueChanged="HudSetting_ValueChanged"/>
-                        <TextBlock Text="Настраивает силу расширения центрального шара и плазменного ядра от суб-баса (20-150 Гц)."
+                        <TextBlock Text="Настраивает силу расширения центрального шара и плазменного ядра от суб-баса (20-150 Гц, от 1.0x до 3.0x)."
                                    FontSize="11" Foreground="#88889C" TextWrapping="Wrap" Margin="0,0,0,12"/>
 
                         <!-- Falloff Slider -->
@@ -668,10 +668,70 @@
                             <ComboBoxItem Content="Arc Reactor (Циан / Электрик)"/>
                             <ComboBoxItem Content="Cyberpunk Flow (Циан -> Фиолетовый -> Маджента)"/>
                             <ComboBoxItem Content="Solar Flare (Янтарь -> Оранжевый -> Неоновый красный)"/>
+                            <ComboBoxItem Content="Пользовательский (Custom)"/>
                         </ComboBox>
 
-                        <!-- Color Shift Checkbox -->
+                        <!-- Custom Colors Panel -->
+                        <Border x:Name="PnlCustomColors" Background="#161622" BorderBrush="#00E5FF" BorderThickness="1"
+                                CornerRadius="6" Padding="12,10" Margin="0,0,0,14" Visibility="Collapsed">
+                            <StackPanel>
+                                <TextBlock Text="🛠 Пользовательские цвета реактора (HEX):" FontWeight="SemiBold" Foreground="#00E5FF" Margin="0,0,0,8"/>
+
+                                <!-- Core Color -->
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="100"/>
+                                        <ColumnDefinition Width="32"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Цвет ядра (Core Color):" VerticalAlignment="Center" Foreground="#ECECF1"/>
+                                    <TextBox x:Name="TxtCustomCoreColor" Text="#00E5FF" Grid.Column="1" Margin="0,0,6,0"
+                                             TextChanged="TxtCustomColor_TextChanged"/>
+                                    <Border x:Name="BrdCustomCoreColor" Grid.Column="2" Background="#00E5FF"
+                                            BorderBrush="#FFFFFF" BorderThickness="1" CornerRadius="4" Height="24"/>
+                                </Grid>
+
+                                <!-- Glow Color -->
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="100"/>
+                                        <ColumnDefinition Width="32"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Цвет свечения (Glow Color):" VerticalAlignment="Center" Foreground="#ECECF1"/>
+                                    <TextBox x:Name="TxtCustomGlowColor" Text="#0040FF" Grid.Column="1" Margin="0,0,6,0"
+                                             TextChanged="TxtCustomColor_TextChanged"/>
+                                    <Border x:Name="BrdCustomGlowColor" Grid.Column="2" Background="#0040FF"
+                                            BorderBrush="#FFFFFF" BorderThickness="1" CornerRadius="4" Height="24"/>
+                                </Grid>
+
+                                <!-- Rays Color -->
+                                <Grid Margin="0,0,0,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="100"/>
+                                        <ColumnDefinition Width="32"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Цвет лучей эквалайзера (Rays Color):" VerticalAlignment="Center" Foreground="#ECECF1"/>
+                                    <TextBox x:Name="TxtCustomRaysColor" Text="#00FFAA" Grid.Column="1" Margin="0,0,6,0"
+                                             TextChanged="TxtCustomColor_TextChanged"/>
+                                    <Border x:Name="BrdCustomRaysColor" Grid.Column="2" Background="#00FFAA"
+                                            BorderBrush="#FFFFFF" BorderThickness="1" CornerRadius="4" Height="24"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Dynamic Modifiers -->
                         <TextBlock Text="✨ Динамические модификаторы сияния" Style="{StaticResource GroupHeaderStyle}"/>
+
+                        <!-- Shatter Overdrive Checkbox -->
+                        <CheckBox x:Name="ChkShatterOverdrive" Content="Эффект раскола при перегрузке (Shatter Overdrive)"
+                                  Foreground="#ECECF1" FontSize="13" Margin="0,4,0,4"
+                                  Checked="HudSetting_ValueChanged" Unchecked="HudSetting_ValueChanged"/>
+                        <TextBlock Text="Активирует кинематический разлет энергетических осколков и колец реактора при мощных басовых дропах и перегрузке."
+                                   FontSize="11" Foreground="#88889C" Margin="24,0,0,14" TextWrapping="Wrap"/>
+
+                        <!-- Color Shift Checkbox -->
                         <CheckBox x:Name="ChkColorShift" Content="Плавный перелив цвета в такт спектру (Color Shift)"
                                   Foreground="#ECECF1" FontSize="13" Margin="0,4,0,4"
                                   Checked="HudSetting_ValueChanged" Unchecked="HudSetting_ValueChanged"/>

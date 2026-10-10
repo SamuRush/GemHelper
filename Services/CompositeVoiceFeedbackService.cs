@@ -194,23 +194,25 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
         {
             try
             {
-                // 2. Cooldown 250 мс: ждём затухания акустического эха колонок (строго в finally — не прерывается cancellation)
-                // Используем независимый CancellationToken, чтобы cooldown не прерывался вместе с основным speech-токеном
-                await Task.Delay(250).ConfigureAwait(false);
-
-                // 3. Снять флаги _isSpeaking и _isProcessing строго ПОСЛЕ cooldown (250 мс)
                 var listener = _voiceListener;
-                listener?.NotifySpeakingFinished();
-                listener?.NotifyProcessingFinished();
+                if (listener != null)
+                {
+                    // 2. Cooldown 250 мс: ждём затухания акустического эха колонок (строго в finally — не прерывается cancellation)
+                    await Task.Delay(250).ConfigureAwait(false);
 
-                // 4. Strict coordination with Vosk (STT): resume listening or enter confirmation listening
-                if (JarvisOrchestrator.Instance.HasPendingAction)
-                {
-                    listener?.EnterConfirmationListening("Awaiting confirmation reply (bypassing wake-word)...");
-                }
-                else
-                {
-                    listener?.ResumeListening();
+                    // 3. Снять флаги _isSpeaking и _isProcessing строго ПОСЛЕ cooldown (250 мс)
+                    listener.NotifySpeakingFinished();
+                    listener.NotifyProcessingFinished();
+
+                    // 4. Strict coordination with Vosk (STT): resume listening or enter confirmation listening
+                    if (JarvisOrchestrator.Instance.HasPendingAction)
+                    {
+                        listener.EnterConfirmationListening("Awaiting confirmation reply (bypassing wake-word)...");
+                    }
+                    else
+                    {
+                        listener.ResumeListening();
+                    }
                 }
                 OnSpeakingFinished?.Invoke();
             }

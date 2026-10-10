@@ -139,9 +139,18 @@ public sealed partial class SettingsWindow : Window
             TxtHudFalloffVal.Text = $"{hud.Falloff:F2}";
 
             int paletteIdx = 0;
-            if (hud.ColorPalette.Contains("Cyberpunk", StringComparison.OrdinalIgnoreCase)) paletteIdx = 1;
+            if (hud.ColorPalette.Contains("Custom", StringComparison.OrdinalIgnoreCase) ||
+                hud.ColorPalette.Contains("Пользователь", StringComparison.OrdinalIgnoreCase)) paletteIdx = 3;
+            else if (hud.ColorPalette.Contains("Cyberpunk", StringComparison.OrdinalIgnoreCase)) paletteIdx = 1;
             else if (hud.ColorPalette.Contains("Solar", StringComparison.OrdinalIgnoreCase)) paletteIdx = 2;
             CmbHudPalette.SelectedIndex = paletteIdx;
+
+            ChkShatterOverdrive.IsChecked = hud.EnableShatterOverdrive;
+            TxtCustomCoreColor.Text = hud.CustomCoreColor ?? "#00E5FF";
+            TxtCustomGlowColor.Text = hud.CustomGlowColor ?? "#0040FF";
+            TxtCustomRaysColor.Text = hud.CustomRaysColor ?? "#00FFAA";
+            UpdateCustomColorSwatches();
+            UpdateCustomPanelVisibility();
 
             ChkColorShift.IsChecked = hud.EnableColorShift;
             ChkIgnoreTts.IsChecked = hud.IgnoreTtsInLoopback;
@@ -744,9 +753,46 @@ public sealed partial class SettingsWindow : Window
         if (TxtHudFalloffVal != null && SldHudFalloff != null)
             TxtHudFalloffVal.Text = $"{SldHudFalloff.Value:F2}";
 
+        UpdateCustomPanelVisibility();
+
         if (_isInitializing) return;
 
         ApplyCurrentHudSettingsToLiveWidget();
+    }
+
+    private void TxtCustomColor_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        UpdateCustomColorSwatches();
+
+        if (_isInitializing) return;
+
+        ApplyCurrentHudSettingsToLiveWidget();
+    }
+
+    private void UpdateCustomPanelVisibility()
+    {
+        if (PnlCustomColors == null || CmbHudPalette == null) return;
+        bool isCustom = CmbHudPalette.SelectedIndex == 3;
+        PnlCustomColors.Visibility = isCustom ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void UpdateCustomColorSwatches()
+    {
+        if (BrdCustomCoreColor != null && TxtCustomCoreColor != null)
+        {
+            var col = ColorMath.ParseHex(TxtCustomCoreColor.Text, Color.FromRgb(0x00, 0xE5, 0xFF));
+            BrdCustomCoreColor.Background = new SolidColorBrush(col);
+        }
+        if (BrdCustomGlowColor != null && TxtCustomGlowColor != null)
+        {
+            var col = ColorMath.ParseHex(TxtCustomGlowColor.Text, Color.FromRgb(0x00, 0x40, 0xFF));
+            BrdCustomGlowColor.Background = new SolidColorBrush(col);
+        }
+        if (BrdCustomRaysColor != null && TxtCustomRaysColor != null)
+        {
+            var col = ColorMath.ParseHex(TxtCustomRaysColor.Text, Color.FromRgb(0x00, 0xFF, 0xAA));
+            BrdCustomRaysColor.Background = new SolidColorBrush(col);
+        }
     }
 
     private void ApplyCurrentHudSettingsToLiveWidget()
@@ -767,7 +813,11 @@ public sealed partial class SettingsWindow : Window
             Falloff = SldHudFalloff?.Value ?? 0.88,
             ColorPalette = palette,
             EnableColorShift = ChkColorShift?.IsChecked == true,
-            IgnoreTtsInLoopback = ChkIgnoreTts?.IsChecked == true
+            IgnoreTtsInLoopback = ChkIgnoreTts?.IsChecked == true,
+            EnableShatterOverdrive = ChkShatterOverdrive?.IsChecked == true,
+            CustomCoreColor = TxtCustomCoreColor?.Text?.Trim() ?? "#00E5FF",
+            CustomGlowColor = TxtCustomGlowColor?.Text?.Trim() ?? "#0040FF",
+            CustomRaysColor = TxtCustomRaysColor?.Text?.Trim() ?? "#00FFAA"
         };
     }
 

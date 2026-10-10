@@ -35,6 +35,10 @@ public sealed class HudSettingsConfig
     public string ColorPalette { get; set; } = "Arc Reactor (Циан / Электрик)";
     public bool EnableColorShift { get; set; } = true;
     public bool IgnoreTtsInLoopback { get; set; } = true;
+    public bool EnableShatterOverdrive { get; set; } = true;
+    public string CustomCoreColor { get; set; } = "#00E5FF";
+    public string CustomGlowColor { get; set; } = "#0040FF";
+    public string CustomRaysColor { get; set; } = "#00FFAA";
 }
 
 public sealed class AppSettingsData
@@ -190,6 +194,21 @@ public static class AppSettingsService
                     if (target["ColorPalette"]?.GetValue<string>() is string cp) data.HudSettings.ColorPalette = cp;
                     if (target["EnableColorShift"] is { } cs) data.HudSettings.EnableColorShift = cs.GetValue<bool>();
                     if (target["IgnoreTtsInLoopback"] is { } it) data.HudSettings.IgnoreTtsInLoopback = it.GetValue<bool>();
+                    if (target["EnableShatterOverdrive"] is { } so) data.HudSettings.EnableShatterOverdrive = so.GetValue<bool>();
+                    if (target["CustomCoreColor"]?.GetValue<string>() is string ccc) data.HudSettings.CustomCoreColor = ccc;
+                    if (target["CustomGlowColor"]?.GetValue<string>() is string cgc) data.HudSettings.CustomGlowColor = cgc;
+                    if (target["CustomRaysColor"]?.GetValue<string>() is string crc) data.HudSettings.CustomRaysColor = crc;
+                }
+            }
+
+            // Sync with HudSettings.json if exists
+            string standaloneHudFile = Path.Combine(AppContext.BaseDirectory, "HudSettings.json");
+            if (File.Exists(standaloneHudFile))
+            {
+                var standalone = Gem.UI.HudSettingsStorage.LoadFromFile(standaloneHudFile);
+                if (standalone != null)
+                {
+                    data.HudSettings = standalone;
                 }
             }
 
@@ -265,7 +284,11 @@ public static class AppSettingsService
                     ["Falloff"] = data.HudSettings.Falloff,
                     ["ColorPalette"] = data.HudSettings.ColorPalette,
                     ["EnableColorShift"] = data.HudSettings.EnableColorShift,
-                    ["IgnoreTtsInLoopback"] = data.HudSettings.IgnoreTtsInLoopback
+                    ["IgnoreTtsInLoopback"] = data.HudSettings.IgnoreTtsInLoopback,
+                    ["EnableShatterOverdrive"] = data.HudSettings.EnableShatterOverdrive,
+                    ["CustomCoreColor"] = data.HudSettings.CustomCoreColor,
+                    ["CustomGlowColor"] = data.HudSettings.CustomGlowColor,
+                    ["CustomRaysColor"] = data.HudSettings.CustomRaysColor
                 }
             };
 
@@ -284,6 +307,16 @@ public static class AppSettingsService
             root["GameAliases"] = aliasesNode;
 
             string json = root.ToJsonString(JsonOptions);
+
+            // Also persist HudSettings.json
+            try
+            {
+                Gem.UI.HudSettingsStorage.SaveToFile(data.HudSettings, Gem.UI.HudSettingsStorage.GetDefaultFilePath());
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[AppSettings Warning] Не удалось сохранить HudSettings.json: {ex.Message}");
+            }
 
             string fileName = "appsettings.json";
             string[] dirs = [AppContext.BaseDirectory, Directory.GetCurrentDirectory()];
