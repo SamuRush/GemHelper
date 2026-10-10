@@ -29,7 +29,7 @@ public sealed partial class ParticleEngine
                 if (minD == dLeft)
                 {
                     shard.X = left;
-                    if (_rand.NextDouble() < 0.02)
+                    if (_rand.NextDouble() < 0.015)
                     {
                         shard.IsStuck = true;
                         shard.StuckEdge = BoundaryEdge.Left;
@@ -39,13 +39,13 @@ public sealed partial class ParticleEngine
                         shard.Vx = 0; shard.Vy = 0;
                         return;
                     }
-                    shard.Vx = -Math.Abs(shard.Vx) * 0.8;
-                    shard.Vy = (shard.Vy + (_rand.NextDouble() - 0.5) * Math.Abs(shard.Vx) * 0.25) * 0.8;
+                    shard.Vx = -Math.Abs(shard.Vx) * 0.85;
+                    shard.Vy = (shard.Vy + (_rand.NextDouble() - 0.5) * Math.Abs(shard.Vx) * 0.25) * 0.85;
                 }
                 else if (minD == dRight)
                 {
                     shard.X = right;
-                    if (_rand.NextDouble() < 0.02)
+                    if (_rand.NextDouble() < 0.015)
                     {
                         shard.IsStuck = true;
                         shard.StuckEdge = BoundaryEdge.Right;
@@ -55,13 +55,13 @@ public sealed partial class ParticleEngine
                         shard.Vx = 0; shard.Vy = 0;
                         return;
                     }
-                    shard.Vx = Math.Abs(shard.Vx) * 0.8;
-                    shard.Vy = (shard.Vy + (_rand.NextDouble() - 0.5) * Math.Abs(shard.Vx) * 0.25) * 0.8;
+                    shard.Vx = Math.Abs(shard.Vx) * 0.85;
+                    shard.Vy = (shard.Vy + (_rand.NextDouble() - 0.5) * Math.Abs(shard.Vx) * 0.25) * 0.85;
                 }
                 else if (minD == dTop)
                 {
                     shard.Y = top;
-                    if (_rand.NextDouble() < 0.02)
+                    if (_rand.NextDouble() < 0.015)
                     {
                         shard.IsStuck = true;
                         shard.StuckEdge = BoundaryEdge.Top;
@@ -71,13 +71,13 @@ public sealed partial class ParticleEngine
                         shard.Vx = 0; shard.Vy = 0;
                         return;
                     }
-                    shard.Vy = -Math.Abs(shard.Vy) * 0.8;
-                    shard.Vx = (shard.Vx + (_rand.NextDouble() - 0.5) * Math.Abs(shard.Vy) * 0.25) * 0.8;
+                    shard.Vy = -Math.Abs(shard.Vy) * 0.85;
+                    shard.Vx = (shard.Vx + (_rand.NextDouble() - 0.5) * Math.Abs(shard.Vy) * 0.25) * 0.85;
                 }
                 else
                 {
                     shard.Y = bottom;
-                    if (_rand.NextDouble() < 0.02)
+                    if (_rand.NextDouble() < 0.015)
                     {
                         shard.IsStuck = true;
                         shard.StuckEdge = BoundaryEdge.Bottom;
@@ -87,8 +87,8 @@ public sealed partial class ParticleEngine
                         shard.Vx = 0; shard.Vy = 0;
                         return;
                     }
-                    shard.Vy = Math.Abs(shard.Vy) * 0.8;
-                    shard.Vx = (shard.Vx + (_rand.NextDouble() - 0.5) * Math.Abs(shard.Vy) * 0.25) * 0.8;
+                    shard.Vy = Math.Abs(shard.Vy) * 0.85;
+                    shard.Vx = (shard.Vx + (_rand.NextDouble() - 0.5) * Math.Abs(shard.Vy) * 0.25) * 0.85;
                 }
                 break;
             }
@@ -100,7 +100,7 @@ public sealed partial class ParticleEngine
         if (shard.X <= 2.0)
         {
             shard.X = 2.0;
-            if (_rand.NextDouble() < 0.02)
+            if (_rand.NextDouble() < 0.015)
             {
                 shard.IsStuck = true;
                 shard.StuckEdge = BoundaryEdge.Left;
@@ -110,14 +110,14 @@ public sealed partial class ParticleEngine
                 shard.Vx = 0; shard.Vy = 0;
                 return;
             }
-            double bounce = 0.75 + _rand.NextDouble() * 0.10;
+            double bounce = 0.82 + _rand.NextDouble() * 0.10;
             shard.Vx = Math.Abs(shard.Vx) * bounce;
             shard.Vy = (shard.Vy + (_rand.NextDouble() - 0.5) * Math.Abs(shard.Vx) * 0.35) * bounce;
         }
         else if (shard.X >= boundsW - 2.0)
         {
             shard.X = boundsW - 2.0;
-            if (_rand.NextDouble() < 0.02)
+            if (_rand.NextDouble() < 0.015)
             {
                 shard.IsStuck = true;
                 shard.StuckEdge = BoundaryEdge.Right;
@@ -127,7 +127,7 @@ public sealed partial class ParticleEngine
                 shard.Vx = 0; shard.Vy = 0;
                 return;
             }
-            double bounce = 0.75 + _rand.NextDouble() * 0.10;
+            double bounce = 0.82 + _rand.NextDouble() * 0.10;
             shard.Vx = -Math.Abs(shard.Vx) * bounce;
             shard.Vy = (shard.Vy + (_rand.NextDouble() - 0.5) * Math.Abs(shard.Vx) * 0.35) * bounce;
         }
@@ -135,7 +135,7 @@ public sealed partial class ParticleEngine
         if (shard.Y <= 2.0)
         {
             shard.Y = 2.0;
-            if (_rand.NextDouble() < 0.02)
+            if (_rand.NextDouble() < 0.015)
             {
                 shard.IsStuck = true;
                 shard.StuckEdge = BoundaryEdge.Top;
@@ -145,14 +145,14 @@ public sealed partial class ParticleEngine
                 shard.Vx = 0; shard.Vy = 0;
                 return;
             }
-            double bounce = 0.75 + _rand.NextDouble() * 0.10;
+            double bounce = 0.82 + _rand.NextDouble() * 0.10;
             shard.Vy = Math.Abs(shard.Vy) * bounce;
             shard.Vx = (shard.Vx + (_rand.NextDouble() - 0.5) * Math.Abs(shard.Vy) * 0.35) * bounce;
         }
         else if (shard.Y >= boundsH - 2.0)
         {
             shard.Y = boundsH - 2.0;
-            if (_rand.NextDouble() < 0.02)
+            if (_rand.NextDouble() < 0.015)
             {
                 shard.IsStuck = true;
                 shard.StuckEdge = BoundaryEdge.Bottom;
@@ -162,7 +162,7 @@ public sealed partial class ParticleEngine
                 shard.Vx = 0; shard.Vy = 0;
                 return;
             }
-            double bounce = 0.75 + _rand.NextDouble() * 0.10;
+            double bounce = 0.82 + _rand.NextDouble() * 0.10;
             shard.Vy = -Math.Abs(shard.Vy) * bounce;
             shard.Vx = (shard.Vx + (_rand.NextDouble() - 0.5) * Math.Abs(shard.Vy) * 0.35) * bounce;
         }

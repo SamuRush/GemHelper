@@ -285,15 +285,16 @@ public sealed class OverdriveParticleOverlayWindow : Window
                 double size = _shards[i].BaseSize * (1.0 + _beatIntensity * 0.55);
                 double rot = _shards[i].Rotation;
 
-                double cosR = Math.Cos(rot);
-                double sinR = Math.Sin(rot);
+                double cosR = Math.Cos(_shards[i].Angle);
+                double sinR = Math.Sin(_shards[i].Angle);
                 double tanX = -sinR;
                 double tanY = cosR;
+                double streakLen = size * (2.8 + _beatIntensity * 1.5);
 
-                Point sp0 = new Point(sx + size * 1.3 * cosR, sy + size * 1.3 * sinR);
-                Point sp1 = new Point(sx + size * 0.5 * tanX, sy + size * 0.5 * tanY);
-                Point sp2 = new Point(sx - size * 0.9 * cosR, sy - size * 0.9 * sinR);
-                Point sp3 = new Point(sx - size * 0.5 * tanX, sy - size * 0.5 * tanY);
+                Point sp0 = new Point(sx + size * 1.2 * cosR, sy + size * 1.2 * sinR);
+                Point sp1 = new Point(sx + size * 0.38 * tanX, sy + size * 0.38 * tanY);
+                Point sp2 = new Point(sx - streakLen * cosR, sy - streakLen * sinR);
+                Point sp3 = new Point(sx - size * 0.38 * tanX, sy - size * 0.38 * tanY);
 
                 sCtx.BeginFigure(sp0, true, true);
                 sCtx.LineTo(sp1, true, false);

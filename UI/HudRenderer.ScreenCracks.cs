@@ -1,22 +1,26 @@
 using System;
-using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Media;
 
 namespace Gem.UI;
 
 /// <summary>
-/// Procedural glass cracking and screen shatter visualizer for the Overdrive effect.
-/// Generates jagged radial cracks, spiderweb branches and concentric cross-bars from the core epicenter.
-/// Geometry is frozen immediately (Freeze()) for 0 GC overhead in 60 FPS rendering.
-/// Supports blinding neon-scarlet flash, beat vibration, click-through transparency,
-/// and reassembly inward glass sealing.
+/// Photorealistic 3D glass fracture stack and screen shatter visualizer for Overdrive:
+/// - Layer 1: Optical refraction & displacement mapping (DesktopRefractionCapture + chromatic aberration)
+/// - Layer 2: Volumetric crack facets with dual-contour specular highlights (#FFFFFF, 1.5 px)
+///   and deep shadows (#05050A, 2.5 px) simulating 6-8 mm thick glass, plus polygonal plates.
+/// - Layer 3: High-voltage plasma arcs (NeonLightningGenerator: Scarlet #FF003C & Cyan #00E5FF).
+/// Frozen StreamGeometry and zero heap allocations maintain 60 FPS performance.
 /// </summary>
 public sealed partial class HudRenderer
 {
     public bool EnableScreenCracks { get; set; } = true;
+    public bool HasActiveCracks => _hasActiveCracks;
 
-    private StreamGeometry? _frozenCracksGeometry;
+    private readonly ProceduralCrackGeometry _crackGeometry = new();
+    private readonly DesktopRefractionCapture _refractionCapture = new();
+    private readonly NeonLightningGenerator _lightningGenerator = new();
+
     private Point _cracksEpicenter;
     private double _cracksTimer = 0.0;
     private bool _hasActiveCracks = false;
@@ -24,12 +28,13 @@ public sealed partial class HudRenderer
 
     private readonly EllipseGeometry _cracksSealClip = new();
     private readonly TranslateTransform _cracksShakeTransform = new();
-    private readonly Random _cracksRand = new();
 
-    private static readonly Pen StaticCracksFlashNeonPen = InitFrozenPen(Color.FromRgb(0xFF, 0xFF, 0xFF), 2.2);
-    private static readonly Pen StaticCracksFlashScarletPen = InitFrozenPen(Color.FromRgb(0xFF, 0x00, 0x3C), 4.8);
-    private static readonly Pen StaticCracksNeonPen = InitFrozenPen(Color.FromArgb(220, 0xFF, 0xFF, 0xFF), 1.2);
-    private static readonly Pen StaticCracksScarletPen = InitFrozenPen(Color.FromArgb(180, 0xFF, 0x00, 0x3C), 2.6);
+    private static readonly Pen StaticVolumetricHighlightPen = InitFrozenPen(Color.FromArgb(245, 255, 255, 255), 1.5);
+    private static readonly Pen StaticVolumetricShadowPen = InitFrozenPen(Color.FromArgb(235, 5, 5, 10), 2.5);
+    private static readonly SolidColorBrush StaticShardPlateBrush = InitFrozenBrush(Color.FromArgb(18, 0, 229, 255));
+
+    private static readonly Pen StaticCracksFlashNeonPen = InitFrozenPen(Color.FromRgb(0xFF, 0xFF, 0xFF), 2.5);
+    private static readonly Pen StaticCracksFlashScarletPen = InitFrozenPen(Color.FromRgb(0xFF, 0x00, 0x3C), 5.0);
 
     private static Pen InitFrozenPen(Color color, double thickness)
     {
@@ -40,6 +45,13 @@ public sealed partial class HudRenderer
         return pen;
     }
 
+    private static SolidColorBrush InitFrozenBrush(Color color)
+    {
+        var brush = new SolidColorBrush(color);
+        brush.Freeze();
+        return brush;
+    }
+
     public void GenerateScreenCracks(Point epicenter, double boundsW, double boundsH)
     {
         if (!EnableScreenCracks) return;
@@ -48,105 +60,25 @@ public sealed partial class HudRenderer
         double h = boundsH > 0 ? boundsH : 1080.0;
         double maxDx = Math.Max(epicenter.X, w - epicenter.X);
         double maxDy = Math.Max(epicenter.Y, h - epicenter.Y);
-        _cracksMaxRadius = Math.Sqrt(maxDx * maxDx + maxDy * maxDy) + 100.0;
+        _cracksMaxRadius = Math.Sqrt(maxDx * maxDx + maxDy * maxDy) + 120.0;
         _cracksEpicenter = epicenter;
         _cracksTimer = 0.0;
 
-        int rayCount = 5 + _cracksRand.Next(3); // 5 to 7 main radial rays
-        var rayNodeLists = new List<List<Point>>(rayCount);
+        // 1. Layer 2: Volumetric crack geometry & polygonal shards
+        _crackGeometry.Generate(epicenter, w, h);
 
-        var geometry = new StreamGeometry();
-        using (var ctx = geometry.Open())
-        {
-            // 1. Generate 5-7 main radial cracks with zigzag path
-            for (int r = 0; r < rayCount; r++)
-            {
-                var nodes = new List<Point>(40);
-                double baseAngle = r * (2.0 * Math.PI / rayCount) + (_cracksRand.NextDouble() - 0.5) * 0.35;
-                Point curPt = new Point(
-                    epicenter.X + 16.0 * Math.Cos(baseAngle),
-                    epicenter.Y + 16.0 * Math.Sin(baseAngle));
+        // 2. Layer 1: Capture desktop under fracture area for optical refraction
+        _refractionCapture.CaptureOrFallback(epicenter, _cracksMaxRadius, w, h);
 
-                ctx.BeginFigure(curPt, false, false);
-                nodes.Add(curPt);
+        // 3. Layer 3: High-voltage plasma arcs
+        _lightningGenerator.Trigger(epicenter);
 
-                double travelDist = 16.0;
-                while (travelDist < _cracksMaxRadius)
-                {
-                    double segLen = 20.0 + _cracksRand.NextDouble() * 20.0; // 20 - 40 px segment length
-                    double angleDev = (_cracksRand.NextDouble() - 0.5) * (35.0 * Math.PI / 180.0); // +-17.5 deg
-                    double segAngle = baseAngle + angleDev;
-
-                    curPt = new Point(
-                        curPt.X + segLen * Math.Cos(segAngle),
-                        curPt.Y + segLen * Math.Sin(segAngle));
-
-                    ctx.LineTo(curPt, true, false);
-                    nodes.Add(curPt);
-                    travelDist += segLen;
-                }
-
-                rayNodeLists.Add(nodes);
-
-                // 2. Generate 2-3 secondary branches for each main ray
-                int branchCount = 2 + _cracksRand.Next(2);
-                for (int b = 0; b < branchCount; b++)
-                {
-                    if (nodes.Count < 6) continue;
-                    int startIdx = 2 + _cracksRand.Next(nodes.Count - 4);
-                    Point branchPt = nodes[startIdx];
-
-                    double branchAngle = baseAngle + ((_cracksRand.Next(2) == 0 ? 1.0 : -1.0) * (0.65 + _cracksRand.NextDouble() * 0.30));
-                    ctx.BeginFigure(branchPt, false, false);
-
-                    int branchSteps = 2 + _cracksRand.Next(3);
-                    for (int s = 0; s < branchSteps; s++)
-                    {
-                        double bLen = 18.0 + _cracksRand.NextDouble() * 16.0;
-                        double bDev = (_cracksRand.NextDouble() - 0.5) * 0.35;
-                        branchPt = new Point(
-                            branchPt.X + bLen * Math.Cos(branchAngle + bDev),
-                            branchPt.Y + bLen * Math.Sin(branchAngle + bDev));
-                        ctx.LineTo(branchPt, true, false);
-                    }
-                }
-            }
-
-            // 3. Concentric transverse cross-bars (spiderweb broken glass)
-            for (int r = 0; r < rayCount; r++)
-            {
-                var nodesA = rayNodeLists[r];
-                var nodesB = rayNodeLists[(r + 1) % rayCount];
-
-                int barCount = Math.Min(nodesA.Count, nodesB.Count) / 5;
-                for (int c = 1; c <= barCount; c++)
-                {
-                    int idxA = Math.Clamp(c * 5, 0, nodesA.Count - 1);
-                    int idxB = Math.Clamp(c * 5 + (_cracksRand.Next(3) - 1), 0, nodesB.Count - 1);
-
-                    Point pA = nodesA[idxA];
-                    Point pB = nodesB[idxB];
-
-                    Point mid = new Point(
-                        (pA.X + pB.X) * 0.5 + (_cracksRand.NextDouble() - 0.5) * 14.0,
-                        (pA.Y + pB.Y) * 0.5 + (_cracksRand.NextDouble() - 0.5) * 14.0);
-
-                    ctx.BeginFigure(pA, false, false);
-                    ctx.LineTo(mid, true, false);
-                    ctx.LineTo(pB, true, false);
-                }
-            }
-        }
-
-        geometry.Freeze();
-        _frozenCracksGeometry = geometry;
         _hasActiveCracks = true;
     }
 
     public void ClearScreenCracks()
     {
         _hasActiveCracks = false;
-        _frozenCracksGeometry = null;
     }
 
     public void RenderScreenCracks(
@@ -158,12 +90,15 @@ public sealed partial class HudRenderer
         float beatIntensity,
         OverdriveStateMachine overdriveState)
     {
-        if (!EnableScreenCracks || !_hasActiveCracks || _frozenCracksGeometry == null) return;
+        if (!EnableScreenCracks || !_hasActiveCracks || !_crackGeometry.HasGeometry) return;
 
         _cracksTimer += dt;
+        _lightningGenerator.Update(dt);
 
-        // Final shutter collapse check: cracks disappear with white flash at Phase 2 slam impact
-        if (overdriveState.ReassemblyPhase == ReassemblyPhase.Phase2_Slam && overdriveState.ReassemblyPhaseTimer >= 0.20)
+        // Instant crack clearance: all fractures vanish at Phase 2 slam impact (t >= 0.20s)
+        // or whenever overdrive and reassembly are complete/inactive
+        if ((overdriveState.ReassemblyPhase == ReassemblyPhase.Phase2_Slam && overdriveState.ReassemblyPhaseTimer >= 0.20) ||
+            (!overdriveState.IsOverdriveActive && !overdriveState.IsReassembling))
         {
             ClearScreenCracks();
             return;
@@ -172,29 +107,62 @@ public sealed partial class HudRenderer
         // 1. Initial 150 ms: Blinding white neon (#FFFFFF) flash with scarlet contour (#FF003C)
         if (_cracksTimer <= 0.15)
         {
-            dc.DrawGeometry(null, StaticCracksFlashScarletPen, _frozenCracksGeometry);
-            dc.DrawGeometry(null, StaticCracksFlashNeonPen, _frozenCracksGeometry);
+            if (_crackGeometry.ShadowGeometry != null)
+                dc.DrawGeometry(null, StaticCracksFlashScarletPen, _crackGeometry.ShadowGeometry);
+            if (_crackGeometry.HighlightGeometry != null)
+                dc.DrawGeometry(null, StaticCracksFlashNeonPen, _crackGeometry.HighlightGeometry);
+
+            // Layer 3 lightning active during detonation flash
+            _lightningGenerator.Render(dc, dt, center);
             return;
         }
 
-        // 2. Overdrive active: Opacity 0.4 - 0.6, flashing under kick drums and vibrating with screen shake
+        // 2. Overdrive active: Render full 3-layer glass fracture stack
         if (overdriveState.IsOverdriveActive)
         {
-            double opacity = Math.Clamp(0.40 + 0.20 * beatIntensity, 0.40, 0.65);
+            double opacity = Math.Clamp(0.50 + 0.30 * beatIntensity, 0.45, 0.85);
 
             _cracksShakeTransform.X = overdriveState.ShakeOffsetX;
             _cracksShakeTransform.Y = overdriveState.ShakeOffsetY;
 
             dc.PushTransform(_cracksShakeTransform);
+
+            // Layer 1: Optical Refraction & Desktop Chromatic Aberration
+            _refractionCapture.RenderRefractionLayer(
+                dc,
+                _cracksEpicenter,
+                dt,
+                _crackGeometry.CombinedClipGeometry,
+                opacity);
+
             dc.PushOpacity(opacity);
-            dc.DrawGeometry(null, StaticCracksScarletPen, _frozenCracksGeometry);
-            dc.DrawGeometry(null, StaticCracksNeonPen, _frozenCracksGeometry);
-            dc.Pop();
-            dc.Pop();
+
+            // Layer 2: Polygonal Shard Plates & Volumetric Facet Bevels (6-8 mm thickness)
+            if (_crackGeometry.PolygonalShardsGeometry != null)
+            {
+                dc.DrawGeometry(StaticShardPlateBrush, null, _crackGeometry.PolygonalShardsGeometry);
+            }
+
+            if (_crackGeometry.ShadowGeometry != null)
+            {
+                dc.DrawGeometry(null, StaticVolumetricShadowPen, _crackGeometry.ShadowGeometry);
+            }
+
+            if (_crackGeometry.HighlightGeometry != null)
+            {
+                dc.DrawGeometry(null, StaticVolumetricHighlightPen, _crackGeometry.HighlightGeometry);
+            }
+
+            dc.Pop(); // Opacity
+
+            // Layer 3: Neon Lightning Arcs
+            _lightningGenerator.Render(dc, dt, center);
+
+            dc.Pop(); // Transform
             return;
         }
 
-        // 3. Reassembly phase (Glass Sealing): cracks heal inward from screen edges to center
+        // 3. Reassembly phase (Glass Sealing): cracks seal inward towards epicenter
         if (overdriveState.IsReassembling)
         {
             double sealProgress = 0.0;
@@ -221,8 +189,17 @@ public sealed partial class HudRenderer
             {
                 dc.PushClip(_cracksSealClip);
                 dc.PushOpacity(alpha);
-                dc.DrawGeometry(null, StaticCracksScarletPen, _frozenCracksGeometry);
-                dc.DrawGeometry(null, StaticCracksNeonPen, _frozenCracksGeometry);
+
+                if (_crackGeometry.ShadowGeometry != null)
+                {
+                    dc.DrawGeometry(null, StaticVolumetricShadowPen, _crackGeometry.ShadowGeometry);
+                }
+
+                if (_crackGeometry.HighlightGeometry != null)
+                {
+                    dc.DrawGeometry(null, StaticVolumetricHighlightPen, _crackGeometry.HighlightGeometry);
+                }
+
                 dc.Pop();
                 dc.Pop();
             }

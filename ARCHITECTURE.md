@@ -652,12 +652,18 @@ JARVIS-win-x64/
 - `UI/ArcReactorVisualHost.cs`: хост WPF визуализатора, таймеры `CompositionTarget.Rendering`, реакция на аудио и овердрайв.
 - `UI/HudPalettes.cs`: структуры `ReactorPalette`, `HudColorTheme`, математика цвета `ColorMath` и предвычисленные замороженные палитры `ArcReactorPalettes`.
 - `UI/OverdriveStateMachine.cs`: стейт-машина накопления энергии, детекции перегрузки (Hyper-Drive), 5-фазной сборки ядра (Hyper-Slam), замаха/масштабирования ядра (Giant Anticipation & Supersonic Slam) и сильной вибрации (-12..+12 px).
-- `UI/HudRenderer.cs`, `UI/HudRenderer.Geometries.cs`, `UI/HudRenderer.Overdrive.cs`: процедурный рендеринг HUD через замороженные `StreamGeometry` контексты без аллокаций в кадре, агрессивный VRAM-глитч с горизонтальным срезом строк.
-- `UI/HudRenderer.ScreenCracks.cs`: процедурная паутина трещин стекла (StreamGeometry.Freeze()), ослепительная вспышка белым неоном (#FFFFFF) с алым контуром (#FF003C), реакция на бочку и анимация затягивания трещин (Glass Sealing).
+- `UI/HudRenderer.cs`, `UI/HudRenderer.Geometries.cs`, `UI/HudRenderer.Overdrive.cs`: процедурный рендеринг HUD через замороженные `StreamGeometry` контексты без аллокаций в кадре, гиперзвуковые частицы-иглы с motion streaks вдоль вектора скорости, агрессивный VRAM-глитч с горизонтальным срезом строк.
+- `UI/HudRenderer.ScreenCracks.cs`: стек визуализации растрескивания экрана (Glass Fracture Stack), координация слоев оптического преломления, объёмных фасок и плазменных дуг, ослепительная вспышка белым неоном (#FFFFFF) с алым контуром (#FF003C), реакция на бочку и мгновенное исчезновение при схлопывании ядра.
+- `UI/GlassDistortionEffect.cs`: шейдерный HLSL эффект (PixelShader 3.0) преломления толстого стекла, радиального сдвига UV-координат и хроматической аберрации.
+- `UI/HlslShaderCompiler.cs`: динамическая компиляция HLSL в байткод `ps_3_0` через системный `d3dcompiler_47.dll` с fallback-кэшем.
+- `UI/DesktopRefractionCapture.cs`: захват пикселей окон рабочего стола под областью разлома (BitBlt / DIB) и рендеринг оптического увеличения (1.06x), преломления и хроматической аберрации (сдвиг RGB-каналов на 2-4 px).
+- `UI/ProceduralCrackGeometry.cs`: процедурная генерация объёмных полигональных граней скола с двойным контуром (зеркальный блик #FFFFFF 1.5 px и глубокая тень #05050A 2.5 px) для эффекта стекла 6-8 мм, и концентрических замкнутых колец, формирующих отдельные полигональные пластины (Shards).
+- `UI/NeonLightningGenerator.cs`: высоковольтные плазменные дуги (2–4 ветвящиеся молнии алого #FF003C и неоново-голубого #00E5FF цветов с ослепительно белым ядром), процедурный шум/джиттер вершин каждого кадра и затухание за 300–450 мс.
 - `UI/ParticleModels.cs`: легковесные структуры `ShardParticle`, `GlitchCodeBlock` и энум `BoundaryEdge`.
-- `UI/ParticleEngine.cs`: основной жизненный цикл пулов частиц, взрывной импульс детонации осколков (2.5–3.5x) и цикл физики `UpdatePhysics`.
-- `UI/ParticleEngine.Physics.cs`: упругие отскоки от границ экрана, коллизии с окнами Windows через AABB, сниженная вероятность застревания (1.5–2.5%) и мини-эквалайзеры застрявших осколков.
+- `UI/ParticleEngine.cs`: основной жизненный цикл пулов частиц, направленная конусная детонация из эпицентра раскрытия ядра (Directional Cone Burst) со скоростью, увеличенной в 4 раза (2200–5000 px/s), и физика движения.
+- `UI/ParticleEngine.Physics.cs`: упругие отскоки от границ экрана, коллизии с окнами Windows через AABB, сниженная вероятность застревания (1.5%) и мини-эквалайзеры застрявших осколков.
 - `UI/ParticleEngine.Glitch.cs`: рендеринг блоков псевдо-дешифровки дампов памяти через `DrawingVisual` и `FormattedText` с катаканой и рандомизацией шрифтов (9-20 pt).
+- `UI/OverdriveParticleOverlayWindow.cs`: полноэкранный кликабельно-прозрачный оверлей с частицами и сверхзвуковыми motion streaks.
 
 ### 9.4 Voice & STT Pipeline (`Voice/`, `Services/`)
 - `Voice/AudioEnergyGate.cs`: быстрое вычисление RMS энергии звукового кадра и гейт фонового шума.

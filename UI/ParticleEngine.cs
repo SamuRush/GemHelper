@@ -70,16 +70,27 @@ public sealed partial class ParticleEngine
     {
         for (int i = 0; i < ActiveShardCount; i++)
         {
-            double angle = _shards[i].BaseAngle;
-            double rad = _shards[i].BaseRadius;
-            _shards[i].X = center.X + rad * Math.Cos(angle);
-            _shards[i].Y = center.Y + rad * Math.Sin(angle);
+            // Directional cone burst: particles eject in focused fans/cones from the split core fissure
+            double ejectionAngle;
+            int mode = i % 4;
+            if (mode == 0)
+                ejectionAngle = -Math.PI / 2.0 + (_rand.NextDouble() - 0.5) * 0.70; // Upward cone
+            else if (mode == 1)
+                ejectionAngle = Math.PI / 2.0 + (_rand.NextDouble() - 0.5) * 0.70;  // Downward cone
+            else if (mode == 2)
+                ejectionAngle = ((_rand.Next(2) == 0) ? -1.0 : 1.0) * (Math.PI / 2.0 + (_rand.NextDouble() - 0.5) * 0.90);
+            else
+                ejectionAngle = _shards[i].BaseAngle + (_rand.NextDouble() - 0.5) * 0.50;
 
-            double chaoticAngle = angle + (_rand.NextDouble() - 0.5) * 1.1;
-            double speed = (650.0 + _rand.NextDouble() * 850.0 + beatIntensity * 350.0) * 3.0;
-            _shards[i].Vx = speed * Math.Cos(chaoticAngle);
-            _shards[i].Vy = speed * Math.Sin(chaoticAngle);
-            _shards[i].RotSpeed = ((i % 2 == 0) ? 1.0 : -1.0) * (3.5 + _rand.NextDouble() * 5.5);
+            double rad = _shards[i].BaseRadius * 0.4;
+            _shards[i].X = center.X + rad * Math.Cos(ejectionAngle);
+            _shards[i].Y = center.Y + rad * Math.Sin(ejectionAngle);
+
+            // Initial speed increased by 4x: (550..1050 + beat*250) * 4.0 -> range 2200 to 5000 px/s
+            double speed = (550.0 + _rand.NextDouble() * 500.0 + beatIntensity * 250.0) * 4.0;
+            _shards[i].Vx = speed * Math.Cos(ejectionAngle);
+            _shards[i].Vy = speed * Math.Sin(ejectionAngle);
+            _shards[i].RotSpeed = ((i % 2 == 0) ? 1.0 : -1.0) * (4.5 + _rand.NextDouble() * 6.5);
             _shards[i].IsStuck = false;
             _shards[i].StuckEdge = BoundaryEdge.None;
             _shards[i].Active = true;
@@ -189,9 +200,9 @@ public sealed partial class ParticleEngine
                     _shards[i].Vx = curSpeed < 1e-3 ? (minSpeed * Math.Cos(_shards[i].Rotation)) : (_shards[i].Vx * factor);
                     _shards[i].Vy = curSpeed < 1e-3 ? (minSpeed * Math.Sin(_shards[i].Rotation)) : (_shards[i].Vy * factor);
                 }
-                else if (curSpeed > 4500.0)
+                else if (curSpeed > 5500.0)
                 {
-                    double factor = 4500.0 / curSpeed;
+                    double factor = 5500.0 / curSpeed;
                     _shards[i].Vx *= factor;
                     _shards[i].Vy *= factor;
                 }

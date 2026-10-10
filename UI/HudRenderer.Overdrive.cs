@@ -94,22 +94,48 @@ public sealed partial class HudRenderer
                 double sx = shards[i].X;
                 double sy = shards[i].Y;
                 double size = shards[i].Size * (1.0 + 0.35 * beatIntensity);
-                double rot = shards[i].Rotation;
+                double speedSq = shards[i].Vx * shards[i].Vx + shards[i].Vy * shards[i].Vy;
 
-                double cosR = Math.Cos(rot);
-                double sinR = Math.Sin(rot);
-                double tanX = -sinR;
-                double tanY = cosR;
+                // Hypersonic Directional Cone Burst: Motion Streaks / Motion Blur needles along velocity
+                if (speedSq > 220.0 * 220.0 && !shards[i].IsStuck)
+                {
+                    double speed = Math.Sqrt(speedSq);
+                    double vxNorm = shards[i].Vx / speed;
+                    double vyNorm = shards[i].Vy / speed;
+                    double nx = -vyNorm;
+                    double ny = vxNorm;
 
-                Point sp0 = new Point(sx + size * cosR, sy + size * sinR);
-                Point sp1 = new Point(sx + size * 0.45 * tanX, sy + size * 0.45 * tanY);
-                Point sp2 = new Point(sx - size * 0.75 * cosR, sy - size * 0.75 * sinR);
-                Point sp3 = new Point(sx - size * 0.45 * tanX, sy - size * 0.45 * tanY);
+                    double streakLen = Math.Clamp(speed * 0.016 * 0.70, 14.0, 52.0);
+                    double halfWidth = Math.Max(1.4, size * 0.32);
 
-                sCtx.BeginFigure(sp0, true, true);
-                sCtx.LineTo(sp1, true, false);
-                sCtx.LineTo(sp2, true, false);
-                sCtx.LineTo(sp3, true, false);
+                    Point head = new Point(sx + vxNorm * (size * 0.6), sy + vyNorm * (size * 0.6));
+                    Point side1 = new Point(sx + nx * halfWidth, sy + ny * halfWidth);
+                    Point tail = new Point(sx - vxNorm * streakLen, sy - vyNorm * streakLen);
+                    Point side2 = new Point(sx - nx * halfWidth, sy - ny * halfWidth);
+
+                    sCtx.BeginFigure(head, true, true);
+                    sCtx.LineTo(side1, true, false);
+                    sCtx.LineTo(tail, true, false);
+                    sCtx.LineTo(side2, true, false);
+                }
+                else
+                {
+                    double rot = shards[i].Rotation;
+                    double cosR = Math.Cos(rot);
+                    double sinR = Math.Sin(rot);
+                    double tanX = -sinR;
+                    double tanY = cosR;
+
+                    Point sp0 = new Point(sx + size * cosR, sy + size * sinR);
+                    Point sp1 = new Point(sx + size * 0.45 * tanX, sy + size * 0.45 * tanY);
+                    Point sp2 = new Point(sx - size * 0.75 * cosR, sy - size * 0.75 * sinR);
+                    Point sp3 = new Point(sx - size * 0.45 * tanX, sy - size * 0.45 * tanY);
+
+                    sCtx.BeginFigure(sp0, true, true);
+                    sCtx.LineTo(sp1, true, false);
+                    sCtx.LineTo(sp2, true, false);
+                    sCtx.LineTo(sp3, true, false);
+                }
             }
         }
         dc.DrawGeometry(pal.PrimaryBrush, pal.PrimaryPen, _dynamicShardsGeometry);
