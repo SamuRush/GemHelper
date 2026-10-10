@@ -97,6 +97,7 @@ public static class Program
         var llmService = serviceProvider.GetRequiredService<LlmIntentService>();
 
         overlay.AttachServices(llmService);
+        overlay.AttachVoiceFeedback(voiceFeedback);
         llmService.OnThinkingStarted += () => overlay.SetState(JarvisState.Thinking);
 
         // 4. Initialize background voice listener (Vosk)

@@ -12,14 +12,19 @@ public class FastRoutingTests
     static FastRoutingTests()
     {
         // Comprehensive JIT warmup for all regexes and fast matching branches
-        _ = LlmIntentService.TryFastMatch("пауза");
-        _ = LlmIntentService.TryFastMatch("следующий трек");
-        _ = LlmIntentService.TryFastMatch("громкость 50");
-        _ = LlmIntentService.TryFastMatch("поставь таймер на 1 минуту");
-        _ = LlmIntentService.TryFastMatch("открой блокнот");
-        _ = LlmIntentService.TryFastMatch("диспетчер задач");
-        _ = LlmIntentService.TryFastMatch("погода");
-        _ = LlmIntentService.TryFastMatch("закройся");
+        string[] warmupPhrases = [
+            "пауза", "следующий трек", "предыдущий трек", "поставь на паузу",
+            "громкость 50", "сделай тише", "выключи звук", "включи звук",
+            "поставь таймер на 1 минуту", "поставь таймер на 5 минут", "отмени таймер",
+            "открой блокнот", "закрой блокнот", "открой калькулятор", "закрой калькулятор",
+            "открой браузер", "закрой браузер", "диспетчер задач", "сверни все",
+            "скриншот", "скопируй", "вставь", "погода", "погода в москве",
+            "закройся", "включи видео", "расскажи шутку", "запусти витчер"
+        ];
+        foreach (var phrase in warmupPhrases)
+        {
+            _ = LlmIntentService.TryFastMatch(phrase);
+        }
     }
 
     public FastRoutingTests()
@@ -114,6 +119,7 @@ public class FastRoutingTests
     [InlineData("поставь на паузу", "pause")]
     [InlineData("останови видео", "pause_video")]
     [InlineData("продолжи видео", "resume_video")]
+    [InlineData("включи видео", "resume_video")]
     [InlineData("включи яндекс музыку", "play_music")]
     [InlineData("следующий трек", "next")]
     [InlineData("предыдущий трек", "prev")]
@@ -128,6 +134,58 @@ public class FastRoutingTests
         var args = response.CommandRequest.Args;
         Assert.True(args.TryGetProperty("action", out var actionProp));
         Assert.Equal(expectedAction, actionProp.GetString());
+    }
+
+    [Fact]
+    public void TurnOnVideo_Command_IsRoutedToMedia_NotSteam()
+    {
+        var response = LlmIntentService.TryFastMatch("включи видео");
+
+        Assert.NotNull(response);
+        Assert.NotNull(response.CommandRequest);
+        Assert.Equal("media", response.CommandRequest.Command);
+        Assert.NotEqual("app", response.CommandRequest.Command);
+
+        var args = response.CommandRequest.Args;
+        Assert.True(args.TryGetProperty("action", out var actionProp));
+        Assert.Equal("resume_video", actionProp.GetString());
+
+        Assert.Equal("Включаю видео, сэр.", response.Reply);
+    }
+
+    [Theory]
+    [InlineData("включи ролик", "resume_video")]
+    [InlineData("включи фильм", "resume_video")]
+    [InlineData("включи сериал", "resume_video")]
+    [InlineData("останови ролик", "pause_video")]
+    [InlineData("останови фильм", "pause_video")]
+    [InlineData("останови сериал", "pause_video")]
+    public void VideoSynonyms_AreRoutedToMedia(string phrase, string expectedAction)
+    {
+        var response = LlmIntentService.TryFastMatch(phrase);
+
+        Assert.NotNull(response);
+        Assert.NotNull(response.CommandRequest);
+        Assert.Equal("media", response.CommandRequest.Command);
+
+        var args = response.CommandRequest.Args;
+        Assert.True(args.TryGetProperty("action", out var actionProp));
+        Assert.Equal(expectedAction, actionProp.GetString());
+    }
+
+    [Theory]
+    [InlineData("Steam Cloud - Videos")]
+    [InlineData("видео")]
+    [InlineData("включи видео")]
+    [InlineData("Cyberpunk 2077 Soundtrack")]
+    [InlineData("Dedicated Server")]
+    [InlineData("SteamVR Beta")]
+    [InlineData("Source SDK Tool")]
+    [InlineData("Steam Test")]
+    public void SteamService_ExcludesServiceEntries_AndVideo(string query)
+    {
+        var result = SteamService.Instance.SearchGame(query);
+        Assert.Null(result);
     }
 
     [Theory]

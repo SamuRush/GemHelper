@@ -58,6 +58,14 @@ public sealed class AppControlCommandHandler : ICommandHandler
         "яндекс музыка", "яндекс.музыка", "яндекс музыку"
     };
 
+    private static readonly HashSet<string> _videoAliases = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "видео", "ролик", "ролики",
+        "фильм", "фильмы",
+        "сериал", "сериалы",
+        "кино"
+    };
+
 
     private static readonly List<AppDefinition> KnownApps = new()
     {
@@ -416,7 +424,21 @@ public sealed class AppControlCommandHandler : ICommandHandler
 
         string normalizedTarget = target.Trim().ToLowerInvariant();
 
-        // 0. МЕДИА-АЛИАСЫ: если запрошен запуск музыки или музыкального приложения,
+        // 0. ВИДЕО-АЛИАСЫ: если запрошен запуск видео / фильма / сериала
+        if (_videoAliases.Contains(normalizedTarget) ||
+            normalizedTarget.Contains("видео") || normalizedTarget.Contains("ролик") ||
+            normalizedTarget.Contains("фильм") || normalizedTarget.Contains("сериал"))
+        {
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine($"[AppHandler] Видео-алиас '{normalizedTarget}' -> делегируем в MediaSession.ControlVideoAsync(pause: false)");
+            Console.ResetColor();
+            bool sent = await MediaSession.ControlVideoAsync(pause: false, cancellationToken);
+            return sent
+                ? CommandResult.Ok("Включаю видео, сэр.", new { MediaAction = "ControlVideo", Alias = normalizedTarget })
+                : CommandResult.Fail("Не удалось включить видео.");
+        }
+
+        // 0.1 МЕДИА-АЛИАСЫ: если запрошен запуск музыки или музыкального приложения,
         // делегируем в MediaSession.PlayMusicAsync вместо попытки Process.Start или слепого PlayPause.
         if (_mediaAliases.Contains(normalizedTarget) || normalizedTarget == "yandexmusic" || normalizedTarget == "yandex music")
         {

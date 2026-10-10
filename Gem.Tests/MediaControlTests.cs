@@ -82,6 +82,10 @@ public class MediaControlTests
     [InlineData("видео на паузу", "pause_video")]
     [InlineData("пауза видео", "pause_video")]
     [InlineData("продолжи видео", "resume_video")]
+    [InlineData("включи видео", "resume_video")]
+    [InlineData("включи фильм", "resume_video")]
+    [InlineData("включи ролик", "resume_video")]
+    [InlineData("включи сериал", "resume_video")]
     [InlineData("видео плей", "resume_video")]
     [InlineData("возобнови видео", "resume_video")]
     [InlineData("включи яндекс музыку", "play_music")]
@@ -158,6 +162,20 @@ public class MediaControlTests
         var handler = new MediaCommandHandler(fakeSession);
 
         var argsDoc = JsonDocument.Parse("""{ "action": "resume_video" }""");
+        var result = await handler.ExecuteAsync(argsDoc.RootElement);
+
+        Assert.True(result.Success);
+        Assert.Equal(1, fakeSession.ControlVideoCount);
+        Assert.False(fakeSession.LastVideoPause);
+    }
+
+    [Fact]
+    public async Task MediaCommandHandler_RoutesPlayVideo_ToControlVideoAsync()
+    {
+        var fakeSession = new FakeMediaSessionService();
+        var handler = new MediaCommandHandler(fakeSession);
+
+        var argsDoc = JsonDocument.Parse("""{ "action": "play_video" }""");
         var result = await handler.ExecuteAsync(argsDoc.RootElement);
 
         Assert.True(result.Success);
@@ -246,6 +264,49 @@ public class MediaControlTests
     {
         bool isTarget = MediaSessionService.IsVideoProcessName(processName);
         Assert.False(isTarget, $"Process '{processName}' must not be identified as video target!");
+    }
+
+    [Theory]
+    [InlineData("Rick Astley - Never Gonna Give You Up - YouTube - Google Chrome")]
+    [InlineData("ВК Видео - Смотреть сериалы онлайн - Браузер")]
+    [InlineData("Фильм онлайн - Кинопоиск")]
+    [InlineData("Dota 2 Championship - Twitch - Brave")]
+    [InlineData("RuTube - Популярное видео")]
+    [InlineData("matrix_reloaded.mp4 - VLC media player")]
+    [InlineData("interstellar.mkv")]
+    public void MediaSessionService_IsVideoTitle_IdentifiesVideoTitles(string title)
+    {
+        bool isVideo = MediaSessionService.IsVideoTitle(title);
+        Assert.True(isVideo, $"Title '{title}' must be recognized as video title!");
+    }
+
+    [Theory]
+    [InlineData("Новая вкладка - Google Chrome")]
+    [InlineData("Google Chrome")]
+    [InlineData("Новая вкладка - Brave")]
+    [InlineData("Поиск в Google - Mozilla Firefox")]
+    [InlineData("Входящие (5) - Почта - Яндекс Браузер")]
+    [InlineData("GitHub - Google/Antigravity")]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void MediaSessionService_IsVideoTitle_RejectsNonVideoTitles(string title)
+    {
+        bool isVideo = MediaSessionService.IsVideoTitle(title);
+        Assert.False(isVideo, $"Title '{title}' must NOT be recognized as video title!");
+    }
+
+    [Theory]
+    [InlineData("brave", true, false)]
+    [InlineData("chrome", true, false)]
+    [InlineData("msedge", true, false)]
+    [InlineData("firefox", true, false)]
+    [InlineData("vlc", false, true)]
+    [InlineData("mpc-hc", false, true)]
+    [InlineData("potplayer", false, true)]
+    public void MediaSessionService_DistinguishesBrowserAndMediaPlayerProcesses(string procName, bool expectedBrowser, bool expectedPlayer)
+    {
+        Assert.Equal(expectedBrowser, MediaSessionService.IsBrowserProcessName(procName));
+        Assert.Equal(expectedPlayer, MediaSessionService.IsMediaPlayerProcessName(procName));
     }
 
     [Fact]

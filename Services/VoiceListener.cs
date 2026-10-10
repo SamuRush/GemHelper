@@ -260,6 +260,11 @@ public sealed class VoiceListener : IDisposable
     public event Action<float>? OnRmsLevelChanged;
 
     /// <summary>
+    /// Event fired when raw audio PCM bytes are captured from the microphone for visualizer FFT analysis.
+    /// </summary>
+    public event Action<byte[], int>? OnAudioBufferAvailable;
+
+    /// <summary>
     /// Event fired when a real-time partial speech recognition hypothesis is produced.
     /// </summary>
     public event Action<string>? OnPartialResult;
@@ -664,6 +669,7 @@ public sealed class VoiceListener : IDisposable
 
             double rms = CalculateRms(e.Buffer, e.BytesRecorded);
             OnRmsLevelChanged?.Invoke((float)rms);
+            OnAudioBufferAvailable?.Invoke(e.Buffer, e.BytesRecorded);
             bool isAudioSpeech = rms >= _silenceThresholdRms;
 
             if (_state == VoiceListenerState.WaitingForWakeWord)
@@ -702,6 +708,7 @@ public sealed class VoiceListener : IDisposable
 
             double rms = CalculateRms(buffer, bytesRecorded);
             OnRmsLevelChanged?.Invoke((float)rms);
+            OnAudioBufferAvailable?.Invoke(buffer, bytesRecorded);
             bool isAudioSpeech = rms >= _silenceThresholdRms;
 
             if (_state == VoiceListenerState.WaitingForWakeWord)

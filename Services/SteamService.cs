@@ -484,9 +484,32 @@ public sealed class SteamService
         }
     }
 
+    /// <summary>
+    /// Checks if a title corresponds to a Steam service entry (Steam Cloud, Videos, Soundtrack, Dedicated Server, Beta, Tool, Test).
+    /// These service entries are strictly excluded from the game search index.
+    /// </summary>
+    public static bool IsServiceEntry(string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title)) return false;
+
+        string[] serviceKeywords =
+        [
+            "Steam Cloud",
+            "Videos",
+            "Soundtrack",
+            "Dedicated Server",
+            "Beta",
+            "Tool",
+            "Test"
+        ];
+
+        return serviceKeywords.Any(k => title.Contains(k, StringComparison.OrdinalIgnoreCase));
+    }
+
     private void AddOrUpdateGame(string appId, string title, bool isInstalled, string? installDir = null, int stateFlags = 4, bool isFromManifest = false)
     {
         if (string.IsNullOrWhiteSpace(appId) || string.IsNullOrWhiteSpace(title)) return;
+        if (IsServiceEntry(title)) return;
 
         string normalized = NormalizeGameTitle(title);
         string cyrillic = TransliterateToCyrillic(normalized);
@@ -981,11 +1004,23 @@ public sealed class SteamService
     public GameSearchResult? SearchGame(string query)
     {
         if (string.IsNullOrWhiteSpace(query)) return null;
+        if (IsServiceEntry(query)) return null;
 
         // Step 1: Normalization & Cyrillic-to-Latin Transliteration
         string text = Regex.Replace(query, @"\b(установи|скачай|поставь|install|игра|игру|игры|запусти|включи|открой)\b", "", RegexOptions.IgnoreCase).Trim();
         text = Regex.Replace(text, @"\s+", " ").Trim();
         if (string.IsNullOrWhiteSpace(text)) text = query.Trim();
+
+        if (IsServiceEntry(text)) return null;
+
+        // Media commands must never be treated as Steam games
+        if (text.Contains("видео", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("ролик", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("фильм", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("сериал", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
 
         string rawQuery      = text.ToLowerInvariant().Replace(" ", "");
         string translitQuery = Transliterate(text).ToLowerInvariant().Replace(" ", "");
@@ -1000,6 +1035,7 @@ public sealed class SteamService
             {
                 if (_gamesByAppId.TryGetValue(numericAppId.ToString(), out var directAppIdGame))
                 {
+                    if (IsServiceEntry(directAppIdGame.Title)) return null;
                     return new GameSearchResult { Found = true, Game = directAppIdGame, Confidence = 1.0 };
                 }
             }
@@ -1015,6 +1051,8 @@ public sealed class SteamService
             {
                 if (_gamesByAppId.TryGetValue(aliasAppId!, out var aliasGame))
                 {
+                    if (IsServiceEntry(aliasGame.Title)) return null;
+
                     Console.ForegroundColor = ConsoleColor.Green;
                     Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [SteamService] Игра найдена по алиасу: '{query}' -> '{aliasGame.Name}' (AppID: {aliasAppId})");
                     Console.ResetColor();
@@ -1030,10 +1068,23 @@ public sealed class SteamService
         SteamGameInfo? bestGame = null;
         double bestScore = 0.0;
 
+        bool hasExplicitGamePrefix = Regex.IsMatch(query, @"\b(игра|игру|игры)\b", RegexOptions.IgnoreCase);
+        bool hasInstallAction = Regex.IsMatch(query, @"\b(установи|скачай|поставь|install)\b", RegexOptions.IgnoreCase);
+        bool hasExplicitGameContext = hasExplicitGamePrefix || hasInstallAction;
+
         lock (_lock)
         {
             foreach (var game in _games)
             {
+                if (IsServiceEntry(game.Title) || IsServiceEntry(game.Name)) continue;
+
+                // Games must be searched only by real titles from the user's library or explicit prefix
+                bool isUserLibrary = game.IsInstalled || game.IsFromManifest || _aliases.ContainsValue(game.AppId);
+                if (!hasExplicitGameContext && !isUserLibrary)
+                {
+                    continue;
+                }
+
                 var cleanGameName = Regex.Replace(game.Name.ToLowerInvariant(), @"[^a-z0-9а-яё]", "");
                 if (string.IsNullOrEmpty(cleanGameName)) continue;
 
@@ -1114,10 +1165,13 @@ public sealed class SteamService
     public SteamGameInfo? FindInstalledGameInternal(string query, bool initiateConfirmation = false)
     {
         if (string.IsNullOrWhiteSpace(query)) return null;
+        if (IsServiceEntry(query)) return null;
 
         string text = Regex.Replace(query, @"\b(удали|деинсталлируй|сноси|удалить|деинсталлировать|снеси|игра|игру|игры)\b", "", RegexOptions.IgnoreCase).Trim();
         text = Regex.Replace(text, @"\s+", " ").Trim();
         if (string.IsNullOrWhiteSpace(text)) text = query.Trim();
+
+        if (IsServiceEntry(text)) return null;
 
         string rawQuery      = text.ToLowerInvariant().Replace(" ", "");
         string translitQuery = Transliterate(text).ToLowerInvariant().Replace(" ", "");
@@ -1169,6 +1223,7 @@ public sealed class SteamService
 
             foreach (var game in _games)
             {
+                if (IsServiceEntry(game.Title) || IsServiceEntry(game.Name)) continue;
                 bool isCandidate = game.IsInstalled || game.IsFromManifest || (game.StateFlags != 1 && game.StateFlags > 0);
                 if (!isCandidate) continue;
 
@@ -1247,6 +1302,7 @@ public sealed class SteamService
     public SteamGameInfo? MatchGameByTitle(string title, string? originalQuery = null)
     {
         if (string.IsNullOrWhiteSpace(title)) return null;
+        if (IsServiceEntry(title)) return null;
 
         string cleanTitle = Regex.Replace(title.ToLowerInvariant(), @"[^a-z0-9а-яё]", "");
         if (string.IsNullOrEmpty(cleanTitle)) return null;
@@ -1256,6 +1312,7 @@ public sealed class SteamService
             // 1. Exact match
             foreach (var game in _games)
             {
+                if (IsServiceEntry(game.Title) || IsServiceEntry(game.Name)) continue;
                 var cleanGame = Regex.Replace(game.Name.ToLowerInvariant(), @"[^a-z0-9а-яё]", "");
                 if (cleanGame == cleanTitle) return game;
             }
@@ -1265,6 +1322,7 @@ public sealed class SteamService
             double bestScore = 0.0;
             foreach (var game in _games)
             {
+                if (IsServiceEntry(game.Title) || IsServiceEntry(game.Name)) continue;
                 var cleanGame = Regex.Replace(game.Name.ToLowerInvariant(), @"[^a-z0-9а-яё]", "");
                 double score = CalculateSimilarity(cleanGame, cleanTitle);
 

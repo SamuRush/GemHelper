@@ -40,6 +40,12 @@ public sealed class EdgeTtsEngine : ITtsEngine, IDisposable
 
     public bool IsAvailable => NetworkInterface.GetIsNetworkAvailable();
 
+    /// <summary>
+    /// Event fired when audio playback PCM chunks are decoded and read by the audio output device.
+    /// Used by the Arc Reactor visualizer for real-time FFT spectrum analysis.
+    /// </summary>
+    public static event Action<byte[], int>? OnAudioPlaybackChunk;
+
     public EdgeTtsEngine(string? voice = null, int timeoutMs = DefaultConnectionTimeoutMs)
     {
         _voice = string.IsNullOrWhiteSpace(voice) ? "ru-RU-DmitryNeural" : voice;
@@ -349,10 +355,10 @@ public sealed class EdgeTtsEngine : ITtsEngine, IDisposable
             }
         }
 
-        using (waveStream)
+        using (var visualStream = new VisualizerWaveStream(waveStream, (buf, count) => OnAudioPlaybackChunk?.Invoke(buf, count)))
         using (var waveOut = new WaveOutEvent())
         {
-            waveOut.Init(waveStream);
+            waveOut.Init(visualStream);
             waveOut.Play();
 
             while (waveOut.PlaybackState == PlaybackState.Playing && !ct.IsCancellationRequested)
@@ -364,6 +370,52 @@ public sealed class EdgeTtsEngine : ITtsEngine, IDisposable
             {
                 waveOut.Stop();
             }
+        }
+    }
+
+    private sealed class VisualizerWaveStream : WaveStream
+    {
+        private readonly WaveStream _source;
+        private readonly Action<byte[], int>? _onRead;
+
+        public VisualizerWaveStream(WaveStream source, Action<byte[], int>? onRead)
+        {
+            _source = source;
+            _onRead = onRead;
+        }
+
+        public override WaveFormat WaveFormat => _source.WaveFormat;
+        public override long Length => _source.Length;
+        public override long Position
+        {
+            get => _source.Position;
+            set => _source.Position = value;
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            int bytesRead = _source.Read(buffer, offset, count);
+            if (bytesRead > 0 && _onRead != null)
+            {
+                try
+                {
+                    _onRead(buffer, bytesRead);
+                }
+                catch
+                {
+                    // Visualizer errors must never disrupt speech playback
+                }
+            }
+            return bytesRead;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _source.Dispose();
+            }
+            base.Dispose(disposing);
         }
     }
 

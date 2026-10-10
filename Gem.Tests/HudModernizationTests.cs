@@ -67,4 +67,70 @@ public class HudModernizationTests
         string formatted = timer.Remaining.ToString(@"mm\:ss");
         Assert.Matches(@"^\d{2}:\d{2}$", formatted);
     }
+
+    [Fact]
+    public void AudioSpectrumAnalyzer_ProcessesPcm16_AndGeneratesFrequencySpectrum()
+    {
+        var analyzer = new AudioSpectrumAnalyzer();
+        byte[] speechSignal = GenerateSpeechSignal(bytes: 2048);
+
+        analyzer.ProcessPcm16(speechSignal, speechSignal.Length);
+
+        float[] spectrum = new float[AudioSpectrumAnalyzer.RayCount];
+        analyzer.GetTargetSpectrum(spectrum, deltaTime: 0.016);
+
+        // Verify that spectrum contains non-zero frequency magnitudes
+        float sum = 0f;
+        for (int i = 0; i < spectrum.Length; i++)
+        {
+            sum += spectrum[i];
+            Assert.True(spectrum[i] >= 0f && spectrum[i] <= 1f, $"Bin {i} value {spectrum[i]} out of range [0, 1]");
+        }
+        Assert.True(sum > 0f, "Spectrum sum should be greater than zero for speech audio");
+
+        // Verify bilateral symmetry: ray r matches ray (96 - 1 - r)
+        for (int r = 0; r < AudioSpectrumAnalyzer.RayCount / 2; r++)
+        {
+            Assert.Equal(spectrum[r], spectrum[AudioSpectrumAnalyzer.RayCount - 1 - r], precision: 4);
+        }
+    }
+
+    [Fact]
+    public void AudioSpectrumAnalyzer_TtsSpeaking_GeneratesModulatedSpeechEnvelope()
+    {
+        var analyzer = new AudioSpectrumAnalyzer();
+        analyzer.SetTtsSpeaking(true);
+
+        float[] spectrum = new float[AudioSpectrumAnalyzer.RayCount];
+        analyzer.GetTargetSpectrum(spectrum, deltaTime: 0.05);
+
+        float sum = 0f;
+        for (int i = 0; i < spectrum.Length; i++)
+        {
+            sum += spectrum[i];
+        }
+        Assert.True(sum > 0f, "TTS speaking mode should generate dynamic speech modulation even without raw input");
+    }
+
+    [Fact]
+    public void VoiceListener_RaisesOnAudioBufferAvailable_OnIncomingAudio()
+    {
+        using var listener = new VoiceListener(wakeWords: ["джарвис"]);
+        listener.TransitionToWaitingForWakeWord("Start in WaitingForWakeWord");
+
+        byte[]? capturedBuffer = null;
+        int capturedBytes = 0;
+
+        listener.OnAudioBufferAvailable += (buf, bytes) =>
+        {
+            capturedBuffer = buf;
+            capturedBytes = bytes;
+        };
+
+        byte[] speechFrame = GenerateSpeechSignal();
+        listener.SimulateAudioInput(speechFrame, speechFrame.Length);
+
+        Assert.NotNull(capturedBuffer);
+        Assert.Equal(speechFrame.Length, capturedBytes);
+    }
 }
