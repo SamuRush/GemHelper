@@ -817,6 +817,13 @@
                                   Foreground="#ECECF1" FontSize="13" Margin="24,4,0,4"
                                   Checked="HudSetting_ValueChanged" Unchecked="HudSetting_ValueChanged"/>
                         <TextBlock Text="Спавнит динамические блоки сбоев ядра, прерываний и дампов памяти со скоростью 15-20 симв/сек на экране во время перегрузки."
+                                   FontSize="11" Foreground="#88889C" Margin="48,0,0,10" TextWrapping="Wrap"/>
+
+                        <!-- Screen Shatter / Glass Cracks Checkbox -->
+                        <CheckBox x:Name="ChkScreenCracks" Content="Эффект растрескивания экрана (Screen Shatter / Glass Cracks)"
+                                  Foreground="#ECECF1" FontSize="13" Margin="24,4,0,4"
+                                  Checked="HudSetting_ValueChanged" Unchecked="HudSetting_ValueChanged"/>
+                        <TextBlock Text="Процедурная паутина трещин стекла с ослепительной вспышкой в эпицентре ядра и анимацией регенерации при сборке."
                                    FontSize="11" Foreground="#88889C" Margin="48,0,0,14" TextWrapping="Wrap"/>
 
                         <!-- Color Shift Checkbox -->

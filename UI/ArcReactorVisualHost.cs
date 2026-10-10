@@ -126,6 +126,12 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         set => _particleEngine.EnableMemoryGlitch = value;
     }
 
+    public bool EnableScreenCracks
+    {
+        get => _renderer.EnableScreenCracks;
+        set => _renderer.EnableScreenCracks = value;
+    }
+
     public bool IsOverdriveActive => _overdrive.IsOverdriveActive;
     public double OverdriveProgress => _overdrive.OverdriveProgress;
     public double CooldownRemaining => _overdrive.CooldownTimer;
@@ -206,6 +212,7 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         EnableMouseRepulsion = config.EnableMouseRepulsion;
         EnableWindowCollisions = config.EnableWindowCollisions;
         EnableMemoryGlitch = config.EnableMemoryGlitch;
+        EnableScreenCracks = config.EnableScreenCracks;
 
         Color customCore = ColorMath.ParseHex(config.CustomCoreColor, Color.FromRgb(0x00, 0xE5, 0xFF));
         Color customGlow = ColorMath.ParseHex(config.CustomGlowColor, Color.FromRgb(0x00, 0x40, 0xFF));
@@ -243,6 +250,10 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         if (shouldExplode)
         {
             _particleEngine.ExplodeShards(center, beatIntensity);
+            if (EnableScreenCracks)
+            {
+                _renderer.GenerateScreenCracks(center, boundsW, boundsH);
+            }
         }
 
         // JIT Window tracking
@@ -359,6 +370,7 @@ public sealed class ArcReactorVisualHost : FrameworkElement
                 ActualWidth,
                 ActualHeight,
                 now,
+                dt,
                 _breathPhase,
                 _angleRing1,
                 _angleRing2,

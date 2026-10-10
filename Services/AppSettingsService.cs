@@ -47,6 +47,7 @@ public sealed class HudSettingsConfig
     public bool EnableMouseRepulsion { get; set; } = true;
     public bool EnableWindowCollisions { get; set; } = true;
     public bool EnableMemoryGlitch { get; set; } = true;
+    public bool EnableScreenCracks { get; set; } = true;
 }
 
 public sealed class AppSettingsData
@@ -210,6 +211,8 @@ public static class AppSettingsService
                     if (target["OverdriveDuration"]?.GetValue<double>() is double od) data.HudSettings.OverdriveDuration = od;
                     if (target["EnableMouseRepulsion"] is { } mr) data.HudSettings.EnableMouseRepulsion = mr.GetValue<bool>();
                     if (target["EnableWindowCollisions"] is { } wc) data.HudSettings.EnableWindowCollisions = wc.GetValue<bool>();
+                    if (target["EnableMemoryGlitch"] is { } emg) data.HudSettings.EnableMemoryGlitch = emg.GetValue<bool>();
+                    if (target["EnableScreenCracks"] is { } esc) data.HudSettings.EnableScreenCracks = esc.GetValue<bool>();
                     if (target["CustomCoreColor"]?.GetValue<string>() is string ccc) data.HudSettings.CustomCoreColor = ccc;
                     if (target["CustomGlowColor"]?.GetValue<string>() is string cgc) data.HudSettings.CustomGlowColor = cgc;
                     if (target["CustomRaysColor"]?.GetValue<string>() is string crc) data.HudSettings.CustomRaysColor = crc;
@@ -308,6 +311,8 @@ public static class AppSettingsService
                     ["OverdriveDuration"] = data.HudSettings.OverdriveDuration,
                     ["EnableMouseRepulsion"] = data.HudSettings.EnableMouseRepulsion,
                     ["EnableWindowCollisions"] = data.HudSettings.EnableWindowCollisions,
+                    ["EnableMemoryGlitch"] = data.HudSettings.EnableMemoryGlitch,
+                    ["EnableScreenCracks"] = data.HudSettings.EnableScreenCracks,
                     ["CustomCoreColor"] = data.HudSettings.CustomCoreColor,
                     ["CustomGlowColor"] = data.HudSettings.CustomGlowColor,
                     ["CustomRaysColor"] = data.HudSettings.CustomRaysColor

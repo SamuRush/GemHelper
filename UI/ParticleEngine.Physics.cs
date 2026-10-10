@@ -29,7 +29,7 @@ public sealed partial class ParticleEngine
                 if (minD == dLeft)
                 {
                     shard.X = left;
-                    if (_rand.NextDouble() < 0.07)
+                    if (_rand.NextDouble() < 0.02)
                     {
                         shard.IsStuck = true;
                         shard.StuckEdge = BoundaryEdge.Left;
@@ -45,7 +45,7 @@ public sealed partial class ParticleEngine
                 else if (minD == dRight)
                 {
                     shard.X = right;
-                    if (_rand.NextDouble() < 0.07)
+                    if (_rand.NextDouble() < 0.02)
                     {
                         shard.IsStuck = true;
                         shard.StuckEdge = BoundaryEdge.Right;
@@ -61,7 +61,7 @@ public sealed partial class ParticleEngine
                 else if (minD == dTop)
                 {
                     shard.Y = top;
-                    if (_rand.NextDouble() < 0.07)
+                    if (_rand.NextDouble() < 0.02)
                     {
                         shard.IsStuck = true;
                         shard.StuckEdge = BoundaryEdge.Top;
@@ -77,7 +77,7 @@ public sealed partial class ParticleEngine
                 else
                 {
                     shard.Y = bottom;
-                    if (_rand.NextDouble() < 0.07)
+                    if (_rand.NextDouble() < 0.02)
                     {
                         shard.IsStuck = true;
                         shard.StuckEdge = BoundaryEdge.Bottom;
@@ -100,7 +100,7 @@ public sealed partial class ParticleEngine
         if (shard.X <= 2.0)
         {
             shard.X = 2.0;
-            if (_rand.NextDouble() < 0.07)
+            if (_rand.NextDouble() < 0.02)
             {
                 shard.IsStuck = true;
                 shard.StuckEdge = BoundaryEdge.Left;
@@ -117,7 +117,7 @@ public sealed partial class ParticleEngine
         else if (shard.X >= boundsW - 2.0)
         {
             shard.X = boundsW - 2.0;
-            if (_rand.NextDouble() < 0.07)
+            if (_rand.NextDouble() < 0.02)
             {
                 shard.IsStuck = true;
                 shard.StuckEdge = BoundaryEdge.Right;
@@ -135,7 +135,7 @@ public sealed partial class ParticleEngine
         if (shard.Y <= 2.0)
         {
             shard.Y = 2.0;
-            if (_rand.NextDouble() < 0.07)
+            if (_rand.NextDouble() < 0.02)
             {
                 shard.IsStuck = true;
                 shard.StuckEdge = BoundaryEdge.Top;
@@ -152,7 +152,7 @@ public sealed partial class ParticleEngine
         else if (shard.Y >= boundsH - 2.0)
         {
             shard.Y = boundsH - 2.0;
-            if (_rand.NextDouble() < 0.07)
+            if (_rand.NextDouble() < 0.02)
             {
                 shard.IsStuck = true;
                 shard.StuckEdge = BoundaryEdge.Bottom;

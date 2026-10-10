@@ -52,6 +52,7 @@ public sealed class OverdriveStateMachine
 
     private double _bassEnergyAccumulator = 0.0;
     private double _kickDebounceTimer = 0.0;
+    private double _violentShakeTimer = 0.0;
     private bool _wasOverdriveActive = false;
 
     public event Action<bool, double, float>? OnOverdriveFrame;
@@ -90,8 +91,15 @@ public sealed class OverdriveStateMachine
             }
             else if (ReassemblyPhase == ReassemblyPhase.Phase2_Slam)
             {
+                double prevT = ReassemblyPhaseTimer;
                 ReassemblyPhaseTimer += dt;
                 double t = ReassemblyPhaseTimer;
+
+                // Violent screen shake trigger at impact moment (t = 0.20)
+                if (prevT < 0.20 && t >= 0.20)
+                {
+                    _violentShakeTimer = 0.40;
+                }
 
                 // Step 3: Core Whiteout (60-80 ms plasma flash in impact window t in [0.20, 0.28])
                 if (t >= 0.20 && t < 0.28)
@@ -104,11 +112,11 @@ public sealed class OverdriveStateMachine
                     WhiteoutIntensity = 0.0;
                 }
 
-                // Step 4: Shockwave Blast (expanding radius 80 -> 370 px, opacity 1.0 -> 0.0 over 300 ms for t in [0.20, 0.50])
+                // Step 4: Extended Shockwave Blast (expanding radius 80 -> 700 px, opacity 1.0 -> 0.0 over 300 ms for t in [0.20, 0.50])
                 if (t >= 0.20)
                 {
                     double shockT = Math.Clamp((t - 0.20) / 0.30, 0.0, 1.0);
-                    ShockwaveRadius = 80.0 + shockT * 290.0;
+                    ShockwaveRadius = 80.0 + shockT * 620.0;
                     ShockwaveOpacity = Math.Max(0.0, 1.0 - shockT);
                 }
                 else
@@ -262,7 +270,15 @@ public sealed class OverdriveStateMachine
         if (IsOverdriveActive) rawCharge = 1.0;
         SmoothedCharge += (rawCharge - SmoothedCharge) * Math.Clamp(dt * 4.0, 0.0, 1.0);
 
-        if (SmoothedCharge > 0.80)
+        if (_violentShakeTimer > 0.0)
+        {
+            _violentShakeTimer = Math.Max(0.0, _violentShakeTimer - dt);
+            double violentRatio = Math.Clamp(_violentShakeTimer / 0.40, 0.0, 1.0);
+            double maxShake = 12.0 * violentRatio;
+            ShakeOffsetX = (_rand.NextDouble() * 2.0 - 1.0) * maxShake;
+            ShakeOffsetY = (_rand.NextDouble() * 2.0 - 1.0) * maxShake;
+        }
+        else if (SmoothedCharge > 0.80)
         {
             double jitterRatio = (SmoothedCharge - 0.80) / 0.20;
             double maxShake = 3.2 * jitterRatio;
@@ -276,6 +292,36 @@ public sealed class OverdriveStateMachine
         }
 
         OnOverdriveFrame?.Invoke(IsOverdriveActive, OverdriveProgress, beatIntensity);
+    }
+
+    /// <summary>
+    /// Calculates core scale multiplier during overdrive reassembly choreography:
+    /// - Step 1: Giant Anticipation (120 ms, t in [0.0, 0.12]): core swells 1.8 - 2.3x (peak ~2.05x)
+    /// - Step 2: Supersonic Slam (80 ms, t in [0.12, 0.20]): collapses sharply with EaseInExpo p^4 to 1.0x
+    /// - Step 5: Mechanical Settle (t >= 0.20): slight damped micro-rebound settling to 1.0x
+    /// </summary>
+    public double CalculateCoreScale()
+    {
+        if (IsReassembling && ReassemblyPhase == ReassemblyPhase.Phase2_Slam)
+        {
+            double t = ReassemblyPhaseTimer;
+            if (t < 0.12)
+            {
+                double p = t / 0.12;
+                return 1.0 + 1.05 * Math.Sin(p * Math.PI / 2.0);
+            }
+            else if (t < 0.20)
+            {
+                double p = (t - 0.12) / 0.08;
+                return 1.0 + 1.05 * Math.Pow(1.0 - p, 2.0);
+            }
+            else
+            {
+                double tau = t - 0.20;
+                return Math.Max(1.0, 1.0 + 0.12 * Math.Exp(-14.0 * tau) * Math.Cos(45.0 * tau));
+            }
+        }
+        return 1.0;
     }
 
     /// <summary>

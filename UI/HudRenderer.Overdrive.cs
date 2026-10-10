@@ -178,21 +178,22 @@ public sealed partial class HudRenderer
 
             double bx = blocks[i].X;
             double by = blocks[i].Y;
-            double bw = text.Width;
-            double bh = text.Height;
 
             dc.PushOpacity(opacity);
-            Rect bgRect = new Rect(bx - 10.0, by - 8.0, bw + 20.0, bh + 16.0);
-            Pen borderPen = blocks[i].IsCrimson ? ParticleEngine.StaticGlitchCrimsonBorderPen : ParticleEngine.StaticGlitchCyanBorderPen;
-            dc.DrawRoundedRectangle(ParticleEngine.StaticGlitchDarkBackdropBrush, borderPen, bgRect, 3.0, 3.0);
+
+            // Raw VRAM corruption: horizontal slice displacement (4 - 10 px) and RGB split
+            double sliceShift = blocks[i].SliceDisplacement > 0.0 ? blocks[i].SliceDisplacement : 6.0;
+            bool isGlitchFlicker = Math.Sin(blocks[i].Age * 45.0 + i) > 0.20;
+            double xShift = isGlitchFlicker ? (sliceShift * ((i % 2 == 0) ? 1.0 : -1.0)) : 0.0;
 
             if (glowText != null)
             {
-                dc.DrawText(glowText, new Point(bx + 1.2, by + 1.2));
-                dc.DrawText(glowText, new Point(bx - 0.8, by - 0.8));
+                // Chromatic aberration / Horizontal slice RGB desync
+                dc.DrawText(glowText, new Point(bx + xShift - 3.2, by));
+                dc.DrawText(glowText, new Point(bx + xShift + 3.2, by));
             }
 
-            dc.DrawText(text, new Point(bx, by));
+            dc.DrawText(text, new Point(bx + xShift, by));
             dc.Pop();
         }
     }

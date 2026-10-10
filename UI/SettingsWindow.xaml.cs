@@ -123,6 +123,7 @@ public sealed partial class SettingsWindow : Window
             ChkMouseRepulsion.IsChecked = hud.EnableMouseRepulsion;
             ChkWindowCollisions.IsChecked = hud.EnableWindowCollisions;
             ChkMemoryGlitch.IsChecked = hud.EnableMemoryGlitch;
+            ChkScreenCracks.IsChecked = hud.EnableScreenCracks;
 
             TxtCustomCoreColor.Text = hud.CustomCoreColor ?? "#00E5FF";
             TxtCustomGlowColor.Text = hud.CustomGlowColor ?? "#0040FF";

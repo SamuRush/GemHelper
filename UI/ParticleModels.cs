@@ -69,6 +69,8 @@ public struct GlitchCodeBlock
     public int Template3;
     public int Template4;
     public int LastDecodedStep;
+    public double FontSize;
+    public double SliceDisplacement;
     public FormattedText? CachedFormattedText;
     public FormattedText? CachedGlowFormattedText;
 }

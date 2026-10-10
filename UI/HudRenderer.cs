@@ -47,6 +47,7 @@ public sealed partial class HudRenderer
 
     // Reusable transform objects
     private readonly ScaleTransform _rootScaleTransform = new();
+    private readonly ScaleTransform _coreScaleTransform = new();
     private readonly RotateTransform _rotRing1 = new();
     private readonly RotateTransform _rotRing2 = new();
     private readonly RotateTransform _rotRing3 = new();
@@ -72,6 +73,7 @@ public sealed partial class HudRenderer
         double actualWidth,
         double actualHeight,
         double now,
+        double dt,
         double breathPhase,
         double angleRing1,
         double angleRing2,
@@ -144,9 +146,25 @@ public sealed partial class HudRenderer
         // Override title
         RenderOverrideTitle(dc, center, now, overdriveState);
 
-        // Plasma core & split fracture
+        // Plasma core & split fracture (with Giant Anticipation & Supersonic Slam scaling)
         Point shakenCenter = new Point(cx + overdriveState.ShakeOffsetX, cy + overdriveState.ShakeOffsetY);
+        double coreScale = overdriveState.CalculateCoreScale();
+        bool hasCoreScale = Math.Abs(coreScale - 1.0) > 0.005;
+        if (hasCoreScale)
+        {
+            _coreScaleTransform.ScaleX = coreScale;
+            _coreScaleTransform.ScaleY = coreScale;
+            _coreScaleTransform.CenterX = shakenCenter.X;
+            _coreScaleTransform.CenterY = shakenCenter.Y;
+            dc.PushTransform(_coreScaleTransform);
+        }
+
         RenderCore(dc, center, shakenCenter, now, breathPhase, smoothedSubBass, bassScaleMultiplier, shatterImpulse, splitDistance, pal, overdriveState);
+
+        if (hasCoreScale)
+        {
+            dc.Pop();
+        }
 
         // Orbital rings
         RenderOrbitalRings(dc, center, shatterImpulse, pal);
@@ -165,6 +183,9 @@ public sealed partial class HudRenderer
         }
 
         dc.Pop(); // _rootScaleTransform
+
+        // Screen shatter / glass cracks
+        RenderScreenCracks(dc, center, actualWidth, actualHeight, dt, beatIntensity, overdriveState);
 
         // Shards & stuck mini-equalizers
         if (overdriveState.OverdriveProgress > 0.02)

@@ -651,12 +651,13 @@ JARVIS-win-x64/
 ### 9.3 HUD Visualizer & Particle Physics (`UI/`)
 - `UI/ArcReactorVisualHost.cs`: хост WPF визуализатора, таймеры `CompositionTarget.Rendering`, реакция на аудио и овердрайв.
 - `UI/HudPalettes.cs`: структуры `ReactorPalette`, `HudColorTheme`, математика цвета `ColorMath` и предвычисленные замороженные палитры `ArcReactorPalettes`.
-- `UI/OverdriveStateMachine.cs`: стейт-машина накопления энергии, детекции перегрузки (Hyper-Drive) и 5-фазной сборки ядра (Hyper-Slam).
-- `UI/HudRenderer.cs`, `UI/HudRenderer.Geometries.cs`, `UI/HudRenderer.Overdrive.cs`: процедурный рендеринг HUD через замороженные `StreamGeometry` контексты без аллокаций в кадре.
+- `UI/OverdriveStateMachine.cs`: стейт-машина накопления энергии, детекции перегрузки (Hyper-Drive), 5-фазной сборки ядра (Hyper-Slam), замаха/масштабирования ядра (Giant Anticipation & Supersonic Slam) и сильной вибрации (-12..+12 px).
+- `UI/HudRenderer.cs`, `UI/HudRenderer.Geometries.cs`, `UI/HudRenderer.Overdrive.cs`: процедурный рендеринг HUD через замороженные `StreamGeometry` контексты без аллокаций в кадре, агрессивный VRAM-глитч с горизонтальным срезом строк.
+- `UI/HudRenderer.ScreenCracks.cs`: процедурная паутина трещин стекла (StreamGeometry.Freeze()), ослепительная вспышка белым неоном (#FFFFFF) с алым контуром (#FF003C), реакция на бочку и анимация затягивания трещин (Glass Sealing).
 - `UI/ParticleModels.cs`: легковесные структуры `ShardParticle`, `GlitchCodeBlock` и энум `BoundaryEdge`.
-- `UI/ParticleEngine.cs`: основной жизненный цикл пулов частиц и цикл физики `UpdatePhysics`.
-- `UI/ParticleEngine.Physics.cs`: упругие отскоки от границ экрана, коллизии с окнами Windows через AABB и мини-эквалайзеры застрявших осколков.
-- `UI/ParticleEngine.Glitch.cs`: рендеринг блоков псевдо-дешифровки дампов памяти через `DrawingVisual` и `FormattedText`.
+- `UI/ParticleEngine.cs`: основной жизненный цикл пулов частиц, взрывной импульс детонации осколков (2.5–3.5x) и цикл физики `UpdatePhysics`.
+- `UI/ParticleEngine.Physics.cs`: упругие отскоки от границ экрана, коллизии с окнами Windows через AABB, сниженная вероятность застревания (1.5–2.5%) и мини-эквалайзеры застрявших осколков.
+- `UI/ParticleEngine.Glitch.cs`: рендеринг блоков псевдо-дешифровки дампов памяти через `DrawingVisual` и `FormattedText` с катаканой и рандомизацией шрифтов (9-20 pt).
 
 ### 9.4 Voice & STT Pipeline (`Voice/`, `Services/`)
 - `Voice/AudioEnergyGate.cs`: быстрое вычисление RMS энергии звукового кадра и гейт фонового шума.

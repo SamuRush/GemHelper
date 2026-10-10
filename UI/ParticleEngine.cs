@@ -76,7 +76,7 @@ public sealed partial class ParticleEngine
             _shards[i].Y = center.Y + rad * Math.Sin(angle);
 
             double chaoticAngle = angle + (_rand.NextDouble() - 0.5) * 1.1;
-            double speed = 650.0 + _rand.NextDouble() * 850.0 + beatIntensity * 350.0;
+            double speed = (650.0 + _rand.NextDouble() * 850.0 + beatIntensity * 350.0) * 3.0;
             _shards[i].Vx = speed * Math.Cos(chaoticAngle);
             _shards[i].Vy = speed * Math.Sin(chaoticAngle);
             _shards[i].RotSpeed = ((i % 2 == 0) ? 1.0 : -1.0) * (3.5 + _rand.NextDouble() * 5.5);
@@ -189,9 +189,9 @@ public sealed partial class ParticleEngine
                     _shards[i].Vx = curSpeed < 1e-3 ? (minSpeed * Math.Cos(_shards[i].Rotation)) : (_shards[i].Vx * factor);
                     _shards[i].Vy = curSpeed < 1e-3 ? (minSpeed * Math.Sin(_shards[i].Rotation)) : (_shards[i].Vy * factor);
                 }
-                else if (curSpeed > 1400.0)
+                else if (curSpeed > 4500.0)
                 {
-                    double factor = 1400.0 / curSpeed;
+                    double factor = 4500.0 / curSpeed;
                     _shards[i].Vx *= factor;
                     _shards[i].Vy *= factor;
                 }

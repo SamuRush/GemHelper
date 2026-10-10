@@ -12,6 +12,10 @@ public sealed partial class ParticleEngine
 
     public static readonly string[] GlitchCodeTemplates = new[]
     {
+        "0xDEAD",
+        "0x00FF88",
+        "ERR_0x9B",
+        "TAG::0xCAFE",
         "0x7FFE9B40 :: MEM_CORRUPTION_DETECTED",
         "FATAL_CORE_BREACH -> IRQ_OVERRIDE_0x0F",
         "DISPATCH_THREAD :: GAIN_SATURATION > 140%",
@@ -21,16 +25,18 @@ public sealed partial class ParticleEngine
         "MEM_DECRYPT [0x00FF88] -> BYPASS_OK",
         "CRITICAL_TEMP :: VOLTAGE_SURGE_9.8V",
         "BUFFER_UNDERRUN :: WASAPI_STREAM_DESYNC",
-        "DMA_CHANNEL_7 :: ADDR_FAULT_0xBADF00D",
+        "DMA_CHANNEL_7 :: ADDR_FAULT_0xBADF00D [VRAM_CORRUPTION]",
         "SYNAPSE_FAULT -> NEURAL_DEFORMATION",
         "QUANTUM_LEAK: ENTROPY_SPIKE +320dB",
         "KERNEL_PANIC :: RING0_EXCEPTION_0x1C",
         "AUDIO_DSP_OVERFLOW: 128_BANDS_CLIPPED",
         "RESONANCE_CASCADE: SUB_BASS_UNSTABLE",
-        "REGISTER_DUMP: EAX=0xDEAD EBX=0xBEEF"
+        "REGISTER_DUMP: EAX=0xDEAD EBX=0xBEEF ECX=0x0000 EDX=0xCAFE",
+        "C:\\Windows\\System32\\ntoskrnl.exe [PAGE_FAULT_IN_NONPAGED_AREA]",
+        "ADDR: 0x00007FF7 :: DISPATCH_THREAD_CONTEXT_DESYNC_0x89"
     };
 
-    private const string GlitchGlyphs = "0123456789ABCDEF$#@%&!*<>/?~_=";
+    private const string GlitchGlyphs = "0123456789ABCDEF$#%@!_?<>/\\|~*アイウエオカキクケコサシスセソタチツテトナニヌネハヒフヘホマミムメモヤユヨラリルレロワヲン";
 
     public static readonly Typeface StaticGlitchTypeface = new(new FontFamily("Consolas, Cascadia Code, Lucida Console, monospace"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal);
     public static readonly SolidColorBrush StaticGlitchCrimsonBrush;
@@ -190,6 +196,9 @@ public sealed partial class ParticleEngine
         _glitchBlocks[slot].TotalLife = 1.5 + _rand.NextDouble() * 1.0;
         _glitchBlocks[slot].IsCrimson = _rand.Next(2) == 0;
         _glitchBlocks[slot].LineCount = lines;
+        double[] fontSizes = { 9.0, 10.5, 12.0, 14.0, 16.5, 19.5 };
+        _glitchBlocks[slot].FontSize = fontSizes[_rand.Next(fontSizes.Length)];
+        _glitchBlocks[slot].SliceDisplacement = 4.0 + _rand.NextDouble() * 6.0;
         _glitchBlocks[slot].Template0 = t0;
         _glitchBlocks[slot].Template1 = t1;
         _glitchBlocks[slot].Template2 = t2;
@@ -248,13 +257,14 @@ public sealed partial class ParticleEngine
 
         var mainBrush = block.IsCrimson ? StaticGlitchCrimsonBrush : StaticGlitchCyanBrush;
         var glowBrush = block.IsCrimson ? StaticGlitchCrimsonGlowBrush : StaticGlitchCyanGlowBrush;
+        double fontSize = block.FontSize > 0.0 ? block.FontSize : 14.5;
 
         block.CachedFormattedText = new FormattedText(
             text,
             System.Globalization.CultureInfo.InvariantCulture,
             FlowDirection.LeftToRight,
             StaticGlitchTypeface,
-            14.5,
+            fontSize,
             mainBrush,
             1.0
         );
@@ -264,7 +274,7 @@ public sealed partial class ParticleEngine
             System.Globalization.CultureInfo.InvariantCulture,
             FlowDirection.LeftToRight,
             StaticGlitchTypeface,
-            14.5,
+            fontSize,
             glowBrush,
             1.0
         );
