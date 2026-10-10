@@ -105,10 +105,10 @@ public sealed partial class HudRenderer
                     double nx = -vyNorm;
                     double ny = vxNorm;
 
-                    double streakLen = Math.Clamp(speed * 0.016 * 0.70, 14.0, 52.0);
-                    double halfWidth = Math.Max(1.4, size * 0.32);
+                    double streakLen = Math.Clamp(speed * 0.016 * 0.90, 22.0, 75.0);
+                    double halfWidth = Math.Max(1.2, size * 0.28);
 
-                    Point head = new Point(sx + vxNorm * (size * 0.6), sy + vyNorm * (size * 0.6));
+                    Point head = new Point(sx + vxNorm * (size * 0.75), sy + vyNorm * (size * 0.75));
                     Point side1 = new Point(sx + nx * halfWidth, sy + ny * halfWidth);
                     Point tail = new Point(sx - vxNorm * streakLen, sy - vyNorm * streakLen);
                     Point side2 = new Point(sx - nx * halfWidth, sy - ny * halfWidth);

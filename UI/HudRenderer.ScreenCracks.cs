@@ -31,10 +31,11 @@ public sealed partial class HudRenderer
 
     private static readonly Pen StaticVolumetricHighlightPen = InitFrozenPen(Color.FromArgb(245, 255, 255, 255), 1.5);
     private static readonly Pen StaticVolumetricShadowPen = InitFrozenPen(Color.FromArgb(235, 5, 5, 10), 2.5);
-    private static readonly SolidColorBrush StaticShardPlateBrush = InitFrozenBrush(Color.FromArgb(18, 0, 229, 255));
+    private static readonly SolidColorBrush StaticShardPlateBrush = InitFrozenBrush(Color.FromArgb(22, 0, 229, 255));
 
     private static readonly Pen StaticCracksFlashNeonPen = InitFrozenPen(Color.FromRgb(0xFF, 0xFF, 0xFF), 2.5);
-    private static readonly Pen StaticCracksFlashScarletPen = InitFrozenPen(Color.FromRgb(0xFF, 0x00, 0x3C), 5.0);
+    private static readonly Pen StaticCracksFlashScarletPen = InitFrozenPen(Color.FromArgb(220, 255, 0, 60), 5.5);
+    private static readonly Pen StaticCracksFlashCyanPen = InitFrozenPen(Color.FromArgb(220, 0, 229, 255), 5.5);
 
     private static Pen InitFrozenPen(Color color, double thickness)
     {
@@ -104,15 +105,32 @@ public sealed partial class HudRenderer
             return;
         }
 
-        // 1. Initial 150 ms: Blinding white neon (#FFFFFF) flash with scarlet contour (#FF003C)
-        if (_cracksTimer <= 0.15)
+        // Pulse and re-energize neon lightning arcs on audio kick beats during Overdrive
+        if (overdriveState.IsOverdriveActive)
         {
-            if (_crackGeometry.ShadowGeometry != null)
-                dc.DrawGeometry(null, StaticCracksFlashScarletPen, _crackGeometry.ShadowGeometry);
-            if (_crackGeometry.HighlightGeometry != null)
-                dc.DrawGeometry(null, StaticCracksFlashNeonPen, _crackGeometry.HighlightGeometry);
+            _lightningGenerator.PulseOnBeat(beatIntensity, center);
+        }
 
-            // Layer 3 lightning active during detonation flash
+        // 1. Initial 150-250 ms: High-speed neon color surge pulse along crack branches
+        if (_cracksTimer <= 0.22)
+        {
+            double surgeFade = Math.Clamp(1.0 - (_cracksTimer / 0.22), 0.0, 1.0);
+            dc.PushOpacity(surgeFade);
+
+            if (_crackGeometry.ShadowGeometry != null)
+            {
+                dc.DrawGeometry(null, StaticCracksFlashScarletPen, _crackGeometry.ShadowGeometry);
+                dc.DrawGeometry(null, StaticCracksFlashCyanPen, _crackGeometry.ShadowGeometry);
+            }
+
+            if (_crackGeometry.HighlightGeometry != null)
+            {
+                dc.DrawGeometry(null, StaticCracksFlashNeonPen, _crackGeometry.HighlightGeometry);
+            }
+
+            dc.Pop();
+
+            // Layer 3 lightning active during detonation surge
             _lightningGenerator.Render(dc, dt, center);
             return;
         }
@@ -120,7 +138,7 @@ public sealed partial class HudRenderer
         // 2. Overdrive active: Render full 3-layer glass fracture stack
         if (overdriveState.IsOverdriveActive)
         {
-            double opacity = Math.Clamp(0.50 + 0.30 * beatIntensity, 0.45, 0.85);
+            double opacity = Math.Clamp(0.52 + 0.30 * beatIntensity, 0.45, 0.88);
 
             _cracksShakeTransform.X = overdriveState.ShakeOffsetX;
             _cracksShakeTransform.Y = overdriveState.ShakeOffsetY;

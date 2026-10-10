@@ -302,6 +302,23 @@ public class GlassFractureStackTests
     }
 
     [Fact]
+    public void Layer3_NeonLightningArcs_PulseOnBeat_ReEnergizesArcs()
+    {
+        var lightning = new NeonLightningGenerator();
+        lightning.Trigger(new Point(960, 540));
+        Assert.True(lightning.IsActive);
+
+        // Advance time until near death
+        lightning.Update(0.40);
+        Assert.True(lightning.CurrentLife <= 0.05);
+
+        // Audio beat drop with high beatIntensity (> 0.38)
+        lightning.PulseOnBeat(0.85f, new Point(960, 540));
+        Assert.True(lightning.IsActive, "Lightning must be re-energized by audio kick drum beats");
+        Assert.True(lightning.CurrentLife > 0.15, "CurrentLife must be refreshed on beat pulse");
+    }
+
+    [Fact]
     public void ArchitectureConstraint_AllUIFiles_Under500Lines()
     {
         string projectDir = AppContext.BaseDirectory;
