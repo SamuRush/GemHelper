@@ -962,24 +962,49 @@ public sealed class LlmIntentService
             return null;
         }
 
-        // 1. Stop Category:
-        // Patterns: "заглуши музыку", "выключи музыку"
-        // Action: emulation of VK_MEDIA_STOP (0xB2) or VK_MEDIA_PLAY_PAUSE (0xB3)
-        // Voice feedback: "Остановил, сэр."
+        // 1. Video Pause Category:
+        // Patterns: "останови видео", "видео на паузу", "пауза видео", "поставь видео на паузу", "стоп видео", "видео стоп"
+        bool isVideoPause = text == "останови видео" || text == "остановить видео" ||
+                            text == "видео на паузу" || text == "пауза видео" ||
+                            text == "поставь видео на паузу" || text == "видео стоп" || text == "стоп видео" ||
+                            text.StartsWith("останови видео") || text.StartsWith("остановить видео") ||
+                            text.StartsWith("поставь видео на паузу");
+
+        if (isVideoPause)
+        {
+            var args = CreateFastMatchArgs("""{ "action": "pause_video" }""");
+            return new JarvisResponse(new CommandRequest("media", args), "Остановил видео, сэр.");
+        }
+
+        // 2. Video Resume Category:
+        // Patterns: "продолжи видео", "видео плей", "возобнови видео", "сними видео с паузы", "запусти видео", "играй видео"
+        bool isVideoResume = text == "продолжи видео" || text == "продолжить видео" ||
+                             text == "видео плей" || text == "плей видео" ||
+                             text == "возобнови видео" || text == "возобновить видео" ||
+                             text == "сними видео с паузы" || text == "запусти видео" || text == "играй видео" ||
+                             text.StartsWith("продолжи видео") || text.StartsWith("возобнови видео");
+
+        if (isVideoResume)
+        {
+            var args = CreateFastMatchArgs("""{ "action": "resume_video" }""");
+            return new JarvisResponse(new CommandRequest("media", args), "Продолжаю видео, сэр.");
+        }
+
+        // 3. Stop Category:
+        // Patterns: "заглуши музыку", "выключи музыку", "стоп музыка", "стоп музыку", "стоп трек", "стоп"
         if (text == "заглуши музыку" || text == "выключи музыку" ||
             text == "заглушить музыку" || text == "выключить музыку" ||
             text == "стоп музыка" || text == "стоп музыку" ||
             text == "выключи трек" || text == "заглуши трек" ||
+            text == "стоп трек" || text == "стоп песню" ||
             text.StartsWith("заглуши музыку") || text.StartsWith("выключи музыку"))
         {
             var args = CreateFastMatchArgs("""{ "action": "stop", "key": "media_stop" }""");
             return new JarvisResponse(new CommandRequest("media", args), "Остановил, сэр.");
         }
 
-        // 2. Next Track Category:
+        // 4. Next Track Category:
         // Patterns: "следующий трек", "следующая песня", "дальше", "переключи", "трек вперед"
-        // Action: emulation of VK_MEDIA_NEXT_TRACK (0xB0)
-        // Voice feedback: "Следующий трек, сэр."
         bool isNext = text == "следующий трек" || text == "следующая песня" || text == "дальше" ||
                       text == "переключи" || text == "переключи трек" || text == "переключи песню" ||
                       text == "переключить" || text == "переключай" ||
@@ -995,10 +1020,8 @@ public sealed class LlmIntentService
             return new JarvisResponse(new CommandRequest("media", args), "Следующий трек, сэр.");
         }
 
-        // 3. Prev Track Category:
+        // 5. Prev Track Category:
         // Patterns: "предыдущий трек", "предыдущая песня", "назад", "верни трек"
-        // Action: emulation of VK_MEDIA_PREV_TRACK (0xB1)
-        // Voice feedback: "Предыдущий трек, сэр."
         bool isPrev = text == "предыдущий трек" || text == "предыдущая песня" || text == "назад" ||
                       text == "верни трек" || text == "верни песню" || text == "трек назад" ||
                       text == "песня назад" || text == "назад трек" ||
@@ -1013,53 +1036,69 @@ public sealed class LlmIntentService
             return new JarvisResponse(new CommandRequest("media", args), "Предыдущий трек, сэр.");
         }
 
-        // 4. Play/Pause Toggle Category:
-        // Patterns: "включи музыку", "музыка", "играй", "пауза", "стоп", "останови", "останови музыку", "продолжи", "возобнови"
-        // Action: emulation of VK_MEDIA_PLAY_PAUSE (0xB3)
-        // Voice feedback:
-        //   Для паузы/остановки: "Остановил, сэр."
-        //   Для продолжения/включения: "Включаю."
+        // 6. Yandex Music & Music Launch Category:
+        // Patterns: "включи яндекс музыку", "запусти яндекс музыку", "яндекс музыка", "включи музыку", "поставь музыку", "запусти музыку"
+        bool isYandexMusic = text == "включи яндекс музыку" || text == "включить яндекс музыку" ||
+                             text == "запусти яндекс музыку" || text == "запустить яндекс музыку" ||
+                             text == "поставь яндекс музыку" || text == "поставить яндекс музыку" ||
+                             text == "яндекс музыка" || text == "яндекс музыку" ||
+                             text == "яндекс.музыка" || text == "яндекс-музыка" ||
+                             text.StartsWith("включи яндекс") || text.StartsWith("запусти яндекс") ||
+                             text.StartsWith("поставь яндекс");
 
-        // 4A. Pause / Stop: "пауза", "стоп", "останови", "останови музыку"
+        if (isYandexMusic)
+        {
+            var args = CreateFastMatchArgs("""{ "action": "play_music", "app": "yandexmusic" }""");
+            return new JarvisResponse(new CommandRequest("media", args), "Включаю Яндекс Музыку, сэр.");
+        }
+
+        bool isPlayMusic = text == "включи музыку" || text == "включить музыку" ||
+                           text == "музыка" || text == "музыку" ||
+                           text == "играй музыку" || text == "играть музыку" ||
+                           text == "поставь музыку" || text == "поставить музыку" ||
+                           text == "запусти музыку" || text == "запустить музыку" ||
+                           text == "поставь трек" || text == "поставь песню" ||
+                           text == "запусти трек" || text == "запусти песню" ||
+                           text.StartsWith("включи музыку") || text.StartsWith("включить музыку") ||
+                           text.StartsWith("поставь музыку") || text.StartsWith("запусти музыку") ||
+                           Regex.IsMatch(text, @"^(запусти|поставь|включи|сыграй)\s+(музыку|музыка|трек|треки|песню|песня|плейлист)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        if (isPlayMusic && !text.StartsWith("играй в ") && !text.StartsWith("играть в "))
+        {
+            var args = CreateFastMatchArgs("""{ "action": "play_music", "app": "yandexmusic" }""");
+            return new JarvisResponse(new CommandRequest("media", args), "Включаю музыку, сэр.");
+        }
+
+        // 7. Pause Category («поставь на паузу»):
+        // Patterns: "поставь на паузу", "на паузу", "пауза", "паузу", "останови воспроизведение", "останови музыку", "останови"
         bool isPause = text == "пауза" || text == "стоп" || text == "останови" || text == "останови музыку" ||
                        text == "останови воспроизведение" || text == "останови трек" || text == "останови песню" ||
                        text == "поставь на паузу" || text == "на паузу" || text == "паузу" ||
-                       text == "стоп трек" || text == "стоп песню" ||
                        text.StartsWith("останови музыку") || text.StartsWith("останови трек") ||
                        text.StartsWith("останови песню") || text.StartsWith("поставь на паузу");
 
         // Do not intercept "стоп приложение" or "стоп джарвис"
         if (isPause && !text.Contains("приложение") && !text.Contains("джарвис") && !text.Contains("себя") && !text.Contains("программ"))
         {
-            var args = CreateFastMatchArgs("""{ "action": "play_pause", "key": "media_play_pause" }""");
+            var args = CreateFastMatchArgs("""{ "action": "pause" }""");
             return new JarvisResponse(new CommandRequest("media", args), "Остановил, сэр.");
         }
 
-        // 4B. Play / Resume: "включи музыку", "музыка", "играй", "продолжи", "возобнови",
-        //     "запусти музыку", "поставь трек", "поставь песню" и аналоги.
-        // Regex-паттерн с $-якорем гарантирует точное совпадение только с медиа-объектами,
-        // исключая имена Steam-игр (например, "запусти витчера" не совпадёт).
-        bool isPlay = text == "включи музыку" || text == "включить музыку" || text == "музыка" || text == "музыку" ||
-                      text == "играй" || text == "играй музыку" || text == "играть музыку" ||
-                      text == "продолжи" || text == "продолжить" || text == "продолжай" ||
-                      text == "продолжи музыку" || text == "продолжить музыку" || text == "продолжи воспроизведение" ||
-                      text == "продолжить воспроизведение" ||
-                      text == "возобнови" || text == "возобновить" || text == "возобнови музыку" ||
-                      text == "возобновить музыку" || text == "возобнови воспроизведение" ||
-                      text == "возобновить воспроизведение" ||
-                      text == "сними с паузы" || text == "плей" || text == "play" ||
-                      text.StartsWith("включи музыку") || text.StartsWith("включить музыку") ||
-                      text.StartsWith("продолжи музыку") || text.StartsWith("возобнови музыку") ||
-                      // Паттерны: «запусти/поставь + музыку/трек/песню/воспроизведение»
-                      Regex.IsMatch(text,
-                          @"^(запусти|поставь|включи|продолжи|возобнови)\s+(музыку|музыка|трек|треки|песню|песня|воспроизведение|плейлист)$",
-                          RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        // 8. General Resume / Unpause Category:
+        // Patterns: "продолжи", "возобнови", "сними с паузы", "плей", "play"
+        bool isResume = text == "продолжи" || text == "продолжить" || text == "продолжай" ||
+                        text == "продолжи музыку" || text == "продолжить музыку" ||
+                        text == "продолжи воспроизведение" || text == "продолжить воспроизведение" ||
+                        text == "возобнови" || text == "возобновить" ||
+                        text == "возобнови музыку" || text == "возобновить музыку" ||
+                        text == "возобнови воспроизведение" || text == "возобновить воспроизведение" ||
+                        text == "сними с паузы" || text == "плей" || text == "play" || text == "играй" ||
+                        text.StartsWith("продолжи музыку") || text.StartsWith("возобнови музыку");
 
-        // Guard: do not confuse "играй в <game>" with media playback
-        if (isPlay && !text.StartsWith("играй в ") && !text.StartsWith("играть в "))
+        if (isResume && !text.StartsWith("играй в ") && !text.StartsWith("играть в "))
         {
-            var args = CreateFastMatchArgs("""{ "action": "play_pause", "key": "media_play_pause" }""");
-            return new JarvisResponse(new CommandRequest("media", args), "Включаю.");
+            var args = CreateFastMatchArgs("""{ "action": "resume" }""");
+            return new JarvisResponse(new CommandRequest("media", args), "Возобновляю воспроизведение, сэр.");
         }
 
         return null;

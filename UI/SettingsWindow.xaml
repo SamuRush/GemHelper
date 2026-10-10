@@ -471,12 +471,7 @@
                             </StackPanel>
                             <StackPanel Grid.Column="1" Margin="6,0,0,0">
                                 <TextBlock Text="Выбор голоса:" Style="{StaticResource FieldLabelStyle}"/>
-                                <ComboBox x:Name="CmbTtsVoice">
-                                    <ComboBoxItem Content="Aidar (Silero SAPI5, Мужской)"/>
-                                    <ComboBoxItem Content="Microsoft Pavel (Windows SAPI5, Мужской)"/>
-                                    <ComboBoxItem Content="ru-RU-DmitryNeural (Edge-TTS, Мужской)"/>
-                                    <ComboBoxItem Content="ru-RU-SvetlanaNeural (Edge-TTS, Женский)"/>
-                                </ComboBox>
+                                <ComboBox x:Name="CmbTtsVoice"/>
                             </StackPanel>
                         </Grid>
                         <Grid Margin="0,4,0,10">

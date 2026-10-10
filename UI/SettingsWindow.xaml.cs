@@ -5,6 +5,8 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Runtime.InteropServices;
+using System.Speech.Synthesis;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -100,9 +102,7 @@ public sealed partial class SettingsWindow : Window
                 isEdge = false;
             }
             CmbTtsEngine.SelectedIndex = isEdge ? 0 : 1;
-
-            string selectedVoice = config.Tts?.Voice ?? config.Tts?.Sapi5Voice ?? "Aidar";
-            SelectTtsVoiceInComboBox(selectedVoice);
+            UpdateVoiceComboBox(isEdge, config.Tts);
 
             // 4. LLM settings
             TxtLlmUrl.Text = config.LlmBaseUrl;
@@ -175,23 +175,161 @@ public sealed partial class SettingsWindow : Window
 
     private void SelectTtsVoiceInComboBox(string voiceName)
     {
-        if (string.IsNullOrWhiteSpace(voiceName))
-        {
-            CmbTtsVoice.SelectedIndex = 0;
-            return;
-        }
+        if (CmbTtsVoice.Items.Count == 0) return;
 
-        for (int i = 0; i < CmbTtsVoice.Items.Count; i++)
+        if (!string.IsNullOrWhiteSpace(voiceName))
         {
-            if (CmbTtsVoice.Items[i] is ComboBoxItem item &&
-                item.Content?.ToString()?.Contains(voiceName, StringComparison.OrdinalIgnoreCase) == true)
+            for (int i = 0; i < CmbTtsVoice.Items.Count; i++)
             {
-                CmbTtsVoice.SelectedIndex = i;
-                return;
+                if (CmbTtsVoice.Items[i] is ComboBoxItem item)
+                {
+                    string tag = item.Tag?.ToString() ?? string.Empty;
+                    string content = item.Content?.ToString() ?? string.Empty;
+
+                    if (tag.Equals(voiceName, StringComparison.OrdinalIgnoreCase) ||
+                        tag.Contains(voiceName, StringComparison.OrdinalIgnoreCase) ||
+                        voiceName.Contains(tag, StringComparison.OrdinalIgnoreCase) ||
+                        content.Contains(voiceName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        CmbTtsVoice.SelectedIndex = i;
+                        return;
+                    }
+                }
             }
         }
 
         CmbTtsVoice.SelectedIndex = 0;
+    }
+
+    private void UpdateVoiceComboBox(bool isEdge, TtsConfig? ttsConfig)
+    {
+        CmbTtsVoice.Items.Clear();
+
+        if (isEdge)
+        {
+            CmbTtsVoice.Items.Add(new ComboBoxItem
+            {
+                Content = "ru-RU-DmitryNeural (Мужской)",
+                Tag = "ru-RU-DmitryNeural"
+            });
+            CmbTtsVoice.Items.Add(new ComboBoxItem
+            {
+                Content = "ru-RU-SvetlanaNeural (Женский)",
+                Tag = "ru-RU-SvetlanaNeural"
+            });
+
+            string activeVoice = ttsConfig?.EdgeVoice ?? (ttsConfig?.Voice is { } v && v.StartsWith("ru-RU", StringComparison.OrdinalIgnoreCase) ? v : "ru-RU-DmitryNeural");
+            SelectTtsVoiceInComboBox(activeVoice);
+        }
+        else
+        {
+            var sapiVoices = GetInstalledSapi5Voices();
+            foreach (var (voiceName, description) in sapiVoices)
+            {
+                CmbTtsVoice.Items.Add(new ComboBoxItem
+                {
+                    Content = description,
+                    Tag = voiceName
+                });
+            }
+
+            string activeVoice = ttsConfig?.Sapi5Voice ?? (ttsConfig?.Voice is { } v && !v.StartsWith("ru-RU", StringComparison.OrdinalIgnoreCase) ? v : "Aidar");
+            SelectTtsVoiceInComboBox(activeVoice);
+        }
+    }
+
+    public static List<(string Name, string Description)> GetInstalledSapi5Voices()
+    {
+        var list = new List<(string Name, string Description)>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // 1. Through System.Speech.Synthesis.SpeechSynthesizer
+        try
+        {
+            using var synth = new SpeechSynthesizer();
+            foreach (var v in synth.GetInstalledVoices())
+            {
+                if (v.Enabled && seen.Add(v.VoiceInfo.Name))
+                {
+                    string genderStr = v.VoiceInfo.Gender == VoiceGender.Female ? "Женский" :
+                                       v.VoiceInfo.Gender == VoiceGender.Male ? "Мужской" : "Нейтральный";
+                    if (v.VoiceInfo.Name.Contains("Irina", StringComparison.OrdinalIgnoreCase) ||
+                        v.VoiceInfo.Name.Contains("Zira", StringComparison.OrdinalIgnoreCase) ||
+                        v.VoiceInfo.Name.Contains("Elena", StringComparison.OrdinalIgnoreCase) ||
+                        v.VoiceInfo.Name.Contains("Kseniya", StringComparison.OrdinalIgnoreCase) ||
+                        v.VoiceInfo.Name.Contains("Xenia", StringComparison.OrdinalIgnoreCase))
+                    {
+                        genderStr = "Женский";
+                    }
+                    else if (v.VoiceInfo.Name.Contains("Pavel", StringComparison.OrdinalIgnoreCase) ||
+                             v.VoiceInfo.Name.Contains("Aidar", StringComparison.OrdinalIgnoreCase) ||
+                             v.VoiceInfo.Name.Contains("Baya", StringComparison.OrdinalIgnoreCase) ||
+                             v.VoiceInfo.Name.Contains("David", StringComparison.OrdinalIgnoreCase) ||
+                             v.VoiceInfo.Name.Contains("Eugene", StringComparison.OrdinalIgnoreCase))
+                    {
+                        genderStr = "Мужской";
+                    }
+
+                    list.Add((v.VoiceInfo.Name, $"{v.VoiceInfo.Name} ({genderStr})"));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[SettingsWindow] Error enumerating System.Speech voices: {ex.Message}");
+        }
+
+        // 2. Through SAPI.SpVoice COM tokens
+        try
+        {
+            Type? spVoiceType = Type.GetTypeFromProgID("SAPI.SpVoice");
+            if (spVoiceType != null)
+            {
+                dynamic spVoice = Activator.CreateInstance(spVoiceType)!;
+                dynamic tokens = spVoice.GetVoices();
+                int count = tokens.Count;
+                for (int i = 0; i < count; i++)
+                {
+                    dynamic token = tokens.Item(i);
+                    string desc = (string)token.GetDescription();
+                    if (!string.IsNullOrWhiteSpace(desc))
+                    {
+                        string baseName = desc;
+                        int dashIdx = desc.IndexOf(" - ", StringComparison.Ordinal);
+                        if (dashIdx > 0)
+                        {
+                            baseName = desc.Substring(0, dashIdx).Trim();
+                        }
+
+                        if (!seen.Contains(desc) && !seen.Contains(baseName))
+                        {
+                            seen.Add(desc);
+                            string genderStr = desc.Contains("Female", StringComparison.OrdinalIgnoreCase) ||
+                                               desc.Contains("Irina", StringComparison.OrdinalIgnoreCase) ||
+                                               desc.Contains("Zira", StringComparison.OrdinalIgnoreCase) ||
+                                               desc.Contains("Kseniya", StringComparison.OrdinalIgnoreCase) ||
+                                               desc.Contains("Xenia", StringComparison.OrdinalIgnoreCase) ? "Женский" : "Мужской";
+                            list.Add((desc, $"{desc} ({genderStr})"));
+                        }
+                    }
+                }
+                try { Marshal.ReleaseComObject(spVoice); } catch { }
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[SettingsWindow] Error enumerating SAPI COM voices: {ex.Message}");
+        }
+
+        // Fallback default list if no SAPI voices detected
+        if (list.Count == 0)
+        {
+            list.Add(("Aidar", "Aidar (Silero SAPI5, Мужской)"));
+            list.Add(("Microsoft Pavel", "Microsoft Pavel (Windows SAPI5, Мужской)"));
+            list.Add(("Microsoft Irina Desktop", "Microsoft Irina Desktop (Windows SAPI5, Женский)"));
+        }
+
+        return list;
     }
 
     private void StartAudioMonitoring()
@@ -309,7 +447,10 @@ public sealed partial class SettingsWindow : Window
 
     private void CmbTtsEngine_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        // Helpful automatic hint or adaptation when changing engines
+        if (_isInitializing) return;
+        bool isEdge = CmbTtsEngine.SelectedIndex == 0;
+        var config = AppSettingsService.Load();
+        UpdateVoiceComboBox(isEdge, config.Tts);
     }
 
     private async void BtnTestVoice_Click(object sender, RoutedEventArgs e)
@@ -317,11 +458,20 @@ public sealed partial class SettingsWindow : Window
         try
         {
             BtnTestVoice.IsEnabled = false;
-            string selectedVoice = (CmbTtsVoice.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "Aidar";
+            bool isEdge = CmbTtsEngine.SelectedIndex == 0;
+            string selectedVoice = (CmbTtsVoice.SelectedItem as ComboBoxItem)?.Tag?.ToString()
+                ?? (CmbTtsVoice.SelectedItem as ComboBoxItem)?.Content?.ToString()
+                ?? "Aidar";
 
-            if (CompositeVoiceFeedbackService.Instance != null)
+            if (selectedVoice.Contains(" - ", StringComparison.Ordinal))
             {
-                await CompositeVoiceFeedbackService.Instance.SpeakAsync("Тест звуковой подсистемы. Джарвис готов к работе.");
+                selectedVoice = selectedVoice.Substring(0, selectedVoice.IndexOf(" - ", StringComparison.Ordinal)).Trim();
+            }
+
+            if (isEdge)
+            {
+                using var edge = new EdgeTtsEngine(selectedVoice, 3000);
+                await edge.SpeakAsync("Тест звуковой подсистемы. Джарвис готов к работе.");
             }
             else
             {
@@ -474,12 +624,24 @@ public sealed partial class SettingsWindow : Window
 
             // Extract TTS settings
             bool isEdge = CmbTtsEngine.SelectedIndex == 0;
-            string selectedVoiceString = (CmbTtsVoice.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "Aidar";
-            string voiceToken = "Aidar";
-            if (selectedVoiceString.Contains("Pavel", StringComparison.OrdinalIgnoreCase)) voiceToken = "Microsoft Pavel";
-            else if (selectedVoiceString.Contains("Aidar", StringComparison.OrdinalIgnoreCase)) voiceToken = "Aidar";
-            else if (selectedVoiceString.Contains("Dmitry", StringComparison.OrdinalIgnoreCase)) voiceToken = "ru-RU-DmitryNeural";
-            else if (selectedVoiceString.Contains("Svetlana", StringComparison.OrdinalIgnoreCase)) voiceToken = "ru-RU-SvetlanaNeural";
+            string selectedVoiceToken = (CmbTtsVoice.SelectedItem as ComboBoxItem)?.Tag?.ToString()
+                ?? (CmbTtsVoice.SelectedItem as ComboBoxItem)?.Content?.ToString()
+                ?? "Aidar";
+
+            if (selectedVoiceToken.Contains(" - ", StringComparison.Ordinal))
+            {
+                selectedVoiceToken = selectedVoiceToken.Substring(0, selectedVoiceToken.IndexOf(" - ", StringComparison.Ordinal)).Trim();
+            }
+
+            var ttsSettings = new TtsConfig
+            {
+                PreferredEngine = isEdge ? "Edge" : "SAPI5",
+                Voice = selectedVoiceToken,
+                EdgeVoice = isEdge ? selectedVoiceToken : (currentConfig.Tts?.EdgeVoice ?? "ru-RU-DmitryNeural"),
+                Sapi5Voice = !isEdge ? selectedVoiceToken : (currentConfig.Tts?.Sapi5Voice ?? "Aidar"),
+                ConnectionTimeoutMs = currentConfig.Tts?.ConnectionTimeoutMs ?? 5000,
+                EnableEdgeTts = isEdge
+            };
 
             var data = new AppSettingsData
             {
@@ -498,15 +660,7 @@ public sealed partial class SettingsWindow : Window
                     MinDurationMs = currentConfig.WakeWord?.MinDurationMs ?? 150
                 },
                 WakeWords = currentConfig.WakeWords,
-                Tts = new TtsConfig
-                {
-                    PreferredEngine = isEdge ? "Edge" : "SAPI5",
-                    Voice = voiceToken,
-                    EdgeVoice = voiceToken.StartsWith("ru-RU", StringComparison.OrdinalIgnoreCase) ? voiceToken : (currentConfig.Tts?.EdgeVoice ?? "ru-RU-DmitryNeural"),
-                    Sapi5Voice = voiceToken.StartsWith("ru-RU", StringComparison.OrdinalIgnoreCase) ? "Aidar" : voiceToken,
-                    ConnectionTimeoutMs = currentConfig.Tts?.ConnectionTimeoutMs ?? 5000,
-                    EnableEdgeTts = isEdge
-                },
+                Tts = ttsSettings,
                 LlmBaseUrl = TxtLlmUrl.Text.Trim(),
                 LlmModel = TxtLlmModel.Text.Trim(),
                 LlmApiKey = TxtLlmApiKey.Text.Trim(),
@@ -531,6 +685,7 @@ public sealed partial class SettingsWindow : Window
             _llmService?.UpdateSettings(data.LlmBaseUrl, data.LlmModel, data.LlmApiKey);
             AppHandler.SetSteamGames(data.GameAliases);
             WeatherService.Instance?.UpdateLocation(finalCityName, lat, lon);
+            CompositeVoiceFeedbackService.Instance = new CompositeVoiceFeedbackService(VoiceListener.Instance, ttsSettings);
 
             TxtStatus.Foreground = Brushes.LightGreen;
             TxtStatus.Text = "✓ Настройки успешно сохранены и применены!";

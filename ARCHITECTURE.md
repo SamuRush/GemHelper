@@ -36,7 +36,7 @@ flowchart TD
     
     subgraph Execution_Layer [Execution & Handlers]
         ROUTER -->|command: volume| VOL_H[VolumeCommandHandler / CoreAudioApi]
-        ROUTER -->|command: media| MED_H[MediaCommandHandler / SendInput]
+        ROUTER -->|command: media| MED_H[MediaCommandHandler / IMediaSessionService / GSMTC / Win32]
         ROUTER -->|command: timer| TIM_H[TimerCommandHandler / TimerService]
         ROUTER -->|command: app| APP_H[AppControlCommandHandler / SteamService]
         ROUTER -->|command: system| SYS_H[SystemCommandHandler / Exit]
@@ -47,9 +47,9 @@ flowchart TD
     DIRECT_RESP -->|reply: text| VFS[IVoiceFeedbackService]
     VFS --> TTS[CompositeVoiceFeedbackService]
 
-    subgraph TTS_Pipeline [Resilient TTS Pipeline - Strictly Male Voices]
-        TTS -->|1. Primary (EnableEdgeTts=true)| EDGE[EdgeTtsEngine / ru-RU-DmitryNeural + 1500ms Connect + 2000ms FirstChunk]
-        EDGE -.->|Fast Failover <= 1.6s| SAPI[SystemSpeechTtsEngine / SAPI5: Direct COM Token Aidar (Russian) -> Microsoft Pavel fallback -> pitch-shift]
+    subgraph TTS_Pipeline [Resilient TTS Pipeline (Male & Female Voices)]
+        TTS -->|1. Primary (EnableEdgeTts=true)| EDGE[EdgeTtsEngine / ru-RU-DmitryNeural or ru-RU-SvetlanaNeural + 1500ms Connect + 2000ms FirstChunk]
+        EDGE -.->|Fast Failover <= 1.6s| SAPI[SystemSpeechTtsEngine / SAPI5: Direct COM Tokens (Aidar / Baya / Kseniya) / Windows SAPI5 (Microsoft Pavel / Microsoft Irina Desktop)]
         TTS -->|Pause / Resume & Confirmation| VL
     end
 ```
@@ -75,8 +75,8 @@ flowchart TD
    - Если в ответе присутствует `CommandRequest`, роутер логирует `[Router: Dispatch] Маршрутизация команды...`, находит зарегистрированный `ICommandHandler` и вызывает `ExecuteAsync()`, после чего логирует `[Router: Result]`.
 5. **Голосовой синтез (`IVoiceFeedbackService` / `CompositeVoiceFeedbackService.cs`)**:
    - Все обработчики и пайплайн вызывают единую абстракцию `IVoiceFeedbackService.SpeakAsync(text)`.
-   - **Primary**: `EdgeTtsEngine` (`ru-RU-DmitryNeural`, базовый таймаут подключения **1500 мс**, жесткий таймаут первого чанка аудиоданных **2000 мс** через `CancellationTokenSource` с немедленным разрывом сокета без повторов, сброс счетчика ошибок при успехе, Keep-Alive пинг WebSocket). Обеспечивает мгновенный Fast Failover на SAPI5 не более чем за 1.6 с.
-   - **Offline / Fallback**: `SystemSpeechTtsEngine` (Windows SAPI5: проект полностью отказался от поиска `.onnx` моделей и локального ONNX-инференса Silero через файлы; активация Silero происходит исключительно через установленный в систему Windows SAPI5-драйвер с прямым COM-биндингом токена `Aidar (Russian)` / `Baya (Russian)`; в качестве аварийного оффлайн-фоллбэка активируется системный мужской голос `Microsoft Pavel` без необработанных исключений и предупреждений в консоли; женский голос `Microsoft Irina Desktop` категорически заблокирован; при отсутствии мужских голосов — модуляция тона `-40% prosody`).
+   - **Primary**: `EdgeTtsEngine` (онлайн-голоса: мужской `ru-RU-DmitryNeural` и женский `ru-RU-SvetlanaNeural`, базовый таймаут подключения **1500 мс**, жесткий таймаут первого чанка аудиоданных **2000 мс** через `CancellationTokenSource` с немедленным разрывом сокета без повторов, сброс счетчика ошибок при успехе, Keep-Alive пинг WebSocket). Обеспечивает мгновенный Fast Failover на SAPI5 не более чем за 1.6 с.
+   - **Offline / Fallback**: `SystemSpeechTtsEngine` (Windows SAPI5: полная поддержка мужских и женских голосов. Прямой COM-биндинг системных токенов Silero SAPI5 `Aidar (Russian)` / `Baya (Russian)` / `Kseniya (Russian)`, а также стандартных системных голосов Windows SAPI5 `Microsoft Pavel` и `Microsoft Irina Desktop`. Женские голоса полностью разблокированы и синтезируются напрямую в естественном тембре без принудительного понижения тона / pitch-shift).
    - **Двухконтурная блокировка микрофона (FSM Processing Lock & Acoustic Echo Suppression)**:
      - При фиксации финальной команды немедленно выставляется `_isProcessing = true`, полностью блокируя захват новых команд и вейк-ворда на время работы LLM и роутера.
      - На время синтеза речи TTS выставляется `_isSpeaking = true`.
@@ -93,7 +93,7 @@ flowchart TD
 | Приоритет | Категория | Обработчик / Сервис | Типичные фразы | Почему этот приоритет |
 |---|---|---|---|---|
 | **1** | **PendingAction (FSM)** | `JarvisOrchestrator` | `да`, `нет`, `отмена`, `удаляй`, `запускай` | **Критический**: предотвращает перехват слов согласия/отмены медиаплеером, таймером или отправку в LLM. |
-| **2** | **Media Keys** | `MatchMediaCommand` / `MediaKeyService` | `пауза`, `стоп`, `музыка`, `запусти музыку`, `поставь трек`, `поставь песню`, `следующий трек`, `предыдущий` | **0 мс задержка**: Win32 SendInput клавиш `VK_MEDIA_*`. Regex-паттерн с `$`-якорем исключает перехват имён игр Steam. Изолирован от поиска приложений. |
+| **2** | **Media Control** | `MatchMediaCommand` / `IMediaSessionService` | `останови видео`, `продолжи видео`, `поставь на паузу`, `включи яндекс музыку`, `включи музыку`, `следующий трек`, `предыдущий` | **0 мс задержка**: Адресный роутинг раздельных сценариев (видео vs музыка vs GSMTC). Исключает слепую эмуляцию `VK_MEDIA_PLAY_PAUSE`, опрашивает GSMTC статус, управляет окнами браузеров/плееров через `VK_SPACE`. Изолирован от поиска приложений. |
 | **3** | **Volume / Audio** | `VolumeCommandHandler` / `NAudio` | `тише`, `громче`, `звук 50`, `выключи звук`, `мут` | Высокочастотные системные команды, не требующие работы парсера таймеров или Steam. |
 | **4** | **Timers & Reminders** | `MatchTimerCommand` / `TimerService` | `поставь таймер на 10 минут`, `напомни через 5 мин`, `сколько осталось` | Быстрый regex-парсер времени. Проверяется до Steam во избежание коллизий типа *"поставь таймер"* vs *"поставь киберпанк"*. |
 | **5** | **System / Hotkeys / Apps** | `AppHandler` / `AppControlCommandHandler` / `HotkeyCommandHandler` | `закройся`, `открой браузер`, `проводник`, `блокнот`, `сверни все`, `открой калькулятор` | Управление окнами, процессами и системными программами. Строго изолировано от каталога Steam во избежание ложных коллизий. |
@@ -163,9 +163,16 @@ flowchart TD
   - Потокобезопасная коллекция `ConcurrentDictionary<Guid, ActiveTimer>`.
   - Фоновые воркеры на `Task.Delay` с индивидуальными `CancellationTokenSource`.
   - Голосовое оповещение по завершении через `CompositeVoiceFeedbackService`.
+- [`Services/IMediaSessionService.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/IMediaSessionService.cs):
+  - Контракт управления воспроизведением (`GetPlaybackStatusAsync`, `PlayAsync`, `PauseAsync`, `StopAsync`, `NextTrackAsync`, `PreviousTrackAsync`, `PlayMusicAsync`, `ControlVideoAsync`).
+- [`Services/MediaSessionService.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/MediaSessionService.cs):
+  - Интеграция с Windows Media Session (GSMTC via `GlobalSystemMediaTransportControlsSessionManager` WinRT / `Windows.Media.Control`).
+  - Опрос статуса (`Playing`, `Paused`, `Stopped`) и предотвращение ложных срабатываний Play/Pause (при статусе `Paused`/`Stopped` команда паузы не посылает toggle-сигнал).
+  - Сценарий «Запуск музыки»: поиск запущенных процессов (`YandexMusic`, `yandexmusic`, `Yandex.Music`), при отсутствии — запуск протокола `yandexmusic://` или fallback в браузер `https://music.yandex.ru`, ожидание инициализации (`InitializationDelayMs`) и старт воспроизведения; при наличии — фокус окна и сигнал воспроизведения.
+  - Сценарий «Управление видео»: определение переднего окна (`GetForegroundWindow`, `GetWindowText`, процесс). Если активен браузер (`chrome`, `msedge`, `firefox`, `browser`, `opera`, `brave`) или медиаплеер (`vlc`, `mpc-hc`, `mpc-be`, `potplayer`, `wmplayer`) — отправка `VK_SPACE` или адресная пауза.
 - [`Services/MediaKeyService.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/MediaKeyService.cs):
   - Мгновенная симуляция мультимедиа-клавиш через Win32 `SendInput` (события `KEYEVENTF_KEYDOWN` + `KEYEVENTF_KEYUP`).
-  - Методы: `PlayPause()`, `NextTrack()`, `PrevTrack()`, `Stop()`.
+  - Методы: `PlayPause()`, `NextTrack()`, `PrevTrack()`, `Stop()`, `SendMediaKey()`.
 - [`Services/AppHandler.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/AppHandler.cs):
   - Централизованное исполнение ответов `HandleJarvisResponseAsync`.
   - Словари сопоставления алиасов приложений и процессов (`SteamGames`, `SteamProcessNames`, `AppTargets`).
@@ -181,28 +188,28 @@ flowchart TD
 - [`Services/TTS/ITtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/ITtsEngine.cs): Базовый контракт движка (`Name`, `IsAvailable`, `SpeakAsync`).
 - [`Services/CompositeVoiceFeedbackService.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/CompositeVoiceFeedbackService.cs):
   - Реализует `IVoiceFeedbackService`.
-  - Гибридный оркестратор со строго мужским тембром речи и двухуровневой цепочкой отказоустойчивости:
-    1. **Primary**: `EdgeTtsEngine` (`ru-RU-DmitryNeural`, онлайн) — **только при `EnableEdgeTts=true`** (по умолчанию `true`). При `EnableEdgeTts=false` шаг пропускается, первичным становится System.Speech SAPI5 (`Aidar (Russian)`).
-    2. **Offline / Fallback**: `SystemSpeechTtsEngine` (Windows SAPI5, приоритет: системный пакет Silero `Aidar (Russian)` > `Baya` > `Microsoft Pavel` > модуляция ExtraLow pitch; строгий запрет женского голоса Ирины).
+  - Гибридный оркестратор с поддержкой мужских и женских тембров речи и двухуровневой цепочкой отказоустойчивости:
+    1. **Primary**: `EdgeTtsEngine` (`ru-RU-DmitryNeural` или `ru-RU-SvetlanaNeural`, онлайн) — **только при `EnableEdgeTts=true`** (по умолчанию `true`). При `EnableEdgeTts=false` шаг пропускается, первичным становится System.Speech SAPI5.
+    2. **Offline / Fallback**: `SystemSpeechTtsEngine` (Windows SAPI5: поддержка как мужских голосов `Aidar`, `Baya`, `Microsoft Pavel`, так и женских голосов `Microsoft Irina Desktop`, `Kseniya`; женские голоса воспроизводятся в естественном тоне без понижения тона pitch-shift).
   - Проект не использует локальный ONNX-инференс Silero через файлы и не производит поиск `.onnx` файлов моделей.
   - Инициализационный лог выводит актуальную конфигурацию: `EnableEdgeTts`, `Primary (Online)` и `Offline / Fallback`.
   - Потокобезопасный `SemaphoreSlim(1, 1)` для сериализации речи.
   - Детальное логирование каждого шага: `[TTS] Попытка синтеза...`, `[TTS: Edge] Воспроизведение завершено.`, `[TTS: Warning] Сбой...`, `[TTS: Error]`.
   - Координация с Vosk: пауза микрофона перед речью, Acoustic Echo Suppression (блокировка аудио-фреймов флагом `_isSpeaking`), 250 мс кулдаун в блоке `finally` для гарантированного затухания акустического эха колонок, активация `EnterConfirmationListening` при наличии активного `PendingAction`.
-- [`Services/TTS/EdgeTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/EdgeTtsEngine.cs): WebSocket-клиент Edge Speech (`ru-RU-DmitryNeural`), генерация DRM-токена `Sec-MS-GEC`, быстрый таймаут подключения **1500 мс** (`ConnectionTimeoutMs`), жесткий таймаут ожидания первого аудиочанка **2000 мс** (`FirstAudioChunkTimeoutMs`) с немедленной отменой сокета через токен и мгновенным откатом на SAPI5 без долгих ретраев; сброс счетчика ошибок при успешном синтезе и фоновый Keep-Alive WebSocket пинг каждые 15 сек. Полный переход на SAPI5 занимает $\le 1.6$ с.
+- [`Services/TTS/EdgeTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/EdgeTtsEngine.cs): WebSocket-клиент Edge Speech (`ru-RU-DmitryNeural` / `ru-RU-SvetlanaNeural`), генерация DRM-токена `Sec-MS-GEC`, быстрый таймаут подключения **1500 мс** (`ConnectionTimeoutMs`), жесткий таймаут ожидания первого аудиочанка **2000 мс** (`FirstAudioChunkTimeoutMs`) с немедленной отменой сокета через токен и мгновенным откатом на SAPI5 без долгих ретраев; сброс счетчика ошибок при успешном синтезе и фоновый Keep-Alive WebSocket пинг каждые 15 сек. Полный переход на SAPI5 занимает $\le 1.6$ с.
 - [`Services/TTS/SystemSpeechTtsEngine.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/SystemSpeechTtsEngine.cs): Надёжный Offline/Fallback движок (SAPI5).
   - При старте выводит в лог **все обнаруженные голоса SAPI5** (`[TTS: SAPI5] Обнаружен голос: ...`).
-  - **Прямой COM-биндинг системных токенов Silero SAPI5**: инсталлятор Silero регистрирует токены `Aidar (Russian)` и `Baya (Russian)` через COM-интерфейс `ISpObjectToken`. В управляемом `System.Speech` вызов `SelectVoice` для синтетических токенов может завершаться ошибкой, поэтому движок использует прямое связывание токена через нативный COM `SAPI.SpVoice` (`spVoice.Voice = token`), активируя нативный голос `Aidar (Russian)` без необходимости ручного переноса токенов в реестре.
-  - При наличии установленного системного пакета Silero выводится лог: `[+] [TTS: SAPI5] Активирован системный голос Silero: Aidar (Russian)`.
-  - При отсутствии Silero SAPI5 движок автоматически переключается на системный мужской голос `Microsoft Pavel` (`[TTS: SAPI5] Успешно активирован голос: 'Microsoft Pavel'.`), который служит стабильным гарантированным оффлайн-фоллбэком без необработанных исключений и предупреждений.
-  - Приоритеты выбора: `Aidar (Russian)` > `Baya` > `Microsoft Pavel` > любой мужской > принудительная модуляция тона (SSML `-40% prosody`). Женский голос `Microsoft Irina Desktop` категорически заблокирован.
+  - **Прямой COM-биндинг системных токенов Silero SAPI5**: инсталлятор Silero регистрирует токены `Aidar (Russian)`, `Baya (Russian)` и женские токены (`Kseniya`) через COM-интерфейс `ISpObjectToken`. В управляемом `System.Speech` вызов `SelectVoice` для синтетических токенов может завершаться ошибкой, поэтому движок использует прямое связывание токена через нативный COM `SAPI.SpVoice` (`spVoice.Voice = token`), активируя нативный голос без необходимости ручного переноса токенов в реестре.
+  - При наличии установленного системного пакета Silero выводится лог: `[+] [TTS: SAPI5] Активирован системный голос Silero: Aidar (Russian)` (или выбранный токен).
+  - При отсутствии Silero SAPI5 движок автоматически переключается на системный голос (`Microsoft Pavel` или `Microsoft Irina Desktop`), который служит стабильным гарантированным оффлайн-фоллбэком без необработанных исключений и предупреждений.
+  - Приоритеты выбора по умолчанию: `Aidar (Russian)` > `Baya` > `Microsoft Pavel` > `Microsoft Irina Desktop` > любой системный голос. При выборе женского голоса синтез выполняется напрямую без изменения тона.
 
 ### 3.4 Обработчики команд (`Handlers/`)
 Все обработчики получают экземпляр `IVoiceFeedbackService` через внедрение зависимостей (DI) в конструкторе, что устраняет обход синтеза и гарантирует прохождение через первичный Edge-TTS с безопасным откатом:
 - [`Handlers/VolumeCommandHandler.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Handlers/VolumeCommandHandler.cs): Управление мастер-громкостью через NAudio `MMDeviceEnumerator` и `IAudioEndpointVolume` (`set`, `change`, `mute`, `get`).
-- [`Handlers/MediaCommandHandler.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Handlers/MediaCommandHandler.cs): Обработка мультимедиа-команд через `MediaKeyService`.
+- [`Handlers/MediaCommandHandler.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Handlers/MediaCommandHandler.cs): Обработка мультимедиа-команд через `IMediaSessionService` с поддержкой раздельных контрактов (`pause_video`, `resume_video`, `play_music`, `pause`, `play`, `stop`, `next`, `prev`) и интеграцией с Windows GSMTC.
 - [`Handlers/TimerCommandHandler.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Handlers/TimerCommandHandler.cs): Управление таймерами (`set`, `cancel`, `status`) через `TimerService` (с инжекцией `IVoiceFeedbackService`).
-- [`Handlers/AppControlCommandHandler.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Handlers/AppControlCommandHandler.cs): Запуск, закрытие, проверка статуса и деинсталляция игр/приложений (с инжекцией `IVoiceFeedbackService`). Содержит реестр канонических системных приложений (`browser`, `explorer`, `notepad`, `calc`, `discord`, `telegram`, `steam`), разрешение браузера по умолчанию через реестр Windows (`UrlAssociations\\https\\UserChoice` / `cmd /c start`), строгую изоляцию от каталога Steam во избежание ложных коллизий и асинхронный запуск `StartApplicationAsync` с защитой от повторного озвучивания. **Таблица медиа-алиасов `_mediaAliases`** (`музыка`, `трек`, `песня`, `плеер` и аналоги): при получении от LLM команды `app/start/музыка` вместо `Process.Start` делегирует исполнение в `MediaKeyService.PlayPause()`, предотвращая `Win32Exception`.
+- [`Handlers/AppControlCommandHandler.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Handlers/AppControlCommandHandler.cs): Запуск, закрытие, проверка статуса и деинсталляция игр/приложений (с инжекцией `IVoiceFeedbackService` и `IMediaSessionService`). Содержит реестр канонических системных приложений (`browser`, `explorer`, `notepad`, `calc`, `discord`, `telegram`, `steam`), разрешение браузера по умолчанию через реестр Windows (`UrlAssociations\\https\\UserChoice` / `cmd /c start`), строгую изоляцию от каталога Steam во избежание ложных коллизий и асинхронный запуск `StartApplicationAsync` с защитой от повторного озвучивания. **Таблица медиа-алиасов `_mediaAliases`** (`музыка`, `трек`, `песня`, `плеер`, `яндекс музыка` и аналоги): при получении команды запуска музыки делегирует исполнение в `MediaSession.PlayMusicAsync("yandexmusic")` вместо слепого `PlayPause` или `Process.Start`, предотвращая ошибки и запуская пайплайн инициализации.
 - [`Handlers/HotkeyCommandHandler.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Handlers/HotkeyCommandHandler.cs): Симуляция системных сочетаний клавиш (Ctrl+C, Ctrl+V, Win+D, Win+Shift+S, Ctrl+Shift+Esc).
 - [`Handlers/SystemCommandHandler.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Handlers/SystemCommandHandler.cs): Выход из ассистента (`action: close`, `name: jarvis`, с инжекцией `IVoiceFeedbackService`). Озвучивает прощание с 5-секундным CancellationTokenSource-таймаутом (защита от блокировки семафора) и выполняет гарантированное завершение процесса (`Application.Current.Shutdown()` + `Environment.Exit(0)`).
 - [`Handlers/WeatherCommandHandler.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Handlers/WeatherCommandHandler.cs): Получение прогноза погоды и голосовое озвучивание отчета строго через `IVoiceFeedbackService`.
@@ -246,6 +253,7 @@ flowchart TD
   - `Gem.Tests/HudModernizationTests.cs`: Тестирование палитры неонового свечения состояний HUD, формул масштабирования RMS-пульсации и корректности форматирования таймеров (`⏱ MM:SS`).
   - `Gem.Tests/DiDecompositionTests.cs`: Тестирование декомпозиции DI-контейнера — проверка регистрации сервисов через `ServiceCollectionExtensions` (`AddJarvisCore`, `AddJarvisHandlers`, `AddJarvisTts`, `ConfigureJarvisRouter`) и отсутствие прямого обращения к синглтонам `.Instance`.
   - `Gem.Tests/SteamAutomationTests.cs`: Тестирование Win32 UI Automation в `SteamService` — сопоставление заголовков модальных окон, сопоставление имен кнопок действий («Удалить», «Uninstall») и безопасная обработка нулевых дескрипторов окон.
+  - `Gem.Tests/MediaControlTests.cs`: Комплексное тестирование переработанного медиа-пайплайна — проверка контрактов FastMatch («останови видео», «поставь на паузу», «продолжи видео», «включи яндекс музыку»), маршрутизация в `MediaCommandHandler`, идемпотентность GSMTC Play/Pause, проверка процессов Яндекс Музыки и распознавание окон браузеров и медиаплееров.
 - **Запуск тестов**:
   - Через xUnit runner: `dotnet test` (автоматическое обнаружение всех тестов через `Gem.sln`).
   - Встроенный запуск через консольное приложение: `dotnet run --project Gem.csproj -- --test-features` (блоки `[20]` и `[21]`).
@@ -423,7 +431,7 @@ JARVIS-win-x64/
    - **Выбор устройства записи**: динамическое перечисление микрофонов через `NAudio.Wave.WaveInEvent.GetCapabilities(i)` с сохранением в `appsettings.json` (`Audio: { DeviceIndex, DeviceName }`). Переключение устройства записи на лету в `VoiceListener.SetAudioDevice(deviceIndex)`.
    - **Слайдер чувствительности NoiseGate RMS**: диапазон 50–600 RMS с базовым порогом **350 RMS** (устраняет проблему глухоты микрофона, когда порог 450 отсекал тихую речь). Динамическое обновление порога в реальном времени через `VoiceListener.SetNoiseGateRms(rms)`.
    - **VU-метр в реальном времени**: индикатор `ProgressBar` со шкалой 0–600 RMS, обновляемый потокобезопасно из событий `VoiceListener.OnRmsLevelChanged` или локального монитора `_previewWaveIn`, с цветовой индикацией речи/шума.
-   - **Синтез речи (TTS) и выбор голоса**: выбор движка (`Edge-TTS` онлайн vs `SAPI5` офлайн) и выбор целевого мужского голоса (`Aidar`, `Microsoft Pavel`, `ru-RU-DmitryNeural`) с кнопкой «🔊 Проверить голос».
+   - **Синтез речи (TTS) и каскадный выбор голоса**: выбор движка (`Edge-TTS` онлайн vs `SAPI5` офлайн) и связанный выбор целевого голоса (для Edge-TTS: `ru-RU-DmitryNeural (Мужской)`, `ru-RU-SvetlanaNeural (Женский)`; для SAPI5: все установленные голоса Windows — `Aidar`, `Baya`, `Microsoft Pavel`, `Microsoft Irina Desktop` и др.) с кнопкой «🔊 Проверить голос».
 2. **🧠 Искусственный интеллект**:
    - Конфигурация LM Studio / OpenAI API: URL эндпоинта, имя модели, API Key.
    - Кнопка «⚡ Проверить подключение» с быстрым HTTP GET запросом к `/v1/models`.

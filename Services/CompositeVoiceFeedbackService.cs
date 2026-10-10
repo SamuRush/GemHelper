@@ -35,9 +35,10 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
         : this(
             voiceListener: voiceListener ?? VoiceListener.Instance,
             edgeTts: new EdgeTtsEngine(
-                configuration?["Tts:EdgeVoice"] ?? "ru-RU-DmitryNeural",
+                configuration?["Tts:EdgeVoice"] ?? (configuration?["Tts:Voice"] is string ev && ev.StartsWith("ru-RU", StringComparison.OrdinalIgnoreCase) ? ev : "ru-RU-DmitryNeural"),
                 int.TryParse(configuration?["Tts:ConnectionTimeoutMs"], out int tMs) && tMs > 0 ? tMs : EdgeTtsEngine.DefaultConnectionTimeoutMs),
-            systemSpeech: new SystemSpeechTtsEngine(),
+            systemSpeech: new SystemSpeechTtsEngine(
+                configuration?["Tts:Sapi5Voice"] ?? (configuration?["Tts:Voice"] is string sv && !sv.StartsWith("ru-RU", StringComparison.OrdinalIgnoreCase) ? sv : null)),
             enableEdgeTts: !bool.TryParse(configuration?["Tts:EnableEdgeTts"], out bool edgeFlag) || edgeFlag)
     {
     }
@@ -47,8 +48,11 @@ public class CompositeVoiceFeedbackService : IVoiceFeedbackService, IDisposable
         TtsConfig ttsConfig)
         : this(
             voiceListener: voiceListener,
-            edgeTts: new EdgeTtsEngine(ttsConfig.EdgeVoice, ttsConfig.ConnectionTimeoutMs),
-            systemSpeech: new SystemSpeechTtsEngine(),
+            edgeTts: new EdgeTtsEngine(
+                !string.IsNullOrWhiteSpace(ttsConfig.EdgeVoice) ? ttsConfig.EdgeVoice : (!string.IsNullOrWhiteSpace(ttsConfig.Voice) && ttsConfig.Voice.StartsWith("ru-RU", StringComparison.OrdinalIgnoreCase) ? ttsConfig.Voice : "ru-RU-DmitryNeural"),
+                ttsConfig.ConnectionTimeoutMs),
+            systemSpeech: new SystemSpeechTtsEngine(
+                !string.IsNullOrWhiteSpace(ttsConfig.Sapi5Voice) ? ttsConfig.Sapi5Voice : (!string.IsNullOrWhiteSpace(ttsConfig.Voice) && !ttsConfig.Voice.StartsWith("ru-RU", StringComparison.OrdinalIgnoreCase) ? ttsConfig.Voice : null)),
             enableEdgeTts: ttsConfig.EnableEdgeTts)
     {
     }

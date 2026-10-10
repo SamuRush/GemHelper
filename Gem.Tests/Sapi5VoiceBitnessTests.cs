@@ -73,4 +73,32 @@ public class Sapi5VoiceBitnessTests
             Assert.Contains("Aidar", voiceName, StringComparison.OrdinalIgnoreCase);
         }
     }
+
+    [Fact]
+    public void ConfigureVoice_WhenIrinaPreferred_SelectsIrinaWithoutPitchShift()
+    {
+        using var synthesizer = new SpeechSynthesizer();
+        bool irinaInstalled = false;
+        foreach (InstalledVoice v in synthesizer.GetInstalledVoices())
+        {
+            if (v.VoiceInfo.Name.Contains("Irina", StringComparison.OrdinalIgnoreCase))
+            {
+                irinaInstalled = true;
+                break;
+            }
+        }
+
+        if (irinaInstalled)
+        {
+            var (voiceName, needPitchShift) = SystemSpeechTtsEngine.ConfigureVoice(synthesizer, "Irina");
+            Assert.NotNull(voiceName);
+            Assert.Contains("Irina", voiceName, StringComparison.OrdinalIgnoreCase);
+            Assert.False(needPitchShift, "Female voice Irina must not require pitch shift!");
+
+            using var engine = new SystemSpeechTtsEngine("Microsoft Irina Desktop");
+            Assert.NotNull(engine.SelectedVoiceName);
+            Assert.Contains("Irina", engine.SelectedVoiceName, StringComparison.OrdinalIgnoreCase);
+            Assert.False(engine.IsPitchShiftedToMale, "Irina voice must synthesize naturally without pitch modification!");
+        }
+    }
 }

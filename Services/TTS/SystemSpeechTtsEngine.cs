@@ -6,8 +6,8 @@ namespace Gem.Services;
 
 /// <summary>
 /// Safety fallback & offline TTS engine utilizing Windows SAPI (System.Speech.Synthesis.SpeechSynthesizer / SAPI5 COM).
-/// Direct integration with installed Windows Silero SAPI5 (Aidar / Baya) with robust fallback to Microsoft Pavel.
-/// Female voices (Microsoft Irina Desktop) are strictly filtered out.
+/// Direct integration with installed Windows Silero SAPI5 (Aidar / Baya / Kseniya) and system voices (Microsoft Pavel / Microsoft Irina Desktop).
+/// Full support for both male and female voices without forced pitch modification.
 /// </summary>
 public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
 {
@@ -28,15 +28,20 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
     public SystemSpeechTtsEngine(string? preferredVoice = null)
     {
         _synthesizer = new SpeechSynthesizer();
-        var (voiceName, needPitchShift) = ConfigureMaleRussianVoice(_synthesizer, preferredVoice);
+        var (voiceName, needPitchShift) = ConfigureVoice(_synthesizer, preferredVoice);
         SelectedVoiceName = voiceName;
         _forceLowPitch = needPitchShift;
 
-        // Если выбран системный голос Silero (Aidar / Baya), привязать прямой зарегистрированный системный токен через SAPI COM
+        // Если выбран системный голос Silero (Aidar / Baya / Kseniya / Xenia и др.), привязать прямой зарегистрированный токен через SAPI COM
         if (voiceName != null && (voiceName.Contains("Aidar", StringComparison.OrdinalIgnoreCase) ||
-                                  voiceName.Contains("Baya", StringComparison.OrdinalIgnoreCase)))
+                                  voiceName.Contains("Baya", StringComparison.OrdinalIgnoreCase) ||
+                                  voiceName.Contains("Kseniya", StringComparison.OrdinalIgnoreCase) ||
+                                  voiceName.Contains("Xenia", StringComparison.OrdinalIgnoreCase)))
         {
-            _spVoice = TryBindSapiComVoiceToken(voiceName.Contains("Aidar", StringComparison.OrdinalIgnoreCase) ? "Aidar" : "Baya");
+            _spVoice = TryBindSapiComVoiceToken(voiceName.Contains("Aidar", StringComparison.OrdinalIgnoreCase) ? "Aidar" :
+                                                voiceName.Contains("Baya", StringComparison.OrdinalIgnoreCase) ? "Baya" :
+                                                voiceName.Contains("Kseniya", StringComparison.OrdinalIgnoreCase) ? "Kseniya" :
+                                                voiceName.Contains("Xenia", StringComparison.OrdinalIgnoreCase) ? "Xenia" : voiceName);
         }
     }
 
@@ -72,11 +77,18 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
     }
 
     /// <summary>
-    /// Configures strictly male voice, excluding Irina and female voices completely.
-    /// Priority order: Aidar (Silero SAPI5) > Baya (Silero SAPI5) > Microsoft Pavel > Any Russian male > Any male > pitch-shift fallback.
-    /// Logs all discovered SAPI5 voices at startup.
+    /// Backward-compatible alias for ConfigureVoice.
     /// </summary>
     public static (string? voiceName, bool needPitchShift) ConfigureMaleRussianVoice(SpeechSynthesizer synthesizer, string? preferredVoice = null)
+        => ConfigureVoice(synthesizer, preferredVoice);
+
+    /// <summary>
+    /// Configures SAPI5 voice with full support for both male and female Russian voices (Aidar, Baya, Pavel, Irina).
+    /// If a female voice (e.g. Microsoft Irina Desktop) is selected, pitch shift is disabled.
+    /// Priority order when voice is not specified: Aidar > Baya > Pavel > Irina / any Russian > any system voice.
+    /// Logs all discovered SAPI5 voices at startup.
+    /// </summary>
+    public static (string? voiceName, bool needPitchShift) ConfigureVoice(SpeechSynthesizer synthesizer, string? preferredVoice = null)
     {
         try
         {
@@ -92,10 +104,10 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
 
             if (installedVoices.Count == 0)
             {
-                return (null, true);
+                return (null, false);
             }
 
-            // If a specific preferred voice was requested, try it first
+            // If a specific preferred voice was requested, try it first (male or female)
             if (!string.IsNullOrWhiteSpace(preferredVoice))
             {
                 var preferred = installedVoices.FirstOrDefault(v =>
@@ -109,26 +121,25 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
                         synthesizer.SelectVoice(preferred.VoiceInfo.Name);
                         synthesizer.Rate = 1;
                         synthesizer.Volume = 100;
+
+                        Console.ForegroundColor = ConsoleColor.Cyan;
+                        Console.WriteLine($"[TTS: SAPI5] Успешно активирован выбранный голос: '{preferred.VoiceInfo.Name}'.");
+                        Console.ResetColor();
+
                         return (preferred.VoiceInfo.Name, false);
                     }
                     catch
                     {
                     }
                 }
-            }
 
-            // Strictly filter out female voices (Irina, Elena, etc.)
-            bool IsFemale(InstalledVoice v)
-            {
-                string name = v.VoiceInfo.Name;
-                return v.VoiceInfo.Gender == VoiceGender.Female ||
-                       name.Contains("Irina", StringComparison.OrdinalIgnoreCase) ||
-                       name.Contains("Elena", StringComparison.OrdinalIgnoreCase) ||
-                       name.Contains("Zira", StringComparison.OrdinalIgnoreCase) ||
-                       name.Contains("Hazel", StringComparison.OrdinalIgnoreCase) ||
-                       name.Contains("Susan", StringComparison.OrdinalIgnoreCase) ||
-                       name.Contains("Hana", StringComparison.OrdinalIgnoreCase) ||
-                       name.Contains("Female", StringComparison.OrdinalIgnoreCase);
+                // Check direct SAPI COM binding for preferred voice tokens (e.g. Silero tokens)
+                var comVoice = TryBindSapiComVoiceToken(preferredVoice);
+                if (comVoice != null)
+                {
+                    try { Marshal.ReleaseComObject(comVoice); } catch { }
+                    return (preferredVoice, false);
+                }
             }
 
             // Priority 0: Aidar — системный установленный пакет Silero SAPI5
@@ -174,7 +185,6 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
             // Priority 0.5: Baya — системный установленный пакет Silero SAPI5 (баритон)
             var sileroBaya = installedVoices.FirstOrDefault(v =>
                 v.Enabled &&
-                !IsFemale(v) &&
                 v.VoiceInfo.Name.Contains("Baya", StringComparison.OrdinalIgnoreCase));
 
             if (sileroBaya != null)
@@ -215,7 +225,6 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
             // Priority 1: Russian male voice (e.g. Microsoft Pavel)
             var ruMaleVoice = installedVoices.FirstOrDefault(v =>
                 v.Enabled &&
-                !IsFemale(v) &&
                 (v.VoiceInfo.Culture.TwoLetterISOLanguageName.Equals("ru", StringComparison.OrdinalIgnoreCase) ||
                  v.VoiceInfo.Name.Contains("Pavel", StringComparison.OrdinalIgnoreCase)) &&
                 (v.VoiceInfo.Gender == VoiceGender.Male || v.VoiceInfo.Name.Contains("Pavel", StringComparison.OrdinalIgnoreCase)));
@@ -225,21 +234,8 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
             {
                 ruMaleVoice = installedVoices.FirstOrDefault(v =>
                     v.Enabled &&
-                    !IsFemale(v) &&
                     (v.VoiceInfo.Name.Contains("Pavel", StringComparison.OrdinalIgnoreCase) ||
                      v.VoiceInfo.Name.Contains("Male", StringComparison.OrdinalIgnoreCase)));
-            }
-
-            // Priority 3: Any installed male voice in the system (e.g. Microsoft David)
-            if (ruMaleVoice == null)
-            {
-                ruMaleVoice = installedVoices.FirstOrDefault(v =>
-                    v.Enabled &&
-                    !IsFemale(v) &&
-                    (v.VoiceInfo.Gender == VoiceGender.Male ||
-                     v.VoiceInfo.Name.Contains("David", StringComparison.OrdinalIgnoreCase) ||
-                     v.VoiceInfo.Name.Contains("Mark", StringComparison.OrdinalIgnoreCase) ||
-                     v.VoiceInfo.Name.Contains("George", StringComparison.OrdinalIgnoreCase)));
             }
 
             if (ruMaleVoice != null)
@@ -259,28 +255,59 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
                 catch (Exception ex)
                 {
                     Console.ForegroundColor = ConsoleColor.DarkYellow;
-                    Console.WriteLine($"[TTS: SAPI5] Не удалось активировать голос '{ruMaleVoice.VoiceInfo.Name}': {ex.Message}. Переход к pitch-shift fallback.");
+                    Console.WriteLine($"[TTS: SAPI5] Не удалось активировать голос '{ruMaleVoice.VoiceInfo.Name}': {ex.Message}.");
                     Console.ResetColor();
                 }
             }
 
-            // No male voice found or all SelectVoice calls failed — force pitch shift
-            synthesizer.Rate = 0;
-            synthesizer.Volume = 100;
+            // Priority 3: Russian female voice (e.g. Microsoft Irina Desktop) without pitch-shift
+            var ruFemaleVoice = installedVoices.FirstOrDefault(v =>
+                v.Enabled &&
+                (v.VoiceInfo.Culture.TwoLetterISOLanguageName.Equals("ru", StringComparison.OrdinalIgnoreCase) ||
+                 v.VoiceInfo.Name.Contains("Irina", StringComparison.OrdinalIgnoreCase)));
 
-            Console.ForegroundColor = ConsoleColor.DarkYellow;
-            Console.WriteLine($"[TTS: System.Speech Warning] В системе не найден установленный мужской голос SAPI5 (Aidar, Baya, Pavel). " +
-                              $"Включена модуляция питча (ExtraLow Pitch): женский голос Ирины заблокирован, тембр занижен до мужского.");
-            Console.ResetColor();
+            if (ruFemaleVoice != null)
+            {
+                try
+                {
+                    synthesizer.SelectVoice(ruFemaleVoice.VoiceInfo.Name);
+                    synthesizer.Rate = 1;
+                    synthesizer.Volume = 100;
 
-            return (synthesizer.Voice.Name, true);
+                    Console.ForegroundColor = ConsoleColor.Cyan;
+                    Console.WriteLine($"[TTS: SAPI5] Успешно активирован женский голос: '{ruFemaleVoice.VoiceInfo.Name}'.");
+                    Console.ResetColor();
+
+                    return (ruFemaleVoice.VoiceInfo.Name, false);
+                }
+                catch (Exception ex)
+                {
+                    Console.ForegroundColor = ConsoleColor.DarkYellow;
+                    Console.WriteLine($"[TTS: SAPI5] Не удалось активировать голос '{ruFemaleVoice.VoiceInfo.Name}': {ex.Message}.");
+                    Console.ResetColor();
+                }
+            }
+
+            // Priority 4: Any installed voice in the system
+            var anyVoice = installedVoices.FirstOrDefault(v => v.Enabled) ?? installedVoices.First();
+            try
+            {
+                synthesizer.SelectVoice(anyVoice.VoiceInfo.Name);
+                synthesizer.Rate = 1;
+                synthesizer.Volume = 100;
+                return (anyVoice.VoiceInfo.Name, false);
+            }
+            catch
+            {
+                return (synthesizer.Voice.Name, false);
+            }
         }
         catch (Exception ex)
         {
             Console.ForegroundColor = ConsoleColor.DarkYellow;
             Console.WriteLine($"[TTS Warning] Ошибка инициализации голоса System.Speech: {ex.Message}");
             Console.ResetColor();
-            return (null, true);
+            return (null, false);
         }
     }
 

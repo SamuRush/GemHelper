@@ -1,6 +1,8 @@
 using System;
 using System.IO;
+using System.Linq;
 using Gem.Services;
+using Gem.UI;
 using Gem.Voice;
 using Xunit;
 
@@ -151,5 +153,53 @@ public class AudioSettingsTests
         using var enginePavel = new SystemSpeechTtsEngine("Microsoft Pavel");
         Assert.NotNull(enginePavel.Name);
         Assert.True(enginePavel.IsAvailable);
+
+        using var engineIrina = new SystemSpeechTtsEngine("Microsoft Irina Desktop");
+        Assert.NotNull(engineIrina.Name);
+        Assert.True(engineIrina.IsAvailable);
+        Assert.False(engineIrina.IsPitchShiftedToMale);
+    }
+
+    [Fact]
+    public void EdgeTtsEngine_WithSvetlanaVoice_InitializesProperly()
+    {
+        using var engine = new EdgeTtsEngine("ru-RU-SvetlanaNeural");
+        Assert.Equal("ru-RU-SvetlanaNeural", engine.Voice);
+        Assert.Equal("Edge", engine.Name);
+    }
+
+    [Fact]
+    public void CompositeVoiceFeedbackService_WithFemaleVoiceSettings_ConfiguresEnginesWithoutPitchShift()
+    {
+        var ttsConfig = new TtsConfig
+        {
+            EnableEdgeTts = true,
+            EdgeVoice = "ru-RU-SvetlanaNeural",
+            Sapi5Voice = "Microsoft Irina Desktop",
+            Voice = "ru-RU-SvetlanaNeural"
+        };
+
+        using var composite = new CompositeVoiceFeedbackService(null, ttsConfig);
+        Assert.Equal("ru-RU-SvetlanaNeural", (composite.EdgeEngine as EdgeTtsEngine)?.Voice);
+    }
+
+    [Fact]
+    public void GetInstalledSapi5Voices_ReturnsBothMaleAndFemaleVoices()
+    {
+        var voices = SettingsWindow.GetInstalledSapi5Voices();
+        Assert.NotNull(voices);
+        Assert.NotEmpty(voices);
+
+        foreach (var (name, desc) in voices)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(name));
+            Assert.False(string.IsNullOrWhiteSpace(desc));
+        }
+
+        using var synth = new System.Speech.Synthesis.SpeechSynthesizer();
+        if (synth.GetInstalledVoices().Any(v => v.VoiceInfo.Name.Contains("Irina", StringComparison.OrdinalIgnoreCase)))
+        {
+            Assert.Contains(voices, v => v.Name.Contains("Irina", StringComparison.OrdinalIgnoreCase));
+        }
     }
 }

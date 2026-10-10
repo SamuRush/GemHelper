@@ -16,20 +16,24 @@ public sealed class AppControlCommandHandler : ICommandHandler
     private readonly Gem.Services.IVoiceFeedbackService? _voiceFeedback;
     private readonly Gem.Services.SteamService? _steamService;
     private readonly Gem.Services.JarvisOrchestrator? _orchestrator;
+    private readonly Gem.Services.IMediaSessionService? _mediaSessionService;
 
     public AppControlCommandHandler(
         Gem.Services.IVoiceFeedbackService? voiceFeedback = null,
         Gem.Services.SteamService? steamService = null,
-        Gem.Services.JarvisOrchestrator? orchestrator = null)
+        Gem.Services.JarvisOrchestrator? orchestrator = null,
+        Gem.Services.IMediaSessionService? mediaSessionService = null)
     {
         _voiceFeedback = voiceFeedback;
         _steamService = steamService;
         _orchestrator = orchestrator;
+        _mediaSessionService = mediaSessionService;
     }
 
     private Gem.Services.IVoiceFeedbackService? VoiceFeedback => _voiceFeedback ?? Gem.Services.CompositeVoiceFeedbackService.Instance;
     private Gem.Services.SteamService Steam => _steamService ?? Gem.Services.SteamService.Instance;
     private Gem.Services.JarvisOrchestrator Orchestrator => _orchestrator ?? Gem.Services.JarvisOrchestrator.Instance;
+    private Gem.Services.IMediaSessionService MediaSession => _mediaSessionService ?? Gem.Services.MediaSessionService.Instance;
 
     private record AppDefinition(
         string CanonicalId,
@@ -412,18 +416,17 @@ public sealed class AppControlCommandHandler : ICommandHandler
 
         string normalizedTarget = target.Trim().ToLowerInvariant();
 
-        // 0. МЕДИА-АЛИАСЫ: если LLM сгенерировал app/start/музыка (или аналог),
-        // делегируем напрямую в MediaKeyService.PlayPause() без вызова Process.Start.
-        // Это предотвращает Win32Exception: «Не удается найти указанный файл».
-        if (_mediaAliases.Contains(normalizedTarget))
+        // 0. МЕДИА-АЛИАСЫ: если запрошен запуск музыки или музыкального приложения,
+        // делегируем в MediaSession.PlayMusicAsync вместо попытки Process.Start или слепого PlayPause.
+        if (_mediaAliases.Contains(normalizedTarget) || normalizedTarget == "yandexmusic" || normalizedTarget == "yandex music")
         {
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine($"[AppHandler] Медиа-алиас '{normalizedTarget}' -> делегируем в MediaKeyService.PlayPause()");
+            Console.WriteLine($"[AppHandler] Медиа-алиас '{normalizedTarget}' -> делегируем в MediaSession.PlayMusicAsync()");
             Console.ResetColor();
-            bool sent = Gem.Services.MediaKeyService.PlayPause();
+            bool sent = await MediaSession.PlayMusicAsync("yandexmusic", cancellationToken);
             return sent
-                ? CommandResult.Ok("Переключаю воспроизведение.", new { MediaAction = "PlayPause", Alias = normalizedTarget })
-                : CommandResult.Fail("Не удалось отправить MediaKey PlayPause.");
+                ? CommandResult.Ok("Запускаю воспроизведение музыки, сэр.", new { MediaAction = "PlayMusic", Alias = normalizedTarget })
+                : CommandResult.Fail("Не удалось запустить воспроизведение музыки.");
         }
 
         // 1. ИЗОЛЯЦИЯ: Сначала проверяем системные и зарегистрированные приложения (браузер, блокнот, калькулятор, проводник, discord, telegram, steam).

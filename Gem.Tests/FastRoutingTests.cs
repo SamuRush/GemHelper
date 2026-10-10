@@ -110,8 +110,11 @@ public class FastRoutingTests
     }
 
     [Theory]
-    [InlineData("пауза", "play_pause")]
-    [InlineData("поставь на паузу", "play_pause")]
+    [InlineData("пауза", "pause")]
+    [InlineData("поставь на паузу", "pause")]
+    [InlineData("останови видео", "pause_video")]
+    [InlineData("продолжи видео", "resume_video")]
+    [InlineData("включи яндекс музыку", "play_music")]
     [InlineData("следующий трек", "next")]
     [InlineData("предыдущий трек", "prev")]
     public void MediaCommands_AreIsolatedFromSteam_AndRoutedToMedia(string phrase, string expectedAction)

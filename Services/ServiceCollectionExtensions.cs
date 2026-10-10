@@ -70,16 +70,22 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddJarvisHandlers(this IServiceCollection services)
     {
+        services.AddSingleton<IMediaSessionService, MediaSessionService>();
         services.AddSingleton<VolumeCommandHandler>();
         services.AddSingleton<AppControlCommandHandler>(sp =>
         {
             var feedback = sp.GetService<IVoiceFeedbackService>();
             var steam = sp.GetService<SteamService>() ?? SteamService.Instance;
             var orchestrator = sp.GetService<JarvisOrchestrator>() ?? JarvisOrchestrator.Instance;
-            return new AppControlCommandHandler(feedback, steam, orchestrator);
+            var mediaSession = sp.GetService<IMediaSessionService>() ?? MediaSessionService.Instance;
+            return new AppControlCommandHandler(feedback, steam, orchestrator, mediaSession);
         });
         services.AddSingleton<HotkeyCommandHandler>();
-        services.AddSingleton<MediaCommandHandler>();
+        services.AddSingleton<MediaCommandHandler>(sp =>
+        {
+            var mediaSession = sp.GetService<IMediaSessionService>() ?? MediaSessionService.Instance;
+            return new MediaCommandHandler(mediaSession);
+        });
         services.AddSingleton<WeatherCommandHandler>(sp =>
         {
             var weather = sp.GetService<WeatherService>() ?? new WeatherService();

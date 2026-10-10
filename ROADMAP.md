@@ -77,6 +77,19 @@
 
 ---
 
+### [x] Task-06: Переработка медиа-пайплайна — GSMTC, разделение видео/музыки и адресный роутинг
+- **Проблема**: Слепая эмуляция VK_MEDIA_PLAY_PAUSE приводит к ложным включениям музыки при попытке поставить на паузу, отсутствует разделение сценариев управления видео в браузере/плеере и запуска Яндекс Музыки.
+- **Зона изменений**: `Services/IMediaSessionService.cs`, `Services/MediaSessionService.cs`, `Handlers/MediaCommandHandler.cs`, `Handlers/AppControlCommandHandler.cs`, `Services/LlmIntentService.cs`, `Gem.Tests/MediaControlTests.cs`.
+- **Технические требования**:
+  1. **Интеграция с Windows Media Session (GSMTC)**: подключить `GlobalSystemMediaTransportControlsSessionManager` (WinRT / `Windows.Media.Control`) для опроса статуса (`Playing`, `Paused`, `Stopped`) и идемпотентного вызова Play/Pause/Stop без слепого тогла.
+  2. **Сценарий «Запуск музыки»**: проверка запущенного процесса Яндекс Музыки (`YandexMusic`, `yandexmusic`, `Yandex.Music`), если нет — запуск через `yandexmusic://` или fallback в браузер `https://music.yandex.ru`, ожидание инициализации и старт воспроизведения. Если запущен — фокус окна и сигнал воспроизведения.
+  3. **Сценарий «Управление видео»**: определение активного окна (`GetForegroundWindow`, `GetWindowText`, имя процесса). Если активен браузер (Chrome, Edge, Firefox, Yandex) или медиаплеер (VLC, MPC) — отправка `VK_SPACE` или адресная команда паузы.
+  4. **Обновление роутера (`TryFastMatch`)**: регистрация контрактов «останови видео» (`pause_video`), «поставь на паузу» (`pause`), «продолжи видео» (`resume_video`), «включи яндекс музыку» (`play_music`) без костыльного маппинга в слепой `play_pause`.
+  5. **Покрытие тестами**: создание `Gem.Tests/MediaControlTests.cs`, проверка всех сценариев и контрактов через `dotnet test Gem.sln`.
+- **Definition of Done**: `dotnet build Gem.csproj` и `dotnet test Gem.sln` завершаются с кодом 0; все тесты проходят успешно.
+
+---
+
 ## 📦 Завершенные фазы
 
 ### Фаза 1. Ядро и голосовой пайплайн [ЗАВЕРШЕНО]
