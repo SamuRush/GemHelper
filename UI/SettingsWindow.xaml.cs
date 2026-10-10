@@ -1,6 +1,9 @@
 using System.Collections.ObjectModel;
 using System.Windows;
+using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Threading;
+using Gem.Win32;
 
 namespace Gem.UI;
 
@@ -200,6 +203,37 @@ public sealed partial class SettingsWindow : Window
     {
         _statusTimer.Stop();
         TxtStatus.Text = string.Empty;
+    }
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        try
+        {
+            var hwnd = new WindowInteropHelper(this).Handle;
+            if (hwnd != IntPtr.Zero)
+            {
+                NativeMethods.EnableImmersiveDarkMode(hwnd);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [SettingsWindow Warning] DWM Immersive Dark Mode: {ex.Message}");
+        }
+    }
+
+    private void LstSteamGames_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (!e.Handled)
+        {
+            e.Handled = true;
+            var eventArg = new MouseWheelEventArgs(e.MouseDevice, e.Timestamp, e.Delta)
+            {
+                RoutedEvent = UIElement.MouseWheelEvent,
+                Source = sender
+            };
+            MainScrollViewer.RaiseEvent(eventArg);
+        }
     }
 
     protected override void OnClosed(EventArgs e)
