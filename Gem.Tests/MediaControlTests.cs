@@ -93,7 +93,22 @@ public class MediaControlTests
     [InlineData("поставь на паузу", "pause")]
     [InlineData("пауза", "pause")]
     [InlineData("следующий трек", "next")]
+    [InlineData("следующая песня", "next")]
+    [InlineData("следующий", "next")]
+    [InlineData("следующее видео", "next")]
+    [InlineData("переключи следующий", "next")]
+    [InlineData("переключи на следующий", "next")]
+    [InlineData("включи следующий", "next")]
+    [InlineData("скипни", "next")]
+    [InlineData("скип", "next")]
+    [InlineData("пропусти трек", "next")]
     [InlineData("предыдущий трек", "prev")]
+    [InlineData("предыдущая песня", "prev")]
+    [InlineData("предыдущий", "prev")]
+    [InlineData("предыдущее видео", "prev")]
+    [InlineData("переключи предыдущий", "prev")]
+    [InlineData("переключи на предыдущий", "prev")]
+    [InlineData("включи предыдущий", "prev")]
     public void TryFastMatch_MediaPhrases_AreMappedToDistinctContracts(string phrase, string expectedAction)
     {
         var response = LlmIntentService.TryFastMatch(phrase);
