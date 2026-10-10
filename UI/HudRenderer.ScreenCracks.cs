@@ -29,13 +29,14 @@ public sealed partial class HudRenderer
     private readonly EllipseGeometry _cracksSealClip = new();
     private readonly TranslateTransform _cracksShakeTransform = new();
 
-    private static readonly Pen StaticVolumetricHighlightPen = InitFrozenPen(Color.FromArgb(245, 255, 255, 255), 1.5);
-    private static readonly Pen StaticVolumetricShadowPen = InitFrozenPen(Color.FromArgb(235, 5, 5, 10), 2.5);
-    private static readonly SolidColorBrush StaticShardPlateBrush = InitFrozenBrush(Color.FromArgb(22, 0, 229, 255));
+    // Solid opaque dual-contour bevel pens: crisp white highlight and deep black shadow (no muddy grey wash)
+    private static readonly Pen StaticVolumetricHighlightPen = InitFrozenPen(Color.FromArgb(255, 255, 255, 255), 1.5);
+    private static readonly Pen StaticVolumetricShadowPen = InitFrozenPen(Color.FromArgb(255, 5, 5, 10), 2.5);
+    private static readonly SolidColorBrush StaticShardPlateBrush = InitFrozenBrush(Color.FromArgb(25, 0, 229, 255));
 
     private static readonly Pen StaticCracksFlashNeonPen = InitFrozenPen(Color.FromRgb(0xFF, 0xFF, 0xFF), 2.5);
-    private static readonly Pen StaticCracksFlashScarletPen = InitFrozenPen(Color.FromArgb(220, 255, 0, 60), 5.5);
-    private static readonly Pen StaticCracksFlashCyanPen = InitFrozenPen(Color.FromArgb(220, 0, 229, 255), 5.5);
+    private static readonly Pen StaticCracksFlashScarletPen = InitFrozenPen(Color.FromArgb(240, 255, 0, 60), 5.5);
+    private static readonly Pen StaticCracksFlashCyanPen = InitFrozenPen(Color.FromArgb(240, 0, 229, 255), 5.5);
 
     private static Pen InitFrozenPen(Color color, double thickness)
     {
@@ -153,14 +154,15 @@ public sealed partial class HudRenderer
                 _crackGeometry.CombinedClipGeometry,
                 opacity);
 
-            dc.PushOpacity(opacity);
-
             // Layer 2: Polygonal Shard Plates & Volumetric Facet Bevels (6-8 mm thickness)
             if (_crackGeometry.PolygonalShardsGeometry != null)
             {
+                dc.PushOpacity(opacity);
                 dc.DrawGeometry(StaticShardPlateBrush, null, _crackGeometry.PolygonalShardsGeometry);
+                dc.Pop();
             }
 
+            // Crisp 3D dual-contour bevels drawn solid: bright white glint and deep black shadow
             if (_crackGeometry.ShadowGeometry != null)
             {
                 dc.DrawGeometry(null, StaticVolumetricShadowPen, _crackGeometry.ShadowGeometry);
@@ -170,8 +172,6 @@ public sealed partial class HudRenderer
             {
                 dc.DrawGeometry(null, StaticVolumetricHighlightPen, _crackGeometry.HighlightGeometry);
             }
-
-            dc.Pop(); // Opacity
 
             // Layer 3: Neon Lightning Arcs
             _lightningGenerator.Render(dc, dt, center);

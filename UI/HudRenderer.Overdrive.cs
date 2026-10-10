@@ -139,51 +139,6 @@ public sealed partial class HudRenderer
             }
         }
         dc.DrawGeometry(pal.PrimaryBrush, pal.PrimaryPen, _dynamicShardsGeometry);
-
-        bool hasStuckBars = false;
-        using (var barCtx = _dynamicStuckBarsGeometry.Open())
-        {
-            for (int i = 0; i < activeCount; i++)
-            {
-                if (!shards[i].Active || !shards[i].IsStuck) continue;
-                hasStuckBars = true;
-
-                double sx = shards[i].StuckX;
-                double sy = shards[i].StuckY;
-                double normAngle = shards[i].StuckAngle;
-
-                for (int k = 0; k < 8; k++)
-                {
-                    float barVal = k switch
-                    {
-                        0 => shards[i].MiniBar0,
-                        1 => shards[i].MiniBar1,
-                        2 => shards[i].MiniBar2,
-                        3 => shards[i].MiniBar3,
-                        4 => shards[i].MiniBar4,
-                        5 => shards[i].MiniBar5,
-                        6 => shards[i].MiniBar6,
-                        _ => shards[i].MiniBar7
-                    };
-
-                    double fanOffset = -0.55 + k * (1.10 / 7.0);
-                    double fanAngle = normAngle + fanOffset;
-                    double cosF = Math.Cos(fanAngle);
-                    double sinF = Math.Sin(fanAngle);
-
-                    double barLen = 5.0 + barVal * 32.0 * Math.Clamp(gainSetting / 3.0, 0.8, 3.5);
-                    Point p0 = new Point(sx + 4.0 * cosF, sy + 4.0 * sinF);
-                    Point p1 = new Point(sx + (4.0 + barLen) * cosF, sy + (4.0 + barLen) * sinF);
-
-                    barCtx.BeginFigure(p0, false, false);
-                    barCtx.LineTo(p1, true, false);
-                }
-            }
-        }
-        if (hasStuckBars)
-        {
-            dc.DrawGeometry(null, pal.RayPen, _dynamicStuckBarsGeometry);
-        }
     }
 
     private void RenderGlitchBlocks(DrawingContext dc, ParticleEngine particleEngine)

@@ -6,17 +6,17 @@ using System.Windows.Media;
 namespace Gem.UI;
 
 /// <summary>
-/// Layer 2: Volumetric crack facets (Volumetric Facets).
+/// Layer 2: Volumetric crack facets (Real Glass Bevels & Refraction).
 /// Generates continuous dual-contour fracture bevels: bright specular highlight (#FFFFFF, 1.5 px)
-/// and deep shadow (#05050A, 2.5 px) simulating 6-8 mm thick cut glass,
-/// along with concentric impact rings forming distinct polygonal glass plates.
+/// and deep shadow (#05050A, 2.5 px) separated cleanly to simulate 6-8 mm thick cut glass,
+/// along with concentric impact rings and full-tree refraction clipping.
 /// All geometries are frozen immediately for 0 GC overhead in 60 FPS rendering.
 /// </summary>
 public sealed class ProceduralCrackGeometry
 {
     public const double SpecularHighlightThickness = 1.5;
     public const double DeepShadowThickness = 2.5;
-    public const double GlassThicknessOffset = 2.4; // 6-8 mm glass bevel offset
+    public const double GlassThicknessOffset = 3.6; // 6-8 mm physical bevel offset (no overlap)
 
     public StreamGeometry? HighlightGeometry { get; private set; }
     public StreamGeometry? ShadowGeometry { get; private set; }
@@ -80,6 +80,9 @@ public sealed class ProceduralCrackGeometry
             // Add continuous dual-contour polyline for the ray
             AddContinuousDualContourPolyline(hCtx, sCtx, nodes, GlassThicknessOffset);
 
+            // Add ribbon to refraction clip geometry along the entire ray
+            AddRibbonToClip(cCtx, nodes, 18.0);
+
             // 2. Generate secondary branching cracks
             int branchCount = 2 + _rand.Next(2);
             for (int b = 0; b < branchCount; b++)
@@ -102,7 +105,8 @@ public sealed class ProceduralCrackGeometry
                     branchNodes.Add(branchPt);
                 }
 
-                AddContinuousDualContourPolyline(hCtx, sCtx, branchNodes, GlassThicknessOffset * 0.85);
+                AddContinuousDualContourPolyline(hCtx, sCtx, branchNodes, GlassThicknessOffset * 0.90);
+                AddRibbonToClip(cCtx, branchNodes, 14.0);
             }
         }
 
@@ -166,6 +170,51 @@ public sealed class ProceduralCrackGeometry
         ShadowGeometry = shadowGeo;
         PolygonalShardsGeometry = platesGeo;
         CombinedClipGeometry = clipGeo;
+    }
+
+    private static void AddRibbonToClip(StreamGeometryContext cCtx, IReadOnlyList<Point> nodes, double width)
+    {
+        if (nodes.Count < 2) return;
+        double halfW = width * 0.5;
+
+        // Forward with +normal
+        Point p0 = nodes[0];
+        Point p1 = nodes[1];
+        double dx = p1.X - p0.X;
+        double dy = p1.Y - p0.Y;
+        double len = Math.Sqrt(dx * dx + dy * dy);
+        if (len < 0.001) len = 1.0;
+        double nx = -dy / len;
+        double ny = dx / len;
+
+        cCtx.BeginFigure(new Point(p0.X + nx * halfW, p0.Y + ny * halfW), true, true);
+        for (int i = 1; i < nodes.Count; i++)
+        {
+            Point curr = nodes[i];
+            Point prev = nodes[i - 1];
+            double cdx = curr.X - prev.X;
+            double cdy = curr.Y - prev.Y;
+            double clen = Math.Sqrt(cdx * cdx + cdy * cdy);
+            if (clen < 0.001) clen = 1.0;
+            double cnx = -cdy / clen;
+            double cny = cdx / clen;
+            cCtx.LineTo(new Point(curr.X + cnx * halfW, curr.Y + cny * halfW), true, false);
+        }
+
+        // Backward with -normal
+        for (int i = nodes.Count - 1; i >= 0; i--)
+        {
+            Point curr = nodes[i];
+            int nextIdx = Math.Min(i + 1, nodes.Count - 1);
+            int prevIdx = Math.Max(0, i - 1);
+            double cdx = nodes[nextIdx].X - nodes[prevIdx].X;
+            double cdy = nodes[nextIdx].Y - nodes[prevIdx].Y;
+            double clen = Math.Sqrt(cdx * cdx + cdy * cdy);
+            if (clen < 0.001) clen = 1.0;
+            double cnx = -cdy / clen;
+            double cny = cdx / clen;
+            cCtx.LineTo(new Point(curr.X - cnx * halfW, curr.Y - cny * halfW), true, false);
+        }
     }
 
     private static void AddContinuousDualContourPolyline(

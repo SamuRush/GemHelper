@@ -8,15 +8,15 @@ using Gem.Win32;
 namespace Gem.UI;
 
 /// <summary>
-/// Layer 1: Captures the desktop / window pixels beneath the fracture epicenter
-/// and renders optical refraction, slight magnification, and chromatic aberration (2-4 px RGB shift).
+/// Layer 1: Captures desktop / window pixels beneath the fracture epicenter
+/// and renders optical refraction, slight magnification (1.09x), and chromatic aberration (2-4 px RGB shift).
 /// Operates with Zero GC allocations in the 60 FPS animation loop.
 /// </summary>
 public sealed class DesktopRefractionCapture
 {
     public bool HasCapturedBackdrop => _backdropBrush != null;
     public ImageBrush? BackdropBrush => _backdropBrush;
-    public double ChromaticShiftPixels { get; set; } = 3.0; // 2-4 px chromatic shift
+    public double ChromaticShiftPixels { get; set; } = 2.8; // 2-3 px chromatic aberration
 
     private ImageBrush? _backdropBrush;
     private ImageBrush? _redChannelBrush;
@@ -32,8 +32,8 @@ public sealed class DesktopRefractionCapture
     private Rect _capturedBounds;
     private Point _capturedCenter;
 
-    private static readonly SolidColorBrush GlassSheenBrush = InitFrozenBrush(Color.FromArgb(20, 0, 229, 255));
-    private static readonly SolidColorBrush GlassHighlightBrush = InitFrozenBrush(Color.FromArgb(25, 255, 255, 255));
+    private static readonly SolidColorBrush GlassSheenBrush = InitFrozenBrush(Color.FromArgb(28, 0, 229, 255));
+    private static readonly SolidColorBrush GlassHighlightBrush = InitFrozenBrush(Color.FromArgb(36, 255, 255, 255));
 
     private static SolidColorBrush InitFrozenBrush(Color color)
     {
@@ -68,12 +68,13 @@ public sealed class DesktopRefractionCapture
             bmp = GenerateProceduralDesktopPattern((int)_capturedBounds.Width, (int)_capturedBounds.Height);
         }
 
-        // Initialize reusable frozen brushes
+        // Initialize reusable frozen brushes with semi-transparent blends for chromatic aberration
         var baseBrush = new ImageBrush(bmp)
         {
             Viewbox = new Rect(0, 0, 1, 1),
             ViewboxUnits = BrushMappingMode.RelativeToBoundingBox,
-            Stretch = Stretch.Fill
+            Stretch = Stretch.Fill,
+            Opacity = 0.65
         };
         baseBrush.Freeze();
         _backdropBrush = baseBrush;
@@ -83,7 +84,7 @@ public sealed class DesktopRefractionCapture
             Viewbox = new Rect(0, 0, 1, 1),
             ViewboxUnits = BrushMappingMode.RelativeToBoundingBox,
             Stretch = Stretch.Fill,
-            Opacity = 0.55
+            Opacity = 0.50
         };
         redBrush.Freeze();
         _redChannelBrush = redBrush;
@@ -93,7 +94,7 @@ public sealed class DesktopRefractionCapture
             Viewbox = new Rect(0, 0, 1, 1),
             ViewboxUnits = BrushMappingMode.RelativeToBoundingBox,
             Stretch = Stretch.Fill,
-            Opacity = 0.55
+            Opacity = 0.50
         };
         blueBrush.Freeze();
         _blueChannelBrush = blueBrush;
@@ -108,19 +109,19 @@ public sealed class DesktopRefractionCapture
     {
         if (_backdropBrush == null || opacity <= 0.01) return;
 
-        // Optical magnification (1.06x) centered at the split rift
-        _magnifyTransform.ScaleX = 1.06;
-        _magnifyTransform.ScaleY = 1.06;
+        // Optical magnification (1.09x) centered at the split rift
+        _magnifyTransform.ScaleX = 1.09;
+        _magnifyTransform.ScaleY = 1.09;
         _magnifyTransform.CenterX = center.X;
         _magnifyTransform.CenterY = center.Y;
 
-        // Chromatic aberration: horizontal and radial shift (2 - 4 px)
+        // Chromatic aberration: horizontal and vertical split (2 - 3 px)
         double caShift = ChromaticShiftPixels;
         _transRed.X = caShift;
-        _transRed.Y = 0;
+        _transRed.Y = 1.0;
 
         _transBlue.X = -caShift;
-        _transBlue.Y = 0;
+        _transBlue.Y = -1.0;
 
         dc.PushOpacity(opacity);
 
@@ -129,7 +130,12 @@ public sealed class DesktopRefractionCapture
             dc.PushClip(shardClipGeometry);
         }
 
-        // 1. Red channel chromatic shift pass
+        // 1. Center magnified base pass
+        dc.PushTransform(_transformGroupCenter);
+        dc.DrawRectangle(_backdropBrush, null, _capturedBounds);
+        dc.Pop();
+
+        // 2. Red channel chromatic shift pass (+caShift)
         if (_redChannelBrush != null)
         {
             dc.PushTransform(_transformGroupRed);
@@ -137,7 +143,7 @@ public sealed class DesktopRefractionCapture
             dc.Pop();
         }
 
-        // 2. Blue channel chromatic shift pass
+        // 3. Blue channel chromatic shift pass (-caShift)
         if (_blueChannelBrush != null)
         {
             dc.PushTransform(_transformGroupBlue);
@@ -145,14 +151,9 @@ public sealed class DesktopRefractionCapture
             dc.Pop();
         }
 
-        // 3. Center magnified refraction pass
-        dc.PushTransform(_transformGroupCenter);
-        dc.DrawRectangle(_backdropBrush, null, _capturedBounds);
-
         // 4. Subtle refractive glass sheen & highlights
         dc.DrawRectangle(GlassSheenBrush, null, _capturedBounds);
         dc.DrawRectangle(GlassHighlightBrush, null, _capturedBounds);
-        dc.Pop();
 
         if (shardClipGeometry != null)
         {
