@@ -119,6 +119,7 @@ public sealed partial class OverlayWidget : Window
         if (PresentationSource.FromVisual(this) is HwndSource source)
         {
             source.AddHook(WndProc);
+            ArcReactor.HostHwnd = source.Handle;
         }
     }
 

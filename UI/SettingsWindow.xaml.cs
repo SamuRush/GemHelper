@@ -151,6 +151,12 @@ public sealed partial class SettingsWindow : Window
             TxtOverdriveThresholdVal.Text = $"{hud.OverdriveThreshold:F2}";
             SldOverdriveCooldown.Value = hud.OverdriveCooldown;
             TxtOverdriveCooldownVal.Text = $"{hud.OverdriveCooldown:F0} сек";
+            SldOverdriveDuration.Value = hud.OverdriveDuration;
+            TxtOverdriveDurationVal.Text = $"{hud.OverdriveDuration:F0} сек";
+            SldShardCount.Value = hud.ShardCount;
+            TxtShardCountVal.Text = $"{hud.ShardCount} шт";
+            ChkMouseRepulsion.IsChecked = hud.EnableMouseRepulsion;
+            ChkWindowCollisions.IsChecked = hud.EnableWindowCollisions;
 
             TxtCustomCoreColor.Text = hud.CustomCoreColor ?? "#00E5FF";
             TxtCustomGlowColor.Text = hud.CustomGlowColor ?? "#0040FF";
@@ -762,6 +768,10 @@ public sealed partial class SettingsWindow : Window
             TxtOverdriveThresholdVal.Text = $"{SldOverdriveThreshold.Value:F2}";
         if (TxtOverdriveCooldownVal != null && SldOverdriveCooldown != null)
             TxtOverdriveCooldownVal.Text = $"{SldOverdriveCooldown.Value:F0} сек";
+        if (TxtOverdriveDurationVal != null && SldOverdriveDuration != null)
+            TxtOverdriveDurationVal.Text = $"{SldOverdriveDuration.Value:F0} сек";
+        if (TxtShardCountVal != null && SldShardCount != null)
+            TxtShardCountVal.Text = $"{SldShardCount.Value:F0} шт";
 
         UpdateCustomPanelVisibility();
 
@@ -828,6 +838,10 @@ public sealed partial class SettingsWindow : Window
             EnableFullscreenOverdrive = ChkFullscreenOverdrive?.IsChecked == true,
             OverdriveThreshold = SldOverdriveThreshold?.Value ?? 0.85,
             OverdriveCooldown = SldOverdriveCooldown?.Value ?? 10.0,
+            ShardCount = (int)(SldShardCount?.Value ?? 48),
+            OverdriveDuration = SldOverdriveDuration?.Value ?? 10.0,
+            EnableMouseRepulsion = ChkMouseRepulsion?.IsChecked == true,
+            EnableWindowCollisions = ChkWindowCollisions?.IsChecked == true,
             CustomCoreColor = TxtCustomCoreColor?.Text?.Trim() ?? "#00E5FF",
             CustomGlowColor = TxtCustomGlowColor?.Text?.Trim() ?? "#0040FF",
             CustomRaysColor = TxtCustomRaysColor?.Text?.Trim() ?? "#00FFAA"

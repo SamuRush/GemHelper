@@ -766,7 +766,51 @@
                                 TickFrequency="1.0" IsSnapToTickEnabled="False"
                                 Margin="24,2,0,4" ValueChanged="HudSetting_ValueChanged"/>
                         <TextBlock Text="Минимальная пауза в секундах между циклами перегрузки, блокирующая непрерывные взрывы подряд на длинных дропах."
-                                   FontSize="11" Foreground="#88889C" Margin="24,0,0,14" TextWrapping="Wrap"/>
+                                   FontSize="11" Foreground="#88889C" Margin="24,0,0,10" TextWrapping="Wrap"/>
+
+                        <!-- Overdrive Duration Slider -->
+                        <Grid Margin="24,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Длительность фазы перегрузки (сек):" Style="{StaticResource FieldLabelStyle}" Grid.Column="0"/>
+                            <TextBlock x:Name="TxtOverdriveDurationVal" Text="10 сек" Foreground="#00E5FF" FontWeight="Bold" FontSize="13" Grid.Column="1"/>
+                        </Grid>
+                        <Slider x:Name="SldOverdriveDuration" Minimum="5.0" Maximum="30.0" Value="10.0"
+                                TickFrequency="1.0" IsSnapToTickEnabled="False"
+                                Margin="24,2,0,4" ValueChanged="HudSetting_ValueChanged"/>
+                        <TextBlock Text="Время удержания активного режима раскола (не гаснет при кратком затишье в треке)."
+                                   FontSize="11" Foreground="#88889C" Margin="24,0,0,10" TextWrapping="Wrap"/>
+
+                        <!-- Shard Count Slider -->
+                        <Grid Margin="24,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Количество осколков (Shard Count):" Style="{StaticResource FieldLabelStyle}" Grid.Column="0"/>
+                            <TextBlock x:Name="TxtShardCountVal" Text="48 шт" Foreground="#00E5FF" FontWeight="Bold" FontSize="13" Grid.Column="1"/>
+                        </Grid>
+                        <Slider x:Name="SldShardCount" Minimum="20" Maximum="300" Value="48"
+                                TickFrequency="10" IsSnapToTickEnabled="True"
+                                Margin="24,2,0,4" ValueChanged="HudSetting_ValueChanged"/>
+                        <TextBlock Text="Количество энергетических осколков в системе частиц при расколе (от 20 до 300+)."
+                                   FontSize="11" Foreground="#88889C" Margin="24,0,0,10" TextWrapping="Wrap"/>
+
+                        <!-- Mouse Repulsion Checkbox -->
+                        <CheckBox x:Name="ChkMouseRepulsion" Content="Взаимодействие частиц с мышью (Mouse Repulsion Physics)"
+                                  Foreground="#ECECF1" FontSize="13" Margin="24,4,0,4"
+                                  Checked="HudSetting_ValueChanged" Unchecked="HudSetting_ValueChanged"/>
+                        <TextBlock Text="Осколки отталкиваются от курсора мыши в радиусе 110 px как от силового барьера."
+                                   FontSize="11" Foreground="#88889C" Margin="48,0,0,10" TextWrapping="Wrap"/>
+
+                        <!-- Window Collisions Checkbox -->
+                        <CheckBox x:Name="ChkWindowCollisions" Content="Коллизии с окнами приложений (AABB Window Collisions)"
+                                  Foreground="#ECECF1" FontSize="13" Margin="24,4,0,4"
+                                  Checked="HudSetting_ValueChanged" Unchecked="HudSetting_ValueChanged"/>
+                        <TextBlock Text="Осколки отскакивают от открытых окон Windows (браузер, блокнот, папки) и могут застревать на их рамках с мини-эквалайзером."
+                                   FontSize="11" Foreground="#88889C" Margin="48,0,0,14" TextWrapping="Wrap"/>
 
                         <!-- Color Shift Checkbox -->
                         <CheckBox x:Name="ChkColorShift" Content="Плавный перелив цвета в такт спектру (Color Shift)"

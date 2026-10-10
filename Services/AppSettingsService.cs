@@ -42,6 +42,10 @@ public sealed class HudSettingsConfig
     public bool EnableFullscreenOverdrive { get; set; } = true;
     public double OverdriveThreshold { get; set; } = 0.85;
     public double OverdriveCooldown { get; set; } = 10.0;
+    public int ShardCount { get; set; } = 48;
+    public double OverdriveDuration { get; set; } = 10.0;
+    public bool EnableMouseRepulsion { get; set; } = true;
+    public bool EnableWindowCollisions { get; set; } = true;
 }
 
 public sealed class AppSettingsData
@@ -201,6 +205,10 @@ public static class AppSettingsService
                     if (target["EnableFullscreenOverdrive"] is { } fso) data.HudSettings.EnableFullscreenOverdrive = fso.GetValue<bool>();
                     if (target["OverdriveThreshold"]?.GetValue<double>() is double ot) data.HudSettings.OverdriveThreshold = ot;
                     if (target["OverdriveCooldown"]?.GetValue<double>() is double oc) data.HudSettings.OverdriveCooldown = oc;
+                    if (target["ShardCount"]?.GetValue<int>() is int sc) data.HudSettings.ShardCount = sc;
+                    if (target["OverdriveDuration"]?.GetValue<double>() is double od) data.HudSettings.OverdriveDuration = od;
+                    if (target["EnableMouseRepulsion"] is { } mr) data.HudSettings.EnableMouseRepulsion = mr.GetValue<bool>();
+                    if (target["EnableWindowCollisions"] is { } wc) data.HudSettings.EnableWindowCollisions = wc.GetValue<bool>();
                     if (target["CustomCoreColor"]?.GetValue<string>() is string ccc) data.HudSettings.CustomCoreColor = ccc;
                     if (target["CustomGlowColor"]?.GetValue<string>() is string cgc) data.HudSettings.CustomGlowColor = cgc;
                     if (target["CustomRaysColor"]?.GetValue<string>() is string crc) data.HudSettings.CustomRaysColor = crc;
@@ -295,6 +303,10 @@ public static class AppSettingsService
                     ["EnableFullscreenOverdrive"] = data.HudSettings.EnableFullscreenOverdrive,
                     ["OverdriveThreshold"] = data.HudSettings.OverdriveThreshold,
                     ["OverdriveCooldown"] = data.HudSettings.OverdriveCooldown,
+                    ["ShardCount"] = data.HudSettings.ShardCount,
+                    ["OverdriveDuration"] = data.HudSettings.OverdriveDuration,
+                    ["EnableMouseRepulsion"] = data.HudSettings.EnableMouseRepulsion,
+                    ["EnableWindowCollisions"] = data.HudSettings.EnableWindowCollisions,
                     ["CustomCoreColor"] = data.HudSettings.CustomCoreColor,
                     ["CustomGlowColor"] = data.HudSettings.CustomGlowColor,
                     ["CustomRaysColor"] = data.HudSettings.CustomRaysColor

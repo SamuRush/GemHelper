@@ -40,6 +40,10 @@ public static class HudSettingsStorage
             ["EnableFullscreenOverdrive"] = config.EnableFullscreenOverdrive,
             ["OverdriveThreshold"] = config.OverdriveThreshold,
             ["OverdriveCooldown"] = config.OverdriveCooldown,
+            ["ShardCount"] = config.ShardCount,
+            ["OverdriveDuration"] = config.OverdriveDuration,
+            ["EnableMouseRepulsion"] = config.EnableMouseRepulsion,
+            ["EnableWindowCollisions"] = config.EnableWindowCollisions,
             ["CustomCoreColor"] = config.CustomCoreColor,
             ["CustomGlowColor"] = config.CustomGlowColor,
             ["CustomRaysColor"] = config.CustomRaysColor
@@ -102,6 +106,10 @@ public static class HudSettingsStorage
         if (node["EnableFullscreenOverdrive"] is { } fso) config.EnableFullscreenOverdrive = fso.GetValue<bool>();
         if (node["OverdriveThreshold"]?.GetValue<double>() is double ot) config.OverdriveThreshold = ot;
         if (node["OverdriveCooldown"]?.GetValue<double>() is double oc) config.OverdriveCooldown = oc;
+        if (node["ShardCount"]?.GetValue<int>() is int sc) config.ShardCount = sc;
+        if (node["OverdriveDuration"]?.GetValue<double>() is double od) config.OverdriveDuration = od;
+        if (node["EnableMouseRepulsion"] is { } mr) config.EnableMouseRepulsion = mr.GetValue<bool>();
+        if (node["EnableWindowCollisions"] is { } wc) config.EnableWindowCollisions = wc.GetValue<bool>();
         if (node["CustomCoreColor"]?.GetValue<string>() is string ccc) config.CustomCoreColor = ccc;
         if (node["CustomGlowColor"]?.GetValue<string>() is string cgc) config.CustomGlowColor = cgc;
         if (node["CustomRaysColor"]?.GetValue<string>() is string crc) config.CustomRaysColor = crc;

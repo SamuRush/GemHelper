@@ -119,3 +119,10 @@ public struct RECT
     public int Width => Right - Left;
     public int Height => Bottom - Top;
 }
+
+[StructLayout(LayoutKind.Sequential)]
+public struct POINT
+{
+    public int X;
+    public int Y;
+}

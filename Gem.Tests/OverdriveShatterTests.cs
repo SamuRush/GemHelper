@@ -467,4 +467,234 @@ public class OverdriveShatterTests
 
         if (threadEx != null) throw threadEx;
     }
+
+    [Fact]
+    public void HudSettings_OverdriveModernization_DefaultValuesAndPersistence()
+    {
+        var settings = new HudSettingsConfig();
+        Assert.Equal(48, settings.ShardCount);
+        Assert.Equal(10.0, settings.OverdriveDuration, precision: 2);
+        Assert.True(settings.EnableMouseRepulsion);
+        Assert.True(settings.EnableWindowCollisions);
+
+        var custom = new HudSettingsConfig
+        {
+            ShardCount = 180,
+            OverdriveDuration = 22.0,
+            EnableMouseRepulsion = false,
+            EnableWindowCollisions = false
+        };
+
+        string tempJsonPath = Path.Combine(Path.GetTempPath(), $"hud_mod_{Guid.NewGuid()}.json");
+        try
+        {
+            HudSettingsStorage.SaveToFile(custom, tempJsonPath);
+            var loaded = HudSettingsStorage.LoadFromFile(tempJsonPath);
+            Assert.NotNull(loaded);
+            Assert.Equal(180, loaded.ShardCount);
+            Assert.Equal(22.0, loaded.OverdriveDuration, precision: 2);
+            Assert.False(loaded.EnableMouseRepulsion);
+            Assert.False(loaded.EnableWindowCollisions);
+        }
+        finally
+        {
+            if (File.Exists(tempJsonPath)) File.Delete(tempJsonPath);
+        }
+    }
+
+    [Fact]
+    public void ArcReactorVisualHost_ShardCount_ConfigurableAndClamped()
+    {
+        Exception? threadEx = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var host = new ArcReactorVisualHost();
+
+                // Test setting custom counts
+                host.ShardCount = 48;
+                Assert.Equal(48, host.ShardCount);
+                Assert.Equal(48, host.GetShardSnapshot().Length);
+
+                host.ShardCount = 120;
+                Assert.Equal(120, host.ShardCount);
+                Assert.Equal(120, host.GetShardSnapshot().Length);
+
+                // Test clamping
+                host.ShardCount = 5; // below 20 min
+                Assert.Equal(20, host.ShardCount);
+
+                host.ShardCount = 999; // above 350 max
+                Assert.Equal(ArcReactorVisualHost.MaxShardCount, host.ShardCount);
+            }
+            catch (Exception ex)
+            {
+                threadEx = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        if (threadEx != null) throw threadEx;
+    }
+
+    [Fact]
+    public void ArcReactorVisualHost_OverdriveDuration_HoldsForConfiguredDurationDespiteSilence()
+    {
+        Exception? threadEx = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var host = new ArcReactorVisualHost
+                {
+                    OverdriveDuration = 10.0, // 10 seconds hold
+                    OverdriveThreshold = 0.50
+                };
+
+                // Trigger overdrive with heavy bass
+                for (int i = 0; i < 20; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 1.0f, beatIntensity: 1.0f, dt: 0.05);
+                }
+
+                Assert.True(host.IsOverdriveActive, "Overdrive should activate on high bass");
+
+                // Run 8.0 seconds of complete silence (160 frames * 0.05s)
+                for (int i = 0; i < 160; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.05);
+                }
+
+                // Mode MUST remain active during silence because configured duration (10s) has not expired!
+                Assert.True(host.IsOverdriveActive, "Overdrive mode must NOT cut off prematurely during quiet moments");
+
+                // Advance another 3.0 seconds (60 frames * 0.05s, total 11.0s elapsed silence)
+                for (int i = 0; i < 60; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.05);
+                }
+
+                // Overdrive should now conclude, finish reassembly, and enter cooldown
+                Assert.False(host.IsOverdriveActive, "Overdrive should deactivate after the hold duration expires");
+                Assert.True(host.IsOnCooldown, "Host should be in cooldown after overdrive concludes");
+            }
+            catch (Exception ex)
+            {
+                threadEx = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        if (threadEx != null) throw threadEx;
+    }
+
+    [Fact]
+    public void ArcReactorVisualHost_ContinuousMotion_CruisingSpeedNeverZero()
+    {
+        Exception? threadEx = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var host = new ArcReactorVisualHost
+                {
+                    OverdriveDuration = 10.0,
+                    OverdriveThreshold = 0.50,
+                    ShardCount = 48
+                };
+
+                // Trigger overdrive
+                for (int i = 0; i < 20; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 1.0f, beatIntensity: 1.0f, dt: 0.05);
+                }
+
+                Assert.True(host.IsOverdriveActive);
+
+                // Run 30 frames with zero audio (silence)
+                for (int i = 0; i < 30; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.05);
+                }
+
+                var snapshot = host.GetShardSnapshot();
+                foreach (var shard in snapshot)
+                {
+                    if (shard.Active && !shard.IsStuck)
+                    {
+                        double speed = Math.Sqrt(shard.Vx * shard.Vx + shard.Vy * shard.Vy);
+                        // Shards must NEVER freeze in place; minimum cruising speed ~160 px/s
+                        Assert.True(speed >= 150.0, $"Shard cruising speed {speed:F2} must be >= 150 px/s (no freezing)");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                threadEx = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        if (threadEx != null) throw threadEx;
+    }
+
+    [Fact]
+    public void ArcReactorVisualHost_OverloadChargeGauge_AccumulatesSmoothly()
+    {
+        Exception? threadEx = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var host = new ArcReactorVisualHost
+                {
+                    OverdriveThreshold = 1.0
+                };
+
+                Assert.Equal(0.0, host.OverloadCharge, precision: 2);
+
+                // Gradually feed moderate bass
+                for (int i = 0; i < 15; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 0.7f, beatIntensity: 0.6f, dt: 0.05);
+                }
+
+                Assert.True(host.OverloadCharge > 0.0, "Overload charge gauge should smoothly accumulate");
+            }
+            catch (Exception ex)
+            {
+                threadEx = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        if (threadEx != null) throw threadEx;
+    }
+
+    [Fact]
+    public void WindowBoundsTracker_InitAndStructure_ZeroAllocations()
+    {
+        var tracker = new WindowBoundsTracker();
+        Assert.Equal(0, tracker.Count);
+        Assert.NotNull(tracker.Bounds);
+        Assert.Equal(WindowBoundsTracker.MaxWindows, tracker.Bounds.Length);
+
+        // Struct initialization
+        var aabb = new WindowAabb(100, 200, 500, 600);
+        Assert.Equal(100.0, aabb.Left);
+        Assert.Equal(200.0, aabb.Top);
+        Assert.Equal(500.0, aabb.Right);
+        Assert.Equal(600.0, aabb.Bottom);
+        Assert.Equal(400.0, aabb.Width);
+        Assert.Equal(400.0, aabb.Height);
+    }
 }
