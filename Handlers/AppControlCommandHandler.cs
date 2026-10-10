@@ -14,13 +14,22 @@ public sealed class AppControlCommandHandler : ICommandHandler
     public string CommandName => "app";
 
     private readonly Gem.Services.IVoiceFeedbackService? _voiceFeedback;
+    private readonly Gem.Services.SteamService? _steamService;
+    private readonly Gem.Services.JarvisOrchestrator? _orchestrator;
 
-    public AppControlCommandHandler(Gem.Services.IVoiceFeedbackService? voiceFeedback = null)
+    public AppControlCommandHandler(
+        Gem.Services.IVoiceFeedbackService? voiceFeedback = null,
+        Gem.Services.SteamService? steamService = null,
+        Gem.Services.JarvisOrchestrator? orchestrator = null)
     {
         _voiceFeedback = voiceFeedback;
+        _steamService = steamService;
+        _orchestrator = orchestrator;
     }
 
     private Gem.Services.IVoiceFeedbackService? VoiceFeedback => _voiceFeedback ?? Gem.Services.CompositeVoiceFeedbackService.Instance;
+    private Gem.Services.SteamService Steam => _steamService ?? Gem.Services.SteamService.Instance;
+    private Gem.Services.JarvisOrchestrator Orchestrator => _orchestrator ?? Gem.Services.JarvisOrchestrator.Instance;
 
     private record AppDefinition(
         string CanonicalId,
@@ -334,7 +343,7 @@ public sealed class AppControlCommandHandler : ICommandHandler
             return CommandResult.Fail($"Установленная игра '{target}' не найдена, сэр.");
         }
 
-        Gem.Services.JarvisOrchestrator.Instance.SetPendingConfirmation(Gem.Services.PendingGameAction.Uninstall, installedGame);
+        Orchestrator.SetPendingConfirmation(Gem.Services.PendingGameAction.Uninstall, installedGame);
         if (VoiceFeedback != null)
         {
             await VoiceFeedback.SpeakAsync($"Вы действительно хотите удалить {installedGame.Title}, сэр?", cancellationToken);
@@ -356,10 +365,10 @@ public sealed class AppControlCommandHandler : ICommandHandler
             return CommandResult.Fail("Action 'install' requires 'name' property.");
         }
 
-        var searchResult = Gem.Services.SteamService.Instance.SearchGame(target);
+        var searchResult = Steam.SearchGame(target);
         if (searchResult != null && searchResult.RequiresConfirmation && searchResult.Game != null)
         {
-            Gem.Services.JarvisOrchestrator.Instance.SetPendingConfirmation(Gem.Services.PendingGameAction.Install, searchResult.Game);
+            Orchestrator.SetPendingConfirmation(Gem.Services.PendingGameAction.Install, searchResult.Game);
             if (VoiceFeedback != null)
             {
                 await VoiceFeedback.SpeakAsync($"Вы имели в виду {searchResult.Game.Name}, сэр?", cancellationToken);
@@ -368,7 +377,7 @@ public sealed class AppControlCommandHandler : ICommandHandler
         }
 
         string resolvedTitle = target;
-        bool ok = await Gem.Services.SteamService.Instance.InstallGameAsync(target, title =>
+        bool ok = await Steam.InstallGameAsync(target, title =>
         {
             resolvedTitle = title;
         });
@@ -485,10 +494,10 @@ public sealed class AppControlCommandHandler : ICommandHandler
         }
 
         // 3. Только если цель НЕ является системным приложением и НЕ является прямым путем — проверяем игры Steam
-        var searchResult = Gem.Services.SteamService.Instance.SearchGame(normalizedTarget);
+        var searchResult = Steam.SearchGame(normalizedTarget);
         if (searchResult != null && searchResult.RequiresConfirmation && searchResult.Game != null)
         {
-            Gem.Services.JarvisOrchestrator.Instance.SetPendingConfirmation(Gem.Services.PendingGameAction.Start, searchResult.Game);
+            Orchestrator.SetPendingConfirmation(Gem.Services.PendingGameAction.Start, searchResult.Game);
             if (VoiceFeedback != null)
             {
                 await VoiceFeedback.SpeakAsync($"Вы имели в виду {searchResult.Game.Name}, сэр?", cancellationToken);
@@ -497,7 +506,7 @@ public sealed class AppControlCommandHandler : ICommandHandler
         }
 
         // Проверяем игры Steam через SteamService
-        if (Gem.Services.SteamService.Instance.LaunchGame(normalizedTarget, out string gameTitle))
+        if (Steam.LaunchGame(normalizedTarget, out string gameTitle))
         {
             return CommandResult.Ok($"Steam game '{gameTitle}' started successfully.", new { Target = target, App = gameTitle });
         }

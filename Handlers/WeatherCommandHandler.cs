@@ -11,20 +11,20 @@ public sealed class WeatherCommandHandler : ICommandHandler
 {
     public string CommandName => "weather";
 
-    private readonly WeatherService? _weatherService;
+    private readonly WeatherService _weatherService;
     private readonly IVoiceFeedbackService? _voiceFeedback;
 
     public WeatherCommandHandler(
         WeatherService? weatherService = null,
         IVoiceFeedbackService? voiceFeedback = null)
     {
-        _weatherService = weatherService;
-        _voiceFeedback = voiceFeedback;
+        _weatherService = weatherService ?? WeatherService.Instance ?? new WeatherService();
+        _voiceFeedback = voiceFeedback ?? CompositeVoiceFeedbackService.Instance;
     }
 
     public async Task<CommandResult> ExecuteAsync(JsonElement args, CancellationToken cancellationToken = default)
     {
-        var weather = _weatherService ?? WeatherService.Instance ?? new WeatherService();
+        var weather = _weatherService;
         string? targetCity = null;
         if (args.ValueKind == JsonValueKind.Object &&
             args.TryGetProperty("city", out var cityProp) &&
@@ -35,7 +35,7 @@ public sealed class WeatherCommandHandler : ICommandHandler
 
         string report = await weather.GetCurrentWeatherReportAsync(targetCity);
 
-        var feedback = _voiceFeedback ?? CompositeVoiceFeedbackService.Instance;
+        var feedback = _voiceFeedback;
         if (feedback != null)
         {
             await feedback.SpeakAsync(report, cancellationToken);
