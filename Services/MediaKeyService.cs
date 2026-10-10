@@ -84,4 +84,97 @@ public static class MediaKeyService
     /// Stops media playback (VK_MEDIA_STOP = 0xB2).
     /// </summary>
     public static bool Stop() => SendMediaKey(NativeConstants.VK_MEDIA_STOP);
+
+    /// <summary>
+    /// Dispatches a key combination (Ctrl + targetKey) via SendInput with keybd_event fallback.
+    /// Useful for internal player volume control (e.g. Yandex Music Ctrl+Up / Ctrl+Down).
+    /// </summary>
+    public static bool SendCtrlKeyCombination(ushort virtualKey)
+    {
+        ushort ctrlScan = (ushort)NativeMethods.MapVirtualKey(NativeConstants.VK_CONTROL, 0);
+        ushort keyScan = (ushort)NativeMethods.MapVirtualKey(virtualKey, 0);
+
+        var inputs = new INPUT[4];
+
+        // 1. Ctrl Down
+        inputs[0] = new INPUT
+        {
+            type = NativeConstants.INPUT_KEYBOARD,
+            u = new InputUnion
+            {
+                ki = new KEYBDINPUT
+                {
+                    wVk = NativeConstants.VK_CONTROL,
+                    wScan = ctrlScan,
+                    dwFlags = 0,
+                    time = 0,
+                    dwExtraInfo = UIntPtr.Zero
+                }
+            }
+        };
+
+        // 2. Target Key Down
+        inputs[1] = new INPUT
+        {
+            type = NativeConstants.INPUT_KEYBOARD,
+            u = new InputUnion
+            {
+                ki = new KEYBDINPUT
+                {
+                    wVk = virtualKey,
+                    wScan = keyScan,
+                    dwFlags = NativeConstants.KEYEVENTF_EXTENDEDKEY,
+                    time = 0,
+                    dwExtraInfo = UIntPtr.Zero
+                }
+            }
+        };
+
+        // 3. Target Key Up
+        inputs[2] = new INPUT
+        {
+            type = NativeConstants.INPUT_KEYBOARD,
+            u = new InputUnion
+            {
+                ki = new KEYBDINPUT
+                {
+                    wVk = virtualKey,
+                    wScan = keyScan,
+                    dwFlags = NativeConstants.KEYEVENTF_KEYUP | NativeConstants.KEYEVENTF_EXTENDEDKEY,
+                    time = 0,
+                    dwExtraInfo = UIntPtr.Zero
+                }
+            }
+        };
+
+        // 4. Ctrl Up
+        inputs[3] = new INPUT
+        {
+            type = NativeConstants.INPUT_KEYBOARD,
+            u = new InputUnion
+            {
+                ki = new KEYBDINPUT
+                {
+                    wVk = NativeConstants.VK_CONTROL,
+                    wScan = ctrlScan,
+                    dwFlags = NativeConstants.KEYEVENTF_KEYUP,
+                    time = 0,
+                    dwExtraInfo = UIntPtr.Zero
+                }
+            }
+        };
+
+        uint sent = NativeMethods.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+        if (sent == (uint)inputs.Length)
+        {
+            return true;
+        }
+
+        // Fallback: keybd_event
+        NativeMethods.keybd_event((byte)NativeConstants.VK_CONTROL, (byte)ctrlScan, 0, UIntPtr.Zero);
+        NativeMethods.keybd_event((byte)virtualKey, (byte)keyScan, NativeConstants.KEYEVENTF_EXTENDEDKEY, UIntPtr.Zero);
+        NativeMethods.keybd_event((byte)virtualKey, (byte)keyScan, NativeConstants.KEYEVENTF_KEYUP | NativeConstants.KEYEVENTF_EXTENDEDKEY, UIntPtr.Zero);
+        NativeMethods.keybd_event((byte)NativeConstants.VK_CONTROL, (byte)ctrlScan, NativeConstants.KEYEVENTF_KEYUP, UIntPtr.Zero);
+        return true;
+    }
 }

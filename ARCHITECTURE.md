@@ -183,9 +183,11 @@ flowchart TD
 - [`Services/IAppAudioService.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/IAppAudioService.cs):
   - Контракт изолированного управления громкостью конкретного приложения/плеера (`SetAppVolumeAsync`, `ChangeAppVolumeAsync`, `SetAppMuteAsync`, `GetAppVolumeAsync`).
 - [`Services/AppAudioService.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/AppAudioService.cs):
-  - Реализация на базе Windows Audio Session API (WASAPI) через `NAudio.CoreAudioApi.MMDeviceEnumerator` и `AudioSessionManager.Sessions`.
+  - Реализация на базе Windows Audio Session API (WASAPI) через `NAudio.CoreAudioApi.MMDeviceEnumerator` и `AudioSessionManager2.GetSessionEnumerator()` (`sessionManager.RefreshSessions()`).
+  - Мультипроцессное сопоставление (Electron architecture): построение дерева процессов и дочерних/внутренних PID через Win32 `Toolhelp32Snapshot` (`GetTargetFamilyPids`), предотвращающее ложные привязки к главному PID окна.
   - Поиск аудио-сессий музыкальных плееров (`Y.Music`, `YandexMusic`, `spotify`, паттерны `music`), видео-браузеров (`chrome`, `msedge`, `firefox`, `browser`) и медиаплееров (`vlc`, `mpc-hc`).
-  - Управление индивидуальным слайдером приложения в системном микшере (`SimpleAudioVolume.Volume`, `SimpleAudioVolume.Mute`) без затрагивания и без конфликтов с общей мастер-громкостью Windows (`MasterVolumeLevelScalar`).
+  - Управление индивидуальным слайдером приложения в системном микшере (`SimpleAudioVolume.Volume`, `SimpleAudioVolume.Mute`) без затрагивания и без конфликтов с общей мастер-громкостью Windows (`MasterVolumeLevelScalar`). При наличии нескольких дочерних сессий громкость применяется ко **всем** сессиям приложения.
+  - Альтернативный fallback и UI-синхронизация для Electron: при активном или найденном окне Яндекс Музыки отправка сочетаний клавиш `Ctrl+Up` / `Ctrl+Down` через `MediaKeyService.SendCtrlKeyCombination` для синхронного сдвига внутреннего программного слайдера плеера.
 
 ### 3.3 Синтез речи (`Services/TTS/`)
 - [`Services/TTS/IVoiceFeedbackService.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/IVoiceFeedbackService.cs):

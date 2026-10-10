@@ -217,4 +217,52 @@ public class PlayerVolumeControlTests
         Assert.False(AppAudioService.IsMusicProcessName("explorer"));
         Assert.False(AppAudioService.IsMusicProcessName("calc"));
     }
+
+    [Theory]
+    [InlineData("YandexMusic.exe", "player", true)]
+    [InlineData("Y.Music.exe", "player", true)]
+    [InlineData("yandexmusic", "music", true)]
+    [InlineData("spotify.exe", "player", true)]
+    [InlineData("aimp", "music", true)]
+    [InlineData("chrome.exe", "video", true)]
+    [InlineData("vlc.exe", "video", true)]
+    [InlineData("notepad.exe", "player", false)]
+    [InlineData("calc.exe", "video", false)]
+    public void AppAudioService_IsProcessNameMatchingTarget_EvaluatesCorrectly(
+        string processName, string target, bool expectedMatch)
+    {
+        bool result = AppAudioService.IsProcessNameMatchingTarget(processName, target);
+        Assert.Equal(expectedMatch, result);
+    }
+
+    [Fact]
+    public void AppAudioService_GetTargetFamilyPids_ReturnsValidSet()
+    {
+        var pids = AppAudioService.GetTargetFamilyPids("player");
+        Assert.NotNull(pids);
+    }
+
+    [Fact]
+    public void AppAudioService_FindSessions_DoesNotThrow()
+    {
+        var exception = Record.Exception(() => AppAudioService.FindSessions("player"));
+        Assert.Null(exception);
+    }
+
+    [Fact]
+    public void MediaKeyService_SendCtrlKeyCombination_ExecutesSuccessfully()
+    {
+        bool upResult = MediaKeyService.SendCtrlKeyCombination(Gem.Win32.NativeConstants.VK_UP);
+        bool downResult = MediaKeyService.SendCtrlKeyCombination(Gem.Win32.NativeConstants.VK_DOWN);
+
+        Assert.True(upResult);
+        Assert.True(downResult);
+    }
+
+    [Fact]
+    public void AppAudioService_FindYandexMusicWindow_ExecutesWithoutExceptions()
+    {
+        var exception = Record.Exception(() => AppAudioService.FindYandexMusicWindow(out _));
+        Assert.Null(exception);
+    }
 }
