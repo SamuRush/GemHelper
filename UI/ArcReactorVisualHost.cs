@@ -39,7 +39,7 @@ public sealed class ReactorPalette
         PrimaryPen = new Pen(PrimaryBrush, 1.2);
         PrimaryPen.Freeze();
 
-        RayPen = new Pen(new SolidColorBrush(Color.FromArgb(230, color.R, color.G, color.B)), 1.5);
+        RayPen = new Pen(new SolidColorBrush(Color.FromArgb(230, color.R, color.G, color.B)), 1.4);
         RayPen.Freeze();
 
         AuraBrush = new RadialGradientBrush
@@ -119,7 +119,7 @@ public sealed class ReactorPalette
 }
 
 /// <summary>
-/// Static registry of pre-computed, frozen palettes for all JARVIS states and beat gradients.
+/// Static registry of pre-computed, frozen palettes for all JARVIS states and smooth spectral gradient morphing.
 /// </summary>
 public static class ArcReactorPalettes
 {
@@ -128,22 +128,22 @@ public static class ArcReactorPalettes
     public static readonly ReactorPalette Thinking = new(Color.FromRgb(0xD5, 0x00, 0xF9));
     public static readonly ReactorPalette Action = new(Color.FromRgb(0x00, 0xE6, 0x76));
 
-    // Pre-computed discrete beat palettes (8 quantization levels)
-    public static readonly ReactorPalette[] BeatPalettes = PrecomputeBeatPalettes();
+    // Pre-computed smooth spectral gradient palettes: Neon Cyan (#00E5FF) -> Deep Ultramarine (#0040FF)
+    public static readonly ReactorPalette[] SpectrumGradientPalettes = PrecomputeSpectrumPalettes();
 
-    private static ReactorPalette[] PrecomputeBeatPalettes()
+    // Retained for backward-compatibility
+    public static readonly ReactorPalette[] BeatPalettes = SpectrumGradientPalettes;
+
+    private static ReactorPalette[] PrecomputeSpectrumPalettes()
     {
-        Color baseColor = Color.FromRgb(0x00, 0xE5, 0xFF);
-        Color ultramarine = Color.FromRgb(0x1E, 0x40, 0xFF);
-        Color purple = Color.FromRgb(0xD5, 0x00, 0xF9);
+        Color baseCyan = Color.FromRgb(0x00, 0xE5, 0xFF);
+        Color deepUltramarine = Color.FromRgb(0x00, 0x40, 0xFF);
 
-        var palettes = new ReactorPalette[8];
-        for (int i = 0; i < 8; i++)
+        var palettes = new ReactorPalette[64];
+        for (int i = 0; i < 64; i++)
         {
-            float t = i / 7.0f;
-            Color c = t < 0.5f
-                ? Lerp(baseColor, ultramarine, t * 2.0f)
-                : Lerp(ultramarine, purple, (t - 0.5f) * 2.0f);
+            float t = i / 63.0f;
+            Color c = Lerp(baseCyan, deepUltramarine, t);
             palettes[i] = new ReactorPalette(c);
         }
         return palettes;
@@ -155,12 +155,12 @@ public static class ArcReactorPalettes
             (byte)(a.G + (b.G - a.G) * t),
             (byte)(a.B + (b.B - a.B) * t));
 
-    public static ReactorPalette GetPalette(JarvisState state, float beat)
+    public static ReactorPalette GetPalette(JarvisState state, float saturation = 0f)
     {
-        if (state == JarvisState.Idle && beat > 0.05f)
+        if (state == JarvisState.Idle)
         {
-            int index = Math.Clamp((int)(beat * 7.99f), 0, 7);
-            return BeatPalettes[index];
+            int index = Math.Clamp((int)(saturation * 63.99f), 0, 63);
+            return SpectrumGradientPalettes[index];
         }
 
         return state switch
@@ -176,16 +176,16 @@ public static class ArcReactorPalettes
 /// <summary>
 /// High-performance holographic Arc Reactor core element rendered at 60 FPS via DrawingVisual.
 /// Replaces the legacy HUD sphere with Tony Stark / JARVIS Arc Reactor visual architecture:
-/// - Layer 1: Radial audio spectrograph crown (96 procedural rays driven by FFT from microphone, TTS, and loopback)
+/// - Layer 1: Radial audio spectrograph crown (128 bilateral procedural rays driven by honest FFT)
 /// - Layer 2: Asynchronously rotating concentric orbital rings, tick scales, dashed arcs and HUD glyphs
-/// - Layer 3: Volumetric plasma energy core with sinusoidal breathing, beat scale burst, and dynamic color morphing
-/// - Center: Biomorphic AI cybernetic face & polygonal energy lattice that blinks and deforms in sync with rhythm
+/// - Layer 3: Volumetric plasma energy core with sinusoidal breathing, smooth sub-bass modulation (Lerp), and smooth color morphing
+/// - Center: Biomorphic AI cybernetic face & polygonal energy lattice that deforms in sync with rhythm
 /// Features smooth Lerp interpolation, event lifecycle management, and zero-GC allocations in the render loop:
 /// reusable StreamGeometryContexts, frozen static resource palettes, and reusable transforms.
 /// </summary>
 public sealed class ArcReactorVisualHost : FrameworkElement
 {
-    private const int RayCount = 96;
+    private const int RayCount = AudioSpectrumAnalyzer.RayCount;
     private const double BaseRadius = 76.0;
     private const double MaxRayHeight = 22.0;
 
@@ -206,7 +206,11 @@ public sealed class ArcReactorVisualHost : FrameworkElement
     private JarvisState _currentState = JarvisState.Idle;
     private ReactorPalette _currentPalette = ArcReactorPalettes.Idle;
 
-    // Audio spectrum & Lerp arrays
+    // Sub-bass and spectral saturation smooth Lerp states
+    private double _smoothedSubBass = 0.0;
+    private double _smoothedSaturation = 0.0;
+
+    // Audio spectrum & Peak Falloff / Decay arrays
     private readonly AudioSpectrumAnalyzer _analyzer = new();
     private readonly float[] _targetSpectrum = new float[RayCount];
     private readonly float[] _currentSpectrum = new float[RayCount];
@@ -494,7 +498,7 @@ public sealed class ArcReactorVisualHost : FrameworkElement
 
     private void UpdatePhysics(double dt, double now)
     {
-        // 1. Orbital ring rotation speeds (asynchronous opposite directions)
+        // 1. Orbital ring rotation base speeds
         double speedMult = _currentState switch
         {
             JarvisState.Thinking  => 2.5,
@@ -503,10 +507,17 @@ public sealed class ArcReactorVisualHost : FrameworkElement
             _ => 1.0
         };
 
-        // On a beat impulse the rings get a short acceleration burst that decays
-        // with beat intensity — no continuous jitter from residual mids/highs.
-        float beat = _analyzer.BeatIntensity;
-        double dynamicSpeed = speedMult + beat * 2.0; // stronger burst on the exact beat frame
+        // Continuous smooth sub-bass modulation (no abrupt beat jumps)
+        float targetSubBass = _analyzer.SubBassEnergy;
+        double subBassLerpSpeed = targetSubBass > _smoothedSubBass ? 12.0 : 6.0;
+        _smoothedSubBass += (targetSubBass - _smoothedSubBass) * Math.Clamp(dt * subBassLerpSpeed, 0.0, 1.0);
+
+        // Spectral saturation smooth Lerp for color gradient
+        float targetSaturation = _analyzer.SpectralSaturation;
+        _smoothedSaturation += (targetSaturation - _smoothedSaturation) * Math.Clamp(dt * 5.0, 0.0, 1.0);
+
+        // Gentle dynamic speed based on continuous sub-bass energy
+        double dynamicSpeed = speedMult + _smoothedSubBass * 0.45;
 
         _angleRing1 = (_angleRing1 + 14.0 * dynamicSpeed * dt) % 360.0;
         _angleRing2 = (_angleRing2 - 28.0 * dynamicSpeed * dt) % 360.0;
@@ -514,8 +525,7 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         _angleRing4 = (_angleRing4 - 42.0 * dynamicSpeed * dt) % 360.0;
         _angleRing5 = (_angleRing5 +  8.0 * dynamicSpeed * dt) % 360.0;
 
-        // 2. Continuous sinusoidal breathing — speed is state-dependent only,
-        //    NOT driven by beat so the core breathes calmly between hits.
+        // Continuous sinusoidal breathing
         double breathSpeed = _currentState switch
         {
             JarvisState.Thinking  => 4.5,
@@ -525,21 +535,26 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         };
         _breathPhase += dt * breathSpeed;
 
-        // 3. Zero-allocation frozen palette selection (hue shifts on beat impulse)
-        _currentPalette = ArcReactorPalettes.GetPalette(_currentState, beat);
+        // Zero-allocation frozen palette selection: smooth gradient Cyan -> Ultramarine
+        _currentPalette = ArcReactorPalettes.GetPalette(_currentState, (float)_smoothedSaturation);
 
-        // 4. Retrieve frequency spectrum using Span (zero allocations) & smooth Lerp.
-        //    The LPF upstream ensures only bass energy drives the ray heights;
-        //    the organic idle wave fills the visual gap between beats.
+        // Retrieve frequency spectrum (zero allocations via Span)
         _analyzer.GetTargetSpectrum(_targetSpectrum.AsSpan(), dt);
 
+        // Peak Falloff / Decay: instant attack on hits, smooth gravitational decay (~0.88 per frame)
+        float falloffRate = MathF.Pow(0.88f, (float)(dt * 60.0));
         for (int i = 0; i < RayCount; i++)
         {
             float target = _targetSpectrum[i];
             float current = _currentSpectrum[i];
-            // Fast attack (0.42), smooth decay (0.12) — prevents jitter on transients
-            float lerpFactor = target > current ? 0.42f : 0.12f;
-            _currentSpectrum[i] = current + (target - current) * lerpFactor;
+            if (target > current)
+            {
+                _currentSpectrum[i] = target; // Instant upward attack
+            }
+            else
+            {
+                _currentSpectrum[i] = Math.Max(target, current * falloffRate); // Smooth gravitational falloff
+            }
         }
     }
 
@@ -554,13 +569,9 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         double baseScale = Math.Min(width, height) / 220.0;
         if (baseScale <= 0.01) baseScale = 1.0;
 
-        // Impulsive scale burst driven by beat detection.
-        // Uses Ease-Out Exponential: beatEase = 1 - exp(-beat × 6) for a sharp onset
-        // and smooth tail that mirrors a real kick-drum transient envelope.
-        float beat = _analyzer.BeatIntensity;
-        double beatEaseScale = 1.0 - Math.Exp(-beat * 6.0);
-        double beatScaleBurst = 1.0 + 0.12 * beatEaseScale; // up to +12% root expansion
-        double finalScale = baseScale * beatScaleBurst;
+        // Central core radius smoothly modulated by sub-bass energy (20-150 Hz) via Lerp
+        double subBassScale = 1.0 + 0.12 * _smoothedSubBass;
+        double finalScale = baseScale * subBassScale;
 
         var pal = _currentPalette;
 
@@ -587,37 +598,28 @@ public sealed class ArcReactorVisualHost : FrameworkElement
             // LAYER 3: PLASMA ENERGY CORE (Volumetric Glow & Sinusoidal Breath)
             // =================================================================
 
-            // Pure sinusoidal idle breath (state-speed driven, NOT coupled to beat jitter)
             double idleBreath = Math.Sin(_breathPhase);
 
-            // Beat impulse uses an Ease-Out Exponential curve:
-            //   beatEase = 1 - exp(-beat × 6)  maps [0,1] → [0,~0.998]
-            //   Fast initial rise then asymptotic tail — matches a real kick-drum envelope.
-            //   Between beats, beat = 0 so beatEase = 0 and only idleBreath drives the radius.
-            double beatEase = 1.0 - Math.Exp(-beat * 6.0);
-
-            // 3a. Outer atmospheric aura — expands sharply on beat, breathes gently in idle
-            double auraBreath    = 1.0 + 0.06 * idleBreath;   // ±6% idle breath
-            double auraBeatBurst = 1.0 + 0.32 * beatEase;     // up to +32% beat burst
-            double auraRadius    = 48.0 * auraBreath * auraBeatBurst;
+            // Sinusoidal idle breath smoothly modulated by sub-bass energy (no binary beat flashes)
+            double auraBreath    = 1.0 + 0.05 * idleBreath;
+            double auraSubBass   = 1.0 + 0.22 * _smoothedSubBass;
+            double auraRadius    = 48.0 * auraBreath * auraSubBass;
             dc.DrawEllipse(pal.AuraBrush, null, center, auraRadius, auraRadius);
 
-            // 3b. Mid plasma energy sphere — moderate beat response
-            double plasmaBreath    = 1.0 + 0.08 * idleBreath;
-            double plasmaBeatBurst = 1.0 + 0.18 * beatEase;
-            double plasmaRadius    = 30.0 * plasmaBreath * plasmaBeatBurst;
+            double plasmaBreath  = 1.0 + 0.07 * idleBreath;
+            double plasmaSubBass = 1.0 + 0.15 * _smoothedSubBass;
+            double plasmaRadius  = 30.0 * plasmaBreath * plasmaSubBass;
             dc.DrawEllipse(pal.PlasmaBrush, null, center, plasmaRadius, plasmaRadius);
 
-            // 3c. Nuclear focal node — brief white-hot flash at beat peak, then back to breath
-            double nuclearBreath    = 1.0 + 0.04 * idleBreath;
-            double nuclearBeatFlash = 1.0 + 0.22 * beatEase;
-            double nuclearRadius    = 13.0 * nuclearBreath * nuclearBeatFlash;
+            double nuclearBreath  = 1.0 + 0.04 * idleBreath;
+            double nuclearSubBass = 1.0 + 0.10 * _smoothedSubBass;
+            double nuclearRadius  = 13.0 * nuclearBreath * nuclearSubBass;
             dc.DrawEllipse(pal.NuclearBrush, null, center, nuclearRadius, nuclearRadius);
 
             // =================================================================
             // BIOMORPHIC AI CENTER ("Face of AI" / Digital Polygonal Cyber-Mesh)
             // =================================================================
-            RenderBiomorphicFace(dc, center, now, beat, pal);
+            RenderBiomorphicFace(dc, center, now, (float)_smoothedSubBass, pal);
 
             // =================================================================
             // LAYER 2: ORBITAL RINGS & HUD GLYPHS (Concentric Rotating Scales)
@@ -664,7 +666,7 @@ public sealed class ArcReactorVisualHost : FrameworkElement
             dc.Pop();
 
             // =================================================================
-            // LAYER 1: RADIAL AUDIO SPECTROGRAPH (Procedural Crown of 96 Rays)
+            // LAYER 1: RADIAL AUDIO SPECTROGRAPH (Procedural Crown of 128 Rays)
             // Batch rendering via StreamGeometry & StreamGeometryContext (0 allocations)
             // =================================================================
             using (var rayCtx = _dynamicRaysGeometry.Open())
@@ -675,10 +677,11 @@ public sealed class ArcReactorVisualHost : FrameworkElement
                     double sin = _sinTable[i];
                     double theta = i * (2.0 * Math.PI / RayCount);
 
-                    // Subtle organic idle wave when silent
-                    double idleWave = 1.3 * Math.Sin(4.0 * theta + 2.5 * now) * Math.Cos(2.0 * theta - 1.8 * now);
+                    // Subtle organic idle wave when silent, smoothly blended with audio
+                    double idleWave = 1.2 * Math.Sin(4.0 * theta + 2.5 * now) * Math.Cos(2.0 * theta - 1.8 * now);
                     double audioHeight = _currentSpectrum[i] * MaxRayHeight;
-                    double h = Math.Clamp(2.5 + idleWave + audioHeight, 1.8, MaxRayHeight + 4.0);
+                    double waveBlend = Math.Max(0.0, 1.0 - _currentSpectrum[i] * 3.0);
+                    double h = Math.Clamp(2.0 + idleWave * waveBlend + audioHeight, 1.5, MaxRayHeight + 4.0);
 
                     Point p0 = new Point(cx + BaseRadius * cos, cy + BaseRadius * sin);
                     Point p1 = new Point(cx + (BaseRadius + h) * cos, cy + (BaseRadius + h) * sin);
@@ -698,9 +701,10 @@ public sealed class ArcReactorVisualHost : FrameworkElement
                     double sin = _sinTable[i];
                     double theta = i * (2.0 * Math.PI / RayCount);
 
-                    double idleWave = 1.3 * Math.Sin(4.0 * theta + 2.5 * now) * Math.Cos(2.0 * theta - 1.8 * now);
+                    double idleWave = 1.2 * Math.Sin(4.0 * theta + 2.5 * now) * Math.Cos(2.0 * theta - 1.8 * now);
                     double audioHeight = _currentSpectrum[i] * MaxRayHeight;
-                    double h = Math.Clamp(2.5 + idleWave + audioHeight, 1.8, MaxRayHeight + 4.0);
+                    double waveBlend = Math.Max(0.0, 1.0 - _currentSpectrum[i] * 3.0);
+                    double h = Math.Clamp(2.0 + idleWave * waveBlend + audioHeight, 1.5, MaxRayHeight + 4.0);
 
                     Point p1 = new Point(cx + (BaseRadius + h) * cos, cy + (BaseRadius + h) * sin);
 
@@ -722,7 +726,7 @@ public sealed class ArcReactorVisualHost : FrameworkElement
     /// Renders procedural biomorphic AI face & polygonal energy lattice in the reactor core.
     /// Batches wireframe lines through StreamGeometryContext for zero heap allocation.
     /// </summary>
-    private void RenderBiomorphicFace(DrawingContext dc, Point center, double now, float beat, ReactorPalette pal)
+    private void RenderBiomorphicFace(DrawingContext dc, Point center, double now, float subBass, ReactorPalette pal)
     {
         double cx = center.X;
         double cy = center.Y;
@@ -737,8 +741,8 @@ public sealed class ArcReactorVisualHost : FrameworkElement
             blinkScale = Math.Max(0.08, 1.0 - Math.Sin(p * Math.PI));
         }
 
-        // 2. Rhythm geometric deformation: vertices expand radially on peak bass beats
-        double deform = 1.0 + 0.18 * beat;
+        // 2. Rhythm geometric deformation: vertices smoothly expand with sub-bass
+        double deform = 1.0 + 0.12 * subBass;
 
         // Left Eye Contour
         Point eL1 = new Point(cx - 12.0 * deform, cy - 2.5 * deform);
