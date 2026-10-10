@@ -109,6 +109,7 @@ public static class Program
             try
             {
                 voiceListener = new VoiceListener(modelPath: voskModelPath, wakeWords: settingsData.WakeWords?.ToArray());
+                overlay.AttachVoiceListener(voiceListener);
             }
             catch (Exception ex)
             {

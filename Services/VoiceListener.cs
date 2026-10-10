@@ -204,6 +204,21 @@ public sealed class VoiceListener : IDisposable
     public event Action<string>? OnCommandSpoken;
 
     /// <summary>
+    /// Event fired when audio RMS energy level changes.
+    /// </summary>
+    public event Action<float>? OnRmsLevelChanged;
+
+    /// <summary>
+    /// Event fired when a real-time partial speech recognition hypothesis is produced.
+    /// </summary>
+    public event Action<string>? OnPartialResult;
+
+    /// <summary>
+    /// Event fired when a final speech recognition result is produced.
+    /// </summary>
+    public event Action<string>? OnFinalResult;
+
+    /// <summary>
     /// Event fired on internal status updates or state changes.
     /// </summary>
     public event Action<VoiceListenerState, string>? OnStatusChanged;
@@ -592,6 +607,7 @@ public sealed class VoiceListener : IDisposable
             }
 
             double rms = CalculateRms(e.Buffer, e.BytesRecorded);
+            OnRmsLevelChanged?.Invoke((float)rms);
             bool isAudioSpeech = rms >= _silenceThresholdRms;
 
             if (_state == VoiceListenerState.WaitingForWakeWord)
@@ -629,6 +645,7 @@ public sealed class VoiceListener : IDisposable
             }
 
             double rms = CalculateRms(buffer, bytesRecorded);
+            OnRmsLevelChanged?.Invoke((float)rms);
             bool isAudioSpeech = rms >= _silenceThresholdRms;
 
             if (_state == VoiceListenerState.WaitingForWakeWord)
@@ -961,6 +978,7 @@ public sealed class VoiceListener : IDisposable
                     Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [STT: Vosk Partial] \"{currentFull}\"");
                     Console.ResetColor();
                 }
+                OnPartialResult?.Invoke(currentFull);
             }
         }
         else
@@ -1046,6 +1064,7 @@ public sealed class VoiceListener : IDisposable
                 Console.ResetColor();
 
                 NotifyProcessingStarted();
+                OnFinalResult?.Invoke(finalCandidate);
                 OnCommandSpoken?.Invoke(finalCandidate);
             }
             else if (!string.IsNullOrWhiteSpace(finalCandidate))

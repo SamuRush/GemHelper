@@ -1,15 +1,21 @@
+using System;
+using System.Linq;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Media.Effects;
 using System.Windows.Threading;
 using Gem.Core;
+using Gem.Services;
+using Gem.Voice;
 
 namespace Gem.UI;
 
 /// <summary>
 /// Minimalist floating HUD overlay widget for JARVIS.
-/// Displays digital core animation reflecting assistant states (Idle, Listening, Thinking, Action).
+/// Displays digital core animation reflecting assistant states (Idle, Listening, Thinking, Action),
+/// reactive audio waveform pulses, real-time speech subtitles, and active timer countdown overlay.
 /// Memory-optimized: strictly stops and detaches previous animation clocks to prevent composition clock accumulation.
 /// </summary>
 public sealed partial class OverlayWidget : Window
@@ -24,29 +30,35 @@ public sealed partial class OverlayWidget : Window
     private static readonly Color ColorSecondaryIdle = Color.FromRgb(0x00, 0x55, 0xAA);
     private static readonly Color ColorDarkIdle = Color.FromRgb(0x00, 0x18, 0x33);
 
-    private static readonly Color ColorAuraListen1 = Color.FromRgb(0x00, 0xFF, 0xAA);
-    private static readonly Color ColorAuraListen2 = Color.FromRgb(0x00, 0xB3, 0x77);
+    private static readonly Color ColorAuraListen1 = Color.FromRgb(0xFF, 0xD6, 0x00);
+    private static readonly Color ColorAuraListen2 = Color.FromRgb(0xFF, 0xA0, 0x00);
     private static readonly Color ColorHighlightListen = Color.FromRgb(0xFF, 0xFF, 0xFF);
-    private static readonly Color ColorPrimaryListen = Color.FromRgb(0x00, 0xFF, 0xAA);
-    private static readonly Color ColorSecondaryListen = Color.FromRgb(0x00, 0xB3, 0x77);
-    private static readonly Color ColorDarkListen = Color.FromRgb(0x00, 0x33, 0x22);
+    private static readonly Color ColorPrimaryListen = Color.FromRgb(0xFF, 0xD6, 0x00);
+    private static readonly Color ColorSecondaryListen = Color.FromRgb(0xFF, 0x8F, 0x00);
+    private static readonly Color ColorDarkListen = Color.FromRgb(0x33, 0x22, 0x00);
 
-    private static readonly Color ColorAuraThink1 = Color.FromRgb(0xB3, 0x88, 0xFF);
-    private static readonly Color ColorAuraThink2 = Color.FromRgb(0x7C, 0x4D, 0xFF);
+    private static readonly Color ColorAuraThink1 = Color.FromRgb(0xD5, 0x00, 0xF9);
+    private static readonly Color ColorAuraThink2 = Color.FromRgb(0xAA, 0x00, 0xFF);
     private static readonly Color ColorHighlightThink = Color.FromRgb(0xFF, 0xFF, 0xFF);
-    private static readonly Color ColorPrimaryThink = Color.FromRgb(0xB3, 0x88, 0xFF);
-    private static readonly Color ColorSecondaryThink = Color.FromRgb(0x65, 0x1F, 0xFF);
+    private static readonly Color ColorPrimaryThink = Color.FromRgb(0xD5, 0x00, 0xF9);
+    private static readonly Color ColorSecondaryThink = Color.FromRgb(0x7B, 0x1F, 0xA2);
     private static readonly Color ColorDarkThink = Color.FromRgb(0x1A, 0x00, 0x33);
 
     private static readonly Color ColorWhite = Color.FromRgb(0xFF, 0xFF, 0xFF);
-    private static readonly Color ColorAuraAction2 = Color.FromRgb(0x00, 0xE5, 0xFF);
-    private static readonly Color ColorSecondaryAction = Color.FromRgb(0x00, 0xD2, 0xFF);
-    private static readonly Color ColorDarkAction = Color.FromRgb(0x00, 0x44, 0x88);
+    private static readonly Color ColorAuraAction1 = Color.FromRgb(0x00, 0xE6, 0x76);
+    private static readonly Color ColorAuraAction2 = Color.FromRgb(0x00, 0xC8, 0x53);
+    private static readonly Color ColorHighlightAction = Color.FromRgb(0xFF, 0xFF, 0xFF);
+    private static readonly Color ColorPrimaryAction = Color.FromRgb(0x00, 0xE6, 0x76);
+    private static readonly Color ColorSecondaryAction = Color.FromRgb(0x00, 0xA0, 0x40);
+    private static readonly Color ColorDarkAction = Color.FromRgb(0x00, 0x33, 0x18);
 
     private JarvisState _currentState = JarvisState.Idle;
     private readonly DispatcherTimer _actionResetTimer;
+    private readonly DispatcherTimer _subtitleFadeTimer;
+    private readonly DispatcherTimer _timerPollingTimer;
     private SettingsWindow? _settingsWindow;
     private LlmIntentService? _llmService;
+    private VoiceListener? _attachedListener;
 
     public JarvisState CurrentState => _currentState;
 
@@ -60,11 +72,139 @@ public sealed partial class OverlayWidget : Window
         };
         _actionResetTimer.Tick += OnActionResetTimerTick;
 
+        _subtitleFadeTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(3)
+        };
+        _subtitleFadeTimer.Tick += OnSubtitleFadeTimerTick;
+
+        _timerPollingTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(500)
+        };
+        _timerPollingTimer.Tick += OnTimerPollingTick;
+
         Loaded += (s, e) =>
         {
             PositionInBottomRightCorner();
             SetState(JarvisState.Idle);
+            _timerPollingTimer.Start();
+
+            if (VoiceListener.Instance != null && _attachedListener == null)
+            {
+                AttachVoiceListener(VoiceListener.Instance);
+            }
         };
+    }
+
+    /// <summary>
+    /// Gets the specified glow DropShadowEffect color per the roadmap:
+    /// Idle: #00E5FF, Listening: #FFD600, Thinking: #D500F9, Action: #00E676.
+    /// </summary>
+    public static Color GetStateGlowColor(JarvisState state) => state switch
+    {
+        JarvisState.Idle => Color.FromRgb(0x00, 0xE5, 0xFF),
+        JarvisState.Listening => Color.FromRgb(0xFF, 0xD6, 0x00),
+        JarvisState.Thinking => Color.FromRgb(0xD5, 0x00, 0xF9),
+        JarvisState.Action => Color.FromRgb(0x00, 0xE6, 0x76),
+        _ => Color.FromRgb(0x00, 0xE5, 0xFF)
+    };
+
+    /// <summary>
+    /// Binds voice listener events to the HUD for waveform reactivity and subtitles.
+    /// </summary>
+    public void AttachVoiceListener(VoiceListener? listener)
+    {
+        if (listener == null) return;
+        if (_attachedListener != null)
+        {
+            _attachedListener.OnRmsLevelChanged -= UpdateAudioWaveform;
+            _attachedListener.OnPartialResult -= ShowSpeechSubtitle;
+            _attachedListener.OnFinalResult -= ShowSpeechSubtitle;
+        }
+
+        _attachedListener = listener;
+        _attachedListener.OnRmsLevelChanged += UpdateAudioWaveform;
+        _attachedListener.OnPartialResult += ShowSpeechSubtitle;
+        _attachedListener.OnFinalResult += ShowSpeechSubtitle;
+    }
+
+    /// <summary>
+    /// Reactive audio waveform pulse binding: dynamically scales neon ring according to RMS.
+    /// </summary>
+    public void UpdateAudioWaveform(float rms)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(() => UpdateAudioWaveform(rms));
+            return;
+        }
+
+        if (_currentState == JarvisState.Action) return;
+
+        float normalized = Math.Clamp(rms / 2500f, 0f, 1f);
+        double targetScale = 1.0 + (normalized * 0.45);
+        double targetOpacity = 0.4 + (normalized * 0.6);
+
+        RingScale.ScaleX = targetScale;
+        RingScale.ScaleY = targetScale;
+        InnerRing.Opacity = targetOpacity;
+    }
+
+    /// <summary>
+    /// Displays speech recognition subtitles with auto-fadeout after 3 seconds of silence.
+    /// </summary>
+    public void ShowSpeechSubtitle(string text)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(() => ShowSpeechSubtitle(text));
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(text)) return;
+
+        SpeechSubtitleText.Text = text.Trim();
+        _subtitleFadeTimer.Stop();
+
+        var fadeIn = new DoubleAnimation
+        {
+            To = 1.0,
+            Duration = TimeSpan.FromMilliseconds(150),
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+        };
+        SpeechSubtitleBorder.BeginAnimation(UIElement.OpacityProperty, fadeIn, HandoffBehavior.SnapshotAndReplace);
+
+        _subtitleFadeTimer.Start();
+    }
+
+    private void OnSubtitleFadeTimerTick(object? sender, EventArgs e)
+    {
+        _subtitleFadeTimer.Stop();
+        var fadeOut = new DoubleAnimation
+        {
+            To = 0.0,
+            Duration = TimeSpan.FromMilliseconds(400),
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn }
+        };
+        SpeechSubtitleBorder.BeginAnimation(UIElement.OpacityProperty, fadeOut, HandoffBehavior.SnapshotAndReplace);
+    }
+
+    private void OnTimerPollingTick(object? sender, EventArgs e)
+    {
+        var activeTimers = TimerService.Instance?.GetActiveTimers();
+        if (activeTimers != null && activeTimers.Count > 0)
+        {
+            var earliest = activeTimers.OrderBy(t => t.Remaining).FirstOrDefault();
+            if (earliest != null && !earliest.IsExpired)
+            {
+                TimerOverlayBorder.Visibility = Visibility.Visible;
+                TimerOverlayText.Text = $"⏱ {earliest.Remaining:mm\\:ss}";
+                return;
+            }
+        }
+
+        TimerOverlayBorder.Visibility = Visibility.Collapsed;
     }
 
     private void OnActionResetTimerTick(object? sender, EventArgs e)
@@ -112,7 +252,8 @@ public sealed partial class OverlayWidget : Window
     }
 
     /// <summary>
-    /// Thread-safe state update that safely stops previous animations before starting new ones.
+    /// Thread-safe state update that transitions DropShadowEffect glow via WPF Storyboard
+    /// and safely stops previous animations before starting new ones.
     /// </summary>
     public void SetState(JarvisState state)
     {
@@ -130,10 +271,13 @@ public sealed partial class OverlayWidget : Window
 
         _currentState = state;
 
-        // 1. Explicitly stop and clear all previous animation clocks to prevent memory accumulation
+        // 1. Explicitly stop and clear previous animation clocks
         StopCurrentAnimations();
 
-        // 2. Apply new state animation
+        // 2. Animate DropShadowEffect glow morphing using WPF Storyboard
+        ApplyGlowStoryboard(state);
+
+        // 3. Apply state core animation
         switch (state)
         {
             case JarvisState.Idle:
@@ -159,9 +303,27 @@ public sealed partial class OverlayWidget : Window
         }
     }
 
+    private void ApplyGlowStoryboard(JarvisState state)
+    {
+        Color targetColor = GetStateGlowColor(state);
+        var glowAnim = new ColorAnimation
+        {
+            To = targetColor,
+            Duration = TimeSpan.FromMilliseconds(400),
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+        };
+
+        Storyboard.SetTarget(glowAnim, OuterGlow);
+        Storyboard.SetTargetProperty(glowAnim, new PropertyPath(DropShadowEffect.ColorProperty));
+
+        var storyboard = new Storyboard();
+        storyboard.Children.Add(glowAnim);
+        storyboard.Begin();
+    }
+
     private void ApplyIdleAnimation()
     {
-        // 1. Set base colors
+        // 1. Set base colors (Cyan)
         AuraColor1.Color = ColorAuraIdle1;
         AuraColor2.Color = ColorAuraIdle2;
         CoreStopHighlight.Color = ColorHighlightIdle;
@@ -201,7 +363,7 @@ public sealed partial class OverlayWidget : Window
 
     private void ApplyListeningAnimation()
     {
-        // 1. Bright Neon Cyan/Green
+        // 1. Bright Amber/Gold (#FFD600)
         AuraColor1.Color = ColorAuraListen1;
         AuraColor2.Color = ColorAuraListen2;
         CoreStopHighlight.Color = ColorHighlightListen;
@@ -213,7 +375,7 @@ public sealed partial class OverlayWidget : Window
         var scaleAnim = new DoubleAnimation
         {
             From = 1.0,
-            To = 1.24,
+            To = 1.22,
             Duration = TimeSpan.FromMilliseconds(450),
             AutoReverse = true,
             RepeatBehavior = RepeatBehavior.Forever,
@@ -233,23 +395,12 @@ public sealed partial class OverlayWidget : Window
         };
         AuraGlow.BeginAnimation(UIElement.OpacityProperty, auraAnim, HandoffBehavior.SnapshotAndReplace);
 
-        // 4. Expanding radar ring
-        var ringAnim = new DoubleAnimation
-        {
-            From = 0.9,
-            To = 1.35,
-            Duration = TimeSpan.FromMilliseconds(600),
-            AutoReverse = true,
-            RepeatBehavior = RepeatBehavior.Forever
-        };
-        RingScale.BeginAnimation(ScaleTransform.ScaleXProperty, ringAnim, HandoffBehavior.SnapshotAndReplace);
-        RingScale.BeginAnimation(ScaleTransform.ScaleYProperty, ringAnim, HandoffBehavior.SnapshotAndReplace);
         InnerRing.Opacity = 0.7;
     }
 
     private void ApplyThinkingAnimation()
     {
-        // 1. Shifting Blue-Violet gradient
+        // 1. Shifting Purple/Violet gradient (#D500F9)
         AuraColor1.Color = ColorAuraThink1;
         AuraColor2.Color = ColorAuraThink2;
         CoreStopHighlight.Color = ColorHighlightThink;
@@ -286,11 +437,11 @@ public sealed partial class OverlayWidget : Window
 
     private void ApplyActionAnimation()
     {
-        // 1. Short bright flash
-        AuraColor1.Color = ColorWhite;
+        // 1. Emerald flash (#00E676)
+        AuraColor1.Color = ColorAuraAction1;
         AuraColor2.Color = ColorAuraAction2;
-        CoreStopHighlight.Color = ColorWhite;
-        CoreStopPrimary.Color = ColorWhite;
+        CoreStopHighlight.Color = ColorHighlightAction;
+        CoreStopPrimary.Color = ColorPrimaryAction;
         CoreStopSecondary.Color = ColorSecondaryAction;
         CoreStopDark.Color = ColorDarkAction;
 
@@ -355,6 +506,19 @@ public sealed partial class OverlayWidget : Window
     {
         _actionResetTimer.Stop();
         _actionResetTimer.Tick -= OnActionResetTimerTick;
+        _subtitleFadeTimer.Stop();
+        _subtitleFadeTimer.Tick -= OnSubtitleFadeTimerTick;
+        _timerPollingTimer.Stop();
+        _timerPollingTimer.Tick -= OnTimerPollingTick;
+
+        if (_attachedListener != null)
+        {
+            _attachedListener.OnRmsLevelChanged -= UpdateAudioWaveform;
+            _attachedListener.OnPartialResult -= ShowSpeechSubtitle;
+            _attachedListener.OnFinalResult -= ShowSpeechSubtitle;
+            _attachedListener = null;
+        }
+
         StopCurrentAnimations();
         base.OnClosed(e);
     }
