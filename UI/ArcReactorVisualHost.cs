@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Windows;
 using System.Windows.Media;
 using Gem.Core;
+using Gem.Services;
 
 namespace Gem.UI;
 
@@ -119,6 +120,74 @@ public sealed class ReactorPalette
 }
 
 /// <summary>
+/// Color interpolation and HSL color space conversion utilities for Sci-Fi HUD visualizers.
+/// </summary>
+public static class ColorMath
+{
+    public static Color HslToRgb(double hue, double saturation, double lightness)
+    {
+        hue = ((hue % 360.0) + 360.0) % 360.0;
+        saturation = Math.Clamp(saturation, 0.0, 1.0);
+        lightness = Math.Clamp(lightness, 0.0, 1.0);
+
+        double c = (1.0 - Math.Abs(2.0 * lightness - 1.0)) * saturation;
+        double x = c * (1.0 - Math.Abs((hue / 60.0) % 2.0 - 1.0));
+        double m = lightness - c / 2.0;
+
+        double r = 0, g = 0, b = 0;
+        if (hue < 60)
+        {
+            r = c; g = x; b = 0;
+        }
+        else if (hue < 120)
+        {
+            r = x; g = c; b = 0;
+        }
+        else if (hue < 180)
+        {
+            r = 0; g = c; b = x;
+        }
+        else if (hue < 240)
+        {
+            r = 0; g = x; b = c;
+        }
+        else if (hue < 300)
+        {
+            r = x; g = 0; b = c;
+        }
+        else
+        {
+            r = c; g = 0; b = x;
+        }
+
+        byte red = (byte)Math.Clamp((int)Math.Round((r + m) * 255.0), 0, 255);
+        byte green = (byte)Math.Clamp((int)Math.Round((g + m) * 255.0), 0, 255);
+        byte blue = (byte)Math.Clamp((int)Math.Round((b + m) * 255.0), 0, 255);
+
+        return Color.FromRgb(red, green, blue);
+    }
+
+    public static Color Lerp(Color a, Color b, float t)
+    {
+        t = Math.Clamp(t, 0f, 1f);
+        return Color.FromRgb(
+            (byte)Math.Round(a.R + (b.R - a.R) * t),
+            (byte)Math.Round(a.G + (b.G - a.G) * t),
+            (byte)Math.Round(a.B + (b.B - a.B) * t));
+    }
+}
+
+/// <summary>
+/// Predefined Sci-Fi holographic color themes for the JARVIS Arc Reactor visualizer.
+/// </summary>
+public enum HudColorTheme
+{
+    ArcReactor,
+    CyberpunkFlow,
+    SolarFlare
+}
+
+/// <summary>
 /// Static registry of pre-computed, frozen palettes for all JARVIS states and smooth spectral gradient morphing.
 /// </summary>
 public static class ArcReactorPalettes
@@ -128,8 +197,10 @@ public static class ArcReactorPalettes
     public static readonly ReactorPalette Thinking = new(Color.FromRgb(0xD5, 0x00, 0xF9));
     public static readonly ReactorPalette Action = new(Color.FromRgb(0x00, 0xE6, 0x76));
 
-    // Pre-computed smooth spectral gradient palettes: Neon Cyan (#00E5FF) -> Deep Ultramarine (#0040FF)
+    // Pre-computed smooth spectral gradient palettes (64 frozen items each, 0 allocations at 60 FPS)
     public static readonly ReactorPalette[] SpectrumGradientPalettes = PrecomputeSpectrumPalettes();
+    public static readonly ReactorPalette[] CyberpunkGradientPalettes = PrecomputeCyberpunkPalettes();
+    public static readonly ReactorPalette[] SolarFlareGradientPalettes = PrecomputeSolarFlarePalettes();
 
     // Retained for backward-compatibility
     public static readonly ReactorPalette[] BeatPalettes = SpectrumGradientPalettes;
@@ -143,24 +214,66 @@ public static class ArcReactorPalettes
         for (int i = 0; i < 64; i++)
         {
             float t = i / 63.0f;
-            Color c = Lerp(baseCyan, deepUltramarine, t);
+            Color c = ColorMath.Lerp(baseCyan, deepUltramarine, t);
             palettes[i] = new ReactorPalette(c);
         }
         return palettes;
     }
 
-    private static Color Lerp(Color a, Color b, float t) =>
-        Color.FromRgb(
-            (byte)(a.R + (b.R - a.R) * t),
-            (byte)(a.G + (b.G - a.G) * t),
-            (byte)(a.B + (b.B - a.B) * t));
+    private static ReactorPalette[] PrecomputeCyberpunkPalettes()
+    {
+        // Cyan (#00E5FF) -> Violet (#8A2BE2) -> Magenta (#F500F5)
+        Color cyan = Color.FromRgb(0x00, 0xE5, 0xFF);
+        Color violet = Color.FromRgb(0x8A, 0x2B, 0xE2);
+        Color magenta = Color.FromRgb(0xF5, 0x00, 0xF5);
 
-    public static ReactorPalette GetPalette(JarvisState state, float saturation = 0f)
+        var palettes = new ReactorPalette[64];
+        for (int i = 0; i < 64; i++)
+        {
+            float t = i / 63.0f;
+            Color c = t < 0.5f
+                ? ColorMath.Lerp(cyan, violet, t * 2.0f)
+                : ColorMath.Lerp(violet, magenta, (t - 0.5f) * 2.0f);
+            palettes[i] = new ReactorPalette(c);
+        }
+        return palettes;
+    }
+
+    private static ReactorPalette[] PrecomputeSolarFlarePalettes()
+    {
+        // Amber/Gold (#FFC400) -> Orange (#FF6400) -> Neon Red (#FF141E)
+        Color amber = Color.FromRgb(255, 196, 0);
+        Color orange = Color.FromRgb(255, 100, 0);
+        Color neonRed = Color.FromRgb(255, 20, 30);
+
+        var palettes = new ReactorPalette[64];
+        for (int i = 0; i < 64; i++)
+        {
+            float t = i / 63.0f;
+            Color c = t < 0.5f
+                ? ColorMath.Lerp(amber, orange, t * 2.0f)
+                : ColorMath.Lerp(orange, neonRed, (t - 0.5f) * 2.0f);
+            palettes[i] = new ReactorPalette(c);
+        }
+        return palettes;
+    }
+
+    public static ReactorPalette GetThemePalette(HudColorTheme theme, float saturation)
+    {
+        int index = Math.Clamp((int)(saturation * 63.99f), 0, 63);
+        return theme switch
+        {
+            HudColorTheme.CyberpunkFlow => CyberpunkGradientPalettes[index],
+            HudColorTheme.SolarFlare => SolarFlareGradientPalettes[index],
+            _ => SpectrumGradientPalettes[index]
+        };
+    }
+
+    public static ReactorPalette GetPalette(JarvisState state, float saturation = 0f, HudColorTheme theme = HudColorTheme.ArcReactor)
     {
         if (state == JarvisState.Idle)
         {
-            int index = Math.Clamp((int)(saturation * 63.99f), 0, 63);
-            return SpectrumGradientPalettes[index];
+            return GetThemePalette(theme, saturation);
         }
 
         return state switch
@@ -267,6 +380,42 @@ public sealed class ArcReactorVisualHost : FrameworkElement
     public AudioSpectrumAnalyzer SpectrumAnalyzer => _analyzer;
     public JarvisState CurrentState => _currentState;
     public Color CurrentColor => _currentPalette.Color;
+
+    public double GainSetting
+    {
+        get => _analyzer.Gain;
+        set => _analyzer.Gain = value;
+    }
+
+    public double BassScaleSetting { get; set; } = 1.4;
+
+    public double FalloffSetting
+    {
+        get => _analyzer.Falloff;
+        set => _analyzer.Falloff = value;
+    }
+
+    public HudColorTheme CurrentTheme { get; set; } = HudColorTheme.ArcReactor;
+
+    public bool EnableColorShiftSetting { get; set; } = true;
+
+    public void ApplyHudSettings(HudSettingsConfig config)
+    {
+        if (config == null) return;
+        GainSetting = config.Gain;
+        BassScaleSetting = config.BassScale;
+        FalloffSetting = config.Falloff;
+        CurrentTheme = ParseTheme(config.ColorPalette);
+        EnableColorShiftSetting = config.EnableColorShift;
+    }
+
+    public static HudColorTheme ParseTheme(string? palette)
+    {
+        if (string.IsNullOrWhiteSpace(palette)) return HudColorTheme.ArcReactor;
+        if (palette.Contains("Cyberpunk", StringComparison.OrdinalIgnoreCase)) return HudColorTheme.CyberpunkFlow;
+        if (palette.Contains("Solar", StringComparison.OrdinalIgnoreCase)) return HudColorTheme.SolarFlare;
+        return HudColorTheme.ArcReactor;
+    }
 
     public ArcReactorVisualHost()
     {
@@ -535,14 +684,15 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         };
         _breathPhase += dt * breathSpeed;
 
-        // Zero-allocation frozen palette selection: smooth gradient Cyan -> Ultramarine
-        _currentPalette = ArcReactorPalettes.GetPalette(_currentState, (float)_smoothedSaturation);
+        // Zero-allocation frozen palette selection: smooth gradient depending on active theme & color shift
+        float effectiveSaturation = EnableColorShiftSetting ? (float)_smoothedSaturation : 0f;
+        _currentPalette = ArcReactorPalettes.GetPalette(_currentState, effectiveSaturation, CurrentTheme);
 
         // Retrieve frequency spectrum (zero allocations via Span)
         _analyzer.GetTargetSpectrum(_targetSpectrum.AsSpan(), dt);
 
-        // Peak Falloff / Decay: instant attack on hits, smooth gravitational decay (~0.88 per frame)
-        float falloffRate = MathF.Pow(0.88f, (float)(dt * 60.0));
+        // Peak Falloff / Decay: instant attack on hits, smooth gravitational decay per user FalloffSetting
+        float falloffRate = MathF.Pow((float)FalloffSetting, (float)(dt * 60.0));
         for (int i = 0; i < RayCount; i++)
         {
             float target = _targetSpectrum[i];
@@ -569,8 +719,9 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         double baseScale = Math.Min(width, height) / 220.0;
         if (baseScale <= 0.01) baseScale = 1.0;
 
-        // Central core radius smoothly modulated by sub-bass energy (20-150 Hz) via Lerp
-        double subBassScale = 1.0 + 0.12 * _smoothedSubBass;
+        // Central core radius smoothly modulated by sub-bass energy (20-150 Hz) via Lerp and BassScale setting
+        double bassScaleMultiplier = BassScaleSetting / 1.4;
+        double subBassScale = 1.0 + (0.12 * bassScaleMultiplier) * _smoothedSubBass;
         double finalScale = baseScale * subBassScale;
 
         var pal = _currentPalette;
@@ -602,17 +753,17 @@ public sealed class ArcReactorVisualHost : FrameworkElement
 
             // Sinusoidal idle breath smoothly modulated by sub-bass energy (no binary beat flashes)
             double auraBreath    = 1.0 + 0.05 * idleBreath;
-            double auraSubBass   = 1.0 + 0.22 * _smoothedSubBass;
+            double auraSubBass   = 1.0 + (0.22 * bassScaleMultiplier) * _smoothedSubBass;
             double auraRadius    = 48.0 * auraBreath * auraSubBass;
             dc.DrawEllipse(pal.AuraBrush, null, center, auraRadius, auraRadius);
 
             double plasmaBreath  = 1.0 + 0.07 * idleBreath;
-            double plasmaSubBass = 1.0 + 0.15 * _smoothedSubBass;
+            double plasmaSubBass = 1.0 + (0.15 * bassScaleMultiplier) * _smoothedSubBass;
             double plasmaRadius  = 30.0 * plasmaBreath * plasmaSubBass;
             dc.DrawEllipse(pal.PlasmaBrush, null, center, plasmaRadius, plasmaRadius);
 
             double nuclearBreath  = 1.0 + 0.04 * idleBreath;
-            double nuclearSubBass = 1.0 + 0.10 * _smoothedSubBass;
+            double nuclearSubBass = 1.0 + (0.10 * bassScaleMultiplier) * _smoothedSubBass;
             double nuclearRadius  = 13.0 * nuclearBreath * nuclearSubBass;
             dc.DrawEllipse(pal.NuclearBrush, null, center, nuclearRadius, nuclearRadius);
 

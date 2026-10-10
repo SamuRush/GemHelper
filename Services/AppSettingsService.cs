@@ -27,9 +27,20 @@ public sealed class VoskConfig
     public string SmallModelPath { get; set; } = "Models/VoskSmall/vosk-model-small-ru";
 }
 
+public sealed class HudSettingsConfig
+{
+    public double Gain { get; set; } = 3.5;
+    public double BassScale { get; set; } = 1.4;
+    public double Falloff { get; set; } = 0.88;
+    public string ColorPalette { get; set; } = "Arc Reactor (Циан / Электрик)";
+    public bool EnableColorShift { get; set; } = true;
+    public bool IgnoreTtsInLoopback { get; set; } = true;
+}
+
 public sealed class AppSettingsData
 {
     public AudioConfig Audio { get; set; } = new();
+    public HudSettingsConfig HudSettings { get; set; } = new();
     public string LlmBaseUrl { get; set; } = "http://127.0.0.1:1234/v1";
     public string LlmModel { get; set; } = "qwen2.5-1.5b-instruct";
     public string LlmApiKey { get; set; } = "lm";
@@ -168,6 +179,20 @@ public static class AppSettingsService
             if (node["Latitude"]?.GetValue<double>() is double lat) data.Latitude = lat;
             if (node["Longitude"]?.GetValue<double>() is double lon) data.Longitude = lon;
 
+            if (node["HudSettings"] is JsonObject hudNode || node["Hud"] is JsonObject)
+            {
+                var target = (node["HudSettings"] as JsonObject) ?? (node["Hud"] as JsonObject);
+                if (target != null)
+                {
+                    if (target["Gain"]?.GetValue<double>() is double g) data.HudSettings.Gain = g;
+                    if (target["BassScale"]?.GetValue<double>() is double b) data.HudSettings.BassScale = b;
+                    if (target["Falloff"]?.GetValue<double>() is double f) data.HudSettings.Falloff = f;
+                    if (target["ColorPalette"]?.GetValue<string>() is string cp) data.HudSettings.ColorPalette = cp;
+                    if (target["EnableColorShift"] is { } cs) data.HudSettings.EnableColorShift = cs.GetValue<bool>();
+                    if (target["IgnoreTtsInLoopback"] is { } it) data.HudSettings.IgnoreTtsInLoopback = it.GetValue<bool>();
+                }
+            }
+
             if (node["GameAliases"] is JsonObject aliases)
             {
                 foreach (var (k, v) in aliases)
@@ -232,6 +257,15 @@ public static class AppSettingsService
                     ["Sapi5Voice"] = data.Tts.Sapi5Voice,
                     ["ConnectionTimeoutMs"] = data.Tts.ConnectionTimeoutMs,
                     ["EnableEdgeTts"] = data.Tts.EnableEdgeTts
+                },
+                ["HudSettings"] = new JsonObject
+                {
+                    ["Gain"] = data.HudSettings.Gain,
+                    ["BassScale"] = data.HudSettings.BassScale,
+                    ["Falloff"] = data.HudSettings.Falloff,
+                    ["ColorPalette"] = data.HudSettings.ColorPalette,
+                    ["EnableColorShift"] = data.HudSettings.EnableColorShift,
+                    ["IgnoreTtsInLoopback"] = data.HudSettings.IgnoreTtsInLoopback
                 }
             };
 

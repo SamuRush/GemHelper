@@ -105,6 +105,12 @@ public sealed class AudioSpectrumAnalyzer
         get { lock (_lock) return _currentSpectralSaturation; }
     }
 
+    /// <summary>FFT logarithmic scale gain multiplier (default 3.5).</summary>
+    public double Gain { get; set; } = 3.5;
+
+    /// <summary>Gravitational decay falloff factor per frame (default 0.88).</summary>
+    public double Falloff { get; set; } = 0.88;
+
     /// <summary>Fires on the audio thread when a bass beat / kick-drum transient is confirmed.</summary>
     public event Action<float>? OnBeatDetected;
 
@@ -348,7 +354,14 @@ public sealed class AudioSpectrumAnalyzer
 
             // High-frequency compensation boost (equal loudness contour approximation)
             float freqBoost = 1.0f + 2.0f * ((float)r / halfRays);
-            float scaled = Math.Clamp(maxMag * 5.6f * freqBoost, 0f, 1f);
+
+            // Logarithmic dB scale: dB = 20 * log10(maxMag + 1e-6)
+            // Dynamic range -60 dB to 0 dB, scaled by user Gain (normalized to baseline 3.5)
+            float db = 20.0f * MathF.Log10(maxMag + 1e-6f);
+            const float minDb = -60.0f;
+            float normalizedDb = Math.Clamp((db - minDb) / (-minDb), 0f, 1f);
+            float gainFactor = (float)(Gain / 3.5);
+            float scaled = Math.Clamp(normalizedDb * gainFactor * freqBoost, 0f, 1f);
 
             // Bilateral symmetry: Left hemisphere mirrors right hemisphere (Iron Man HUD aesthetic)
             _rawSpectrum[r] = scaled;
@@ -405,8 +418,8 @@ public sealed class AudioSpectrumAnalyzer
 
             _decaySpectrum.AsSpan(0, RayCount).CopyTo(destination);
 
-            // Smooth gravitational decay falloff (~0.88 per frame at 60 FPS)
-            float decayFactor = MathF.Pow(0.88f, (float)(deltaTime * 60.0));
+            // Smooth gravitational decay falloff based on Falloff setting (~0.88 per frame at 60 FPS)
+            float decayFactor = MathF.Pow((float)Falloff, (float)(deltaTime * 60.0));
             for (int r = 0; r < RayCount; r++)
             {
                 _decaySpectrum[r] *= decayFactor;

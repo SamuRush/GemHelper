@@ -24,6 +24,8 @@ namespace Gem.UI;
 /// </summary>
 public sealed partial class OverlayWidget : Window
 {
+    public static OverlayWidget? Instance { get; private set; }
+
     private JarvisState _currentState = JarvisState.Idle;
     private readonly DispatcherTimer _actionResetTimer;
     private readonly DispatcherTimer _subtitleFadeTimer;
@@ -34,12 +36,22 @@ public sealed partial class OverlayWidget : Window
     private VoiceListener? _attachedListener;
     private IVoiceFeedbackService? _attachedFeedback;
     private NAudio.Wave.WasapiLoopbackCapture? _loopbackCapture;
+    private bool _isSpeaking = false;
 
     public JarvisState CurrentState => _currentState;
+    public bool IgnoreTtsInLoopback { get; set; } = true;
 
     public OverlayWidget()
     {
+        Instance = this;
         InitializeComponent();
+
+        try
+        {
+            var config = AppSettingsService.Load();
+            ApplyHudSettings(config.HudSettings);
+        }
+        catch { }
 
         _actionResetTimer = new DispatcherTimer
         {
@@ -142,11 +154,13 @@ public sealed partial class OverlayWidget : Window
 
     private void OnTtsSpeakingStarted()
     {
+        _isSpeaking = true;
         ArcReactor.SpectrumAnalyzer.SetTtsSpeaking(true);
     }
 
     private void OnTtsSpeakingFinished()
     {
+        _isSpeaking = false;
         ArcReactor.SpectrumAnalyzer.SetTtsSpeaking(false);
     }
 
@@ -358,11 +372,26 @@ public sealed partial class OverlayWidget : Window
     }
 
     /// <summary>
+    /// Applies HUD visualizer settings (Gain, BassScale, Falloff, Palette, ColorShift, IgnoreTTS) live at runtime.
+    /// </summary>
+    public void ApplyHudSettings(HudSettingsConfig config)
+    {
+        if (config == null) return;
+        IgnoreTtsInLoopback = config.IgnoreTtsInLoopback;
+        ArcReactor.ApplyHudSettings(config);
+    }
+
+    /// <summary>
     /// Processes incoming WASAPI Loopback system audio bytes strictly in-place with zero queue allocations.
     /// Bytes are read immediately into SpectrumAnalyzer and discarded without persisting in any List or unbounded Queue.
     /// </summary>
     private void OnLoopbackDataAvailable(object? sender, NAudio.Wave.WaveInEventArgs e)
     {
+        if (IgnoreTtsInLoopback && _isSpeaking)
+        {
+            return;
+        }
+
         if (_loopbackCapture != null && e.BytesRecorded > 0)
         {
             try
@@ -396,6 +425,8 @@ public sealed partial class OverlayWidget : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        if (Instance == this) Instance = null;
+
         StopLoopbackCapture();
         ArcReactor.StopRendering();
 

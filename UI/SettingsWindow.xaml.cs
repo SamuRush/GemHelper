@@ -127,7 +127,26 @@ public sealed partial class SettingsWindow : Window
                 _steamGames.Add(new SteamGameEntry(kv.Key, kv.Value));
             }
 
-            // 7. Start audio monitoring for VU meter
+            // 7. HUD visualizer settings
+            var hud = config.HudSettings ?? new HudSettingsConfig();
+            SldHudGain.Value = hud.Gain;
+            TxtHudGainVal.Text = $"{hud.Gain:F1}x";
+
+            SldHudBassScale.Value = hud.BassScale;
+            TxtHudBassVal.Text = $"{hud.BassScale:F2}x";
+
+            SldHudFalloff.Value = hud.Falloff;
+            TxtHudFalloffVal.Text = $"{hud.Falloff:F2}";
+
+            int paletteIdx = 0;
+            if (hud.ColorPalette.Contains("Cyberpunk", StringComparison.OrdinalIgnoreCase)) paletteIdx = 1;
+            else if (hud.ColorPalette.Contains("Solar", StringComparison.OrdinalIgnoreCase)) paletteIdx = 2;
+            CmbHudPalette.SelectedIndex = paletteIdx;
+
+            ChkColorShift.IsChecked = hud.EnableColorShift;
+            ChkIgnoreTts.IsChecked = hud.IgnoreTtsInLoopback;
+
+            // 8. Start audio monitoring for VU meter
             StartAudioMonitoring();
         }
         catch (Exception ex)
@@ -654,6 +673,8 @@ public sealed partial class SettingsWindow : Window
                 EnableEdgeTts = isEdge
             };
 
+            var hudConfig = GetCurrentHudConfigFromUi();
+
             var data = new AppSettingsData
             {
                 Audio = new AudioConfig
@@ -661,6 +682,7 @@ public sealed partial class SettingsWindow : Window
                     DeviceIndex = deviceIndex,
                     DeviceName = deviceName
                 },
+                HudSettings = hudConfig,
                 WakeWord = new WakeWordConfig
                 {
                     Name = currentConfig.WakeWord?.Name ?? "джарвис",
@@ -697,6 +719,7 @@ public sealed partial class SettingsWindow : Window
             AppHandler.SetSteamGames(data.GameAliases);
             WeatherService.Instance?.UpdateLocation(finalCityName, lat, lon);
             CompositeVoiceFeedbackService.Instance = new CompositeVoiceFeedbackService(VoiceListener.Instance, ttsSettings);
+            OverlayWidget.Instance?.ApplyHudSettings(hudConfig);
 
             TxtStatus.Foreground = Brushes.LightGreen;
             TxtStatus.Text = "✓ Настройки успешно сохранены и применены!";
@@ -710,6 +733,42 @@ public sealed partial class SettingsWindow : Window
             _statusTimer.Stop();
             _statusTimer.Start();
         }
+    }
+
+    private void HudSetting_ValueChanged(object sender, RoutedEventArgs e)
+    {
+        if (TxtHudGainVal != null && SldHudGain != null)
+            TxtHudGainVal.Text = $"{SldHudGain.Value:F1}x";
+        if (TxtHudBassVal != null && SldHudBassScale != null)
+            TxtHudBassVal.Text = $"{SldHudBassScale.Value:F2}x";
+        if (TxtHudFalloffVal != null && SldHudFalloff != null)
+            TxtHudFalloffVal.Text = $"{SldHudFalloff.Value:F2}";
+
+        if (_isInitializing) return;
+
+        ApplyCurrentHudSettingsToLiveWidget();
+    }
+
+    private void ApplyCurrentHudSettingsToLiveWidget()
+    {
+        var config = GetCurrentHudConfigFromUi();
+        OverlayWidget.Instance?.ApplyHudSettings(config);
+    }
+
+    private HudSettingsConfig GetCurrentHudConfigFromUi()
+    {
+        string palette = (CmbHudPalette?.SelectedItem as ComboBoxItem)?.Content?.ToString()
+            ?? "Arc Reactor (Циан / Электрик)";
+
+        return new HudSettingsConfig
+        {
+            Gain = SldHudGain?.Value ?? 3.5,
+            BassScale = SldHudBassScale?.Value ?? 1.4,
+            Falloff = SldHudFalloff?.Value ?? 0.88,
+            ColorPalette = palette,
+            EnableColorShift = ChkColorShift?.IsChecked == true,
+            IgnoreTtsInLoopback = ChkIgnoreTts?.IsChecked == true
+        };
     }
 
     private void OnStatusTimerTick(object? sender, EventArgs e)

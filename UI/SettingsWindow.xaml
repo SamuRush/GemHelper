@@ -607,6 +607,86 @@
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
+
+            <!-- TAB 5: ВИЗУАЛИЗАТОР (HUD) -->
+            <TabItem Header="🎛 Визуализатор (HUD)">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="4,8,12,8">
+                    <StackPanel>
+                        <TextBlock Text="🎛 Настройка эффектов и FFT-эквалайзера HUD" Style="{StaticResource GroupHeaderStyle}"/>
+                        <TextBlock Text="Управление чувствительностью спектрографа, динамикой ядра и цветовыми темами реактора."
+                                   FontSize="11" Foreground="#88889C" Margin="0,0,0,12"/>
+
+                        <!-- Spectrum Gain Slider -->
+                        <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Чувствительность спектра (Gain):" Style="{StaticResource FieldLabelStyle}" Grid.Column="0"/>
+                            <TextBlock x:Name="TxtHudGainVal" Text="3.5x" Foreground="#00E5FF" FontWeight="Bold" FontSize="13" Grid.Column="1"/>
+                        </Grid>
+                        <Slider x:Name="SldHudGain" Minimum="1.0" Maximum="8.0" Value="3.5"
+                                TickFrequency="0.5" IsSnapToTickEnabled="False"
+                                Margin="0,2,0,4" ValueChanged="HudSetting_ValueChanged"/>
+                        <TextBlock Text="Масштабирует логарифмические полосы FFT, чтобы лучи эквалайзера колебались выразительно и высоко даже на средней громкости музыки."
+                                   FontSize="11" Foreground="#88889C" TextWrapping="Wrap" Margin="0,0,0,12"/>
+
+                        <!-- Bass Scale Slider -->
+                        <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Реакция ядра на бас (Bass Scale):" Style="{StaticResource FieldLabelStyle}" Grid.Column="0"/>
+                            <TextBlock x:Name="TxtHudBassVal" Text="1.40x" Foreground="#00E5FF" FontWeight="Bold" FontSize="13" Grid.Column="1"/>
+                        </Grid>
+                        <Slider x:Name="SldHudBassScale" Minimum="1.0" Maximum="2.0" Value="1.4"
+                                TickFrequency="0.1" IsSnapToTickEnabled="False"
+                                Margin="0,2,0,4" ValueChanged="HudSetting_ValueChanged"/>
+                        <TextBlock Text="Настраивает силу расширения центрального шара и плазменного ядра от суб-баса (20-150 Гц)."
+                                   FontSize="11" Foreground="#88889C" TextWrapping="Wrap" Margin="0,0,0,12"/>
+
+                        <!-- Falloff Slider -->
+                        <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Плавность спада (Falloff):" Style="{StaticResource FieldLabelStyle}" Grid.Column="0"/>
+                            <TextBlock x:Name="TxtHudFalloffVal" Text="0.88" Foreground="#00E5FF" FontWeight="Bold" FontSize="13" Grid.Column="1"/>
+                        </Grid>
+                        <Slider x:Name="SldHudFalloff" Minimum="0.70" Maximum="0.98" Value="0.88"
+                                TickFrequency="0.02" IsSnapToTickEnabled="False"
+                                Margin="0,2,0,4" ValueChanged="HudSetting_ValueChanged"/>
+                        <TextBlock Text="Скорость гравитационного спада лучей эквалайзера за кадр (0.70 - 0.98)."
+                                   FontSize="11" Foreground="#88889C" TextWrapping="Wrap" Margin="0,0,0,14"/>
+
+                        <!-- Color Palette ComboBox -->
+                        <TextBlock Text="🎨 Цветовая палитра реактора" Style="{StaticResource GroupHeaderStyle}"/>
+                        <TextBlock Text="Выберите световую тему реактора:" Style="{StaticResource FieldLabelStyle}"/>
+                        <ComboBox x:Name="CmbHudPalette" Margin="0,0,0,14" SelectionChanged="HudSetting_ValueChanged">
+                            <ComboBoxItem Content="Arc Reactor (Циан / Электрик)"/>
+                            <ComboBoxItem Content="Cyberpunk Flow (Циан -> Фиолетовый -> Маджента)"/>
+                            <ComboBoxItem Content="Solar Flare (Янтарь -> Оранжевый -> Неоновый красный)"/>
+                        </ComboBox>
+
+                        <!-- Color Shift Checkbox -->
+                        <TextBlock Text="✨ Динамические модификаторы сияния" Style="{StaticResource GroupHeaderStyle}"/>
+                        <CheckBox x:Name="ChkColorShift" Content="Плавный перелив цвета в такт спектру (Color Shift)"
+                                  Foreground="#ECECF1" FontSize="13" Margin="0,4,0,4"
+                                  Checked="HudSetting_ValueChanged" Unchecked="HudSetting_ValueChanged"/>
+                        <TextBlock Text="Динамический сдвиг оттенка (Hue Shift) в зависимости от текущей спектральной энергии."
+                                   FontSize="11" Foreground="#88889C" Margin="24,0,0,14" TextWrapping="Wrap"/>
+
+                        <!-- Ignore TTS in Loopback Checkbox -->
+                        <CheckBox x:Name="ChkIgnoreTts" Content="Игнорировать собственный голос TTS Джарвиса при визуализации музыки"
+                                  Foreground="#ECECF1" FontSize="13" Margin="0,4,0,4"
+                                  Checked="HudSetting_ValueChanged" Unchecked="HudSetting_ValueChanged"/>
+                        <TextBlock Text="Отсекает loopback-захват звуковой карты, когда Джарвис говорит, предотвращая ложные вспышки от собственного голоса."
+                                   FontSize="11" Foreground="#88889C" Margin="24,0,0,14" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
         </TabControl>
 
         <!-- Bottom Action Bar -->
