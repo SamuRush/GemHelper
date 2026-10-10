@@ -1,10 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Runtime.InteropServices;
-using System.Text;
 using System.Threading.Tasks;
-using Gem.Win32;
+using Gem.Services.Audio;
 using NAudio.CoreAudioApi;
 
 namespace Gem.Services;
@@ -33,40 +30,6 @@ public class AppAudioService : IAppAudioService
         "foobar2000",
         "music"
     };
-
-    #region Win32 Toolhelp32 Declarations for Process Family Resolution
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern IntPtr CreateToolhelp32Snapshot(uint dwFlags, uint th32ProcessID);
-
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Auto)]
-    private static extern bool Process32First(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
-
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Auto)]
-    private static extern bool Process32Next(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool CloseHandle(IntPtr hObject);
-
-    private const uint TH32CS_SNAPPROCESS = 0x00000002;
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
-    private struct PROCESSENTRY32
-    {
-        public uint dwSize;
-        public uint cntUsage;
-        public uint th32ProcessID;
-        public IntPtr th32DefaultHeapID;
-        public uint th32ModuleID;
-        public uint cntThreads;
-        public uint th32ParentProcessID;
-        public int pcPriClassBase;
-        public uint dwFlags;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
-        public string szExeFile;
-    }
-
-    #endregion
 
     public static bool IsMusicProcessName(string processName)
     {
@@ -118,365 +81,27 @@ public class AppAudioService : IAppAudioService
     /// Collects all main and descendant child PIDs belonging to the target process family
     /// to reliably match multi-process Electron audio worker/renderer subprocesses.
     /// </summary>
-    public static HashSet<uint> GetTargetFamilyPids(string target)
-    {
-        var familyPids = new HashSet<uint>();
-        try
-        {
-            var parentToChildren = new Dictionary<uint, List<uint>>();
-            var rootPids = new List<uint>();
-
-            var snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-            if (snapshot != IntPtr.Zero && snapshot != (IntPtr)(-1))
-            {
-                try
-                {
-                    var entry = new PROCESSENTRY32();
-                    entry.dwSize = (uint)Marshal.SizeOf<PROCESSENTRY32>();
-
-                    if (Process32First(snapshot, ref entry))
-                    {
-                        do
-                        {
-                            uint pid = entry.th32ProcessID;
-                            uint parentPid = entry.th32ParentProcessID;
-                            string exe = entry.szExeFile;
-
-                            if (!parentToChildren.TryGetValue(parentPid, out var children))
-                            {
-                                children = new List<uint>();
-                                parentToChildren[parentPid] = children;
-                            }
-                            children.Add(pid);
-
-                            if (IsProcessNameMatchingTarget(exe, target))
-                            {
-                                rootPids.Add(pid);
-                            }
-                        } while (Process32Next(snapshot, ref entry));
-                    }
-                }
-                finally
-                {
-                    CloseHandle(snapshot);
-                }
-            }
-            else
-            {
-                // Fallback: standard Process enumeration
-                foreach (var proc in Process.GetProcesses())
-                {
-                    try
-                    {
-                        if (IsProcessNameMatchingTarget(proc.ProcessName, target))
-                        {
-                            rootPids.Add((uint)proc.Id);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        JarvisLog.Debug("AppAudioService", $"Error examining process for target '{target}': {ex.Message}");
-                    }
-                    finally
-                    {
-                        proc.Dispose();
-                    }
-                }
-            }
-
-            // Breadth-First Search to gather all child and grandchild PIDs
-            var queue = new Queue<uint>(rootPids);
-            while (queue.Count > 0)
-            {
-                uint currentPid = queue.Dequeue();
-                if (familyPids.Add(currentPid))
-                {
-                    if (parentToChildren.TryGetValue(currentPid, out var childList))
-                    {
-                        foreach (var childPid in childList)
-                        {
-                            queue.Enqueue(childPid);
-                        }
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[AppAudioService] Error collecting family PIDs: {ex.Message}");
-        }
-
-        return familyPids;
-    }
-
-    private static bool IsSessionIdentifierMatchingTarget(string sessionId, string target)
-    {
-        if (string.IsNullOrWhiteSpace(sessionId)) return false;
-        string normTarget = target.ToLowerInvariant().Trim();
-
-        if (normTarget == "player" || normTarget == "music" || normTarget == "yandexmusic")
-        {
-            return sessionId.Contains("YandexMusic", StringComparison.OrdinalIgnoreCase)
-                || sessionId.Contains("Y.Music", StringComparison.OrdinalIgnoreCase)
-                || sessionId.Contains("yandex-music", StringComparison.OrdinalIgnoreCase)
-                || sessionId.Contains("spotify", StringComparison.OrdinalIgnoreCase)
-                || sessionId.Contains("aimp", StringComparison.OrdinalIgnoreCase)
-                || sessionId.Contains("music", StringComparison.OrdinalIgnoreCase);
-        }
-
-        if (normTarget == "video")
-        {
-            return sessionId.Contains("chrome", StringComparison.OrdinalIgnoreCase)
-                || sessionId.Contains("msedge", StringComparison.OrdinalIgnoreCase)
-                || sessionId.Contains("firefox", StringComparison.OrdinalIgnoreCase)
-                || sessionId.Contains("browser", StringComparison.OrdinalIgnoreCase)
-                || sessionId.Contains("opera", StringComparison.OrdinalIgnoreCase)
-                || sessionId.Contains("brave", StringComparison.OrdinalIgnoreCase)
-                || sessionId.Contains("vlc", StringComparison.OrdinalIgnoreCase)
-                || sessionId.Contains("mpc", StringComparison.OrdinalIgnoreCase);
-        }
-
-        return sessionId.Contains(normTarget, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool IsDisplayNameMatchingTarget(string displayName, string target)
-    {
-        if (string.IsNullOrWhiteSpace(displayName)) return false;
-        string normTarget = target.ToLowerInvariant().Trim();
-
-        if (normTarget == "player" || normTarget == "music" || normTarget == "yandexmusic")
-        {
-            return displayName.Contains("Яндекс Музыка", StringComparison.OrdinalIgnoreCase)
-                || displayName.Contains("Yandex Music", StringComparison.OrdinalIgnoreCase)
-                || displayName.Contains("Music", StringComparison.OrdinalIgnoreCase);
-        }
-
-        return displayName.Contains(normTarget, StringComparison.OrdinalIgnoreCase);
-    }
+    public static HashSet<uint> GetTargetFamilyPids(string target) =>
+        ProcessFamilyTreeResolver.GetTargetFamilyPids(target, IsProcessNameMatchingTarget);
 
     /// <summary>
-    /// Enumerates all active WASAPI audio sessions via AudioSessionManager2.GetSessionEnumerator(),
-    /// checking process name, child PIDs, session identifiers, and display names.
-    /// Returns all matching sessions (critical for multi-process Electron apps where multiple sessions exist).
+    /// Enumerates all active WASAPI audio sessions matching target.
     /// </summary>
-    public static List<(AudioSessionControl Session, string ProcessName, uint Pid)> FindSessions(string target)
-    {
-        var matched = new List<(AudioSessionControl, string, uint)>();
-        try
-        {
-            using var enumerator = new MMDeviceEnumerator();
-            using var defaultDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
-            if (defaultDevice == null) return matched;
-
-            var sessionManager = defaultDevice.AudioSessionManager;
-            if (sessionManager == null) return matched;
-
-            // Refresh sessions to invoke AudioSessionManager2.GetSessionEnumerator()
-            sessionManager.RefreshSessions();
-
-            var sessions = sessionManager.Sessions;
-            if (sessions == null || sessions.Count == 0) return matched;
-
-            // Collect all parent and child PIDs belonging to the target process family
-            var targetFamilyPids = GetTargetFamilyPids(target);
-
-            for (int i = 0; i < sessions.Count; i++)
-            {
-                var session = sessions[i];
-                uint pid = session.GetProcessID;
-
-                string procName = "";
-                if (pid != 0)
-                {
-                    try
-                    {
-                        using var proc = Process.GetProcessById((int)pid);
-                        procName = proc.ProcessName;
-                    }
-                    catch
-                    {
-                        // Subprocess may be protected or transient
-                    }
-                }
-
-                string sessionId = session.GetSessionIdentifier ?? "";
-                string displayName = session.DisplayName ?? "";
-
-                bool isMatch = false;
-
-                // 1. Session PID matches any process or child PID in the family
-                if (pid != 0 && targetFamilyPids.Contains(pid))
-                {
-                    isMatch = true;
-                }
-
-                // 2. Process name matches target (e.g. "YandexMusic")
-                if (!isMatch && !string.IsNullOrEmpty(procName) && IsProcessNameMatchingTarget(procName, target))
-                {
-                    isMatch = true;
-                }
-
-                // 3. Session Identifier contains the target executable or pattern
-                if (!isMatch && IsSessionIdentifierMatchingTarget(sessionId, target))
-                {
-                    isMatch = true;
-                }
-
-                // 4. Session Display Name matches
-                if (!isMatch && IsDisplayNameMatchingTarget(displayName, target))
-                {
-                    isMatch = true;
-                }
-
-                if (isMatch)
-                {
-                    string label = !string.IsNullOrEmpty(procName) ? procName : (!string.IsNullOrEmpty(displayName) ? displayName : target);
-                    matched.Add((session, label, pid));
-                }
-                else
-                {
-                    try { session.Dispose(); }
-                    catch (Exception ex)
-                    {
-                        JarvisLog.Debug("AppAudioService", $"Error disposing non-matching session: {ex.Message}");
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[AppAudioService Warning] Error enumerating audio sessions: {ex.Message}");
-        }
-
-        return matched;
-    }
-
-    #region Electron Window & Hotkey Fallback (Ctrl+Up / Ctrl+Down)
+    public static List<(AudioSessionControl Session, string ProcessName, uint Pid)> FindSessions(string target) =>
+        AudioSessionFinder.FindSessions(target, GetTargetFamilyPids, IsProcessNameMatchingTarget);
 
     /// <summary>
     /// Searches for the Yandex Music window, checking the foreground window first,
     /// then enumerating visible top-level windows.
     /// </summary>
-    public static IntPtr FindYandexMusicWindow(out bool isForeground)
-    {
-        isForeground = false;
-        IntPtr fg = NativeMethods.GetForegroundWindow();
-        if (fg != IntPtr.Zero)
-        {
-            var sb = new StringBuilder(256);
-            NativeMethods.GetWindowText(fg, sb, sb.Capacity);
-            string fgTitle = sb.ToString();
-
-            NativeMethods.GetWindowThreadProcessId(fg, out uint pid);
-            string fgProcName = "";
-            try
-            {
-                using var p = Process.GetProcessById((int)pid);
-                fgProcName = p.ProcessName;
-            }
-            catch (Exception ex)
-            {
-                JarvisLog.Debug("AppAudioService", $"Error getting process for foreground window PID {pid}: {ex.Message}");
-            }
-
-            if (IsMusicProcessName(fgProcName) ||
-                fgTitle.Contains("Яндекс Музыка", StringComparison.OrdinalIgnoreCase) ||
-                fgTitle.Contains("Yandex Music", StringComparison.OrdinalIgnoreCase) ||
-                fgTitle.Contains("Y.Music", StringComparison.OrdinalIgnoreCase))
-            {
-                isForeground = true;
-                return fg;
-            }
-        }
-
-        IntPtr found = IntPtr.Zero;
-        try
-        {
-            NativeMethods.EnumWindows((hWnd, lParam) =>
-            {
-                if (!NativeMethods.IsWindowVisible(hWnd)) return true;
-
-                var sb = new StringBuilder(256);
-                NativeMethods.GetWindowText(hWnd, sb, sb.Capacity);
-                string title = sb.ToString();
-
-                NativeMethods.GetWindowThreadProcessId(hWnd, out uint pid);
-                string procName = "";
-                try
-                {
-                    using var p = Process.GetProcessById((int)pid);
-                    procName = p.ProcessName;
-                }
-                catch (Exception ex)
-                {
-                    JarvisLog.Debug("AppAudioService", $"Error getting process for window PID {pid}: {ex.Message}");
-                }
-
-                if (IsMusicProcessName(procName) ||
-                    title.Contains("Яндекс Музыка", StringComparison.OrdinalIgnoreCase) ||
-                    title.Contains("Yandex Music", StringComparison.OrdinalIgnoreCase) ||
-                    title.Contains("Y.Music", StringComparison.OrdinalIgnoreCase))
-                {
-                    found = hWnd;
-                    return false; // Stop enumeration
-                }
-
-                return true;
-            }, IntPtr.Zero);
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[AppAudioService] EnumWindows error: {ex.Message}");
-        }
-
-        return found;
-    }
+    public static IntPtr FindYandexMusicWindow(out bool isForeground) =>
+        ElectronWindowController.FindYandexMusicWindow(out isForeground, IsMusicProcessName);
 
     /// <summary>
-    /// Sends internal Electron player hotkeys (Ctrl+Up / Ctrl+Down) to the active or found Yandex Music window
-    /// to synchronously shift the internal UI volume slider.
+    /// Sends internal Electron player hotkeys (Ctrl+Up / Ctrl+Down) to the active or found Yandex Music window.
     /// </summary>
-    public static bool TrySendElectronMusicHotkeys(bool increase, int repeatCount = 1)
-    {
-        IntPtr musicWnd = FindYandexMusicWindow(out bool isForeground);
-        if (musicWnd == IntPtr.Zero)
-        {
-            return false;
-        }
-
-        ushort vk = increase ? NativeConstants.VK_UP : NativeConstants.VK_DOWN;
-
-        IntPtr previousForeground = IntPtr.Zero;
-        if (!isForeground)
-        {
-            previousForeground = NativeMethods.GetForegroundWindow();
-            NativeMethods.SetForegroundWindow(musicWnd);
-        }
-
-        try
-        {
-            int count = Math.Clamp(repeatCount, 1, 10);
-            for (int i = 0; i < count; i++)
-            {
-                MediaKeyService.SendCtrlKeyCombination(vk);
-            }
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[AppAudioService] Error sending Electron hotkeys: {ex.Message}");
-            return false;
-        }
-        finally
-        {
-            if (previousForeground != IntPtr.Zero && previousForeground != musicWnd)
-            {
-                NativeMethods.SetForegroundWindow(previousForeground);
-            }
-        }
-    }
-
-    #endregion
+    public static bool TrySendElectronMusicHotkeys(bool increase, int repeatCount = 1) =>
+        ElectronWindowController.TrySendElectronMusicHotkeys(increase, repeatCount, IsMusicProcessName);
 
     public Task<AppVolumeResult> SetAppVolumeAsync(string target, float scalar)
     {

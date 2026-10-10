@@ -40,7 +40,7 @@ public sealed partial class OverlayWidget : Window
     private LlmIntentService? _llmService;
     private VoiceListener? _attachedListener;
     private IVoiceFeedbackService? _attachedFeedback;
-    private NAudio.Wave.WasapiLoopbackCapture? _loopbackCapture;
+    private readonly WasapiLoopbackCaptureService _loopbackCaptureService = new();
     private bool _isSpeaking = false;
     private bool _isOverdriveGlowApplied = false;
 
@@ -168,18 +168,6 @@ public sealed partial class OverlayWidget : Window
         return IntPtr.Zero;
     }
 
-    /// <summary>
-    /// Gets the specified glow DropShadowEffect color per the roadmap:
-    /// Idle: #00E5FF, Listening: #FFD600, Thinking: #D500F9, Action: #00E676.
-    /// </summary>
-    public static Color GetStateGlowColor(JarvisState state) => state switch
-    {
-        JarvisState.Idle => Color.FromRgb(0x00, 0xE5, 0xFF),
-        JarvisState.Listening => Color.FromRgb(0xFF, 0xD6, 0x00),
-        JarvisState.Thinking => Color.FromRgb(0xD5, 0x00, 0xF9),
-        JarvisState.Action => Color.FromRgb(0x00, 0xE6, 0x76),
-        _ => Color.FromRgb(0x00, 0xE5, 0xFF)
-    };
 
     /// <summary>
     /// Binds voice listener events to the HUD for waveform reactivity, FFT crown, and subtitles.
@@ -249,73 +237,6 @@ public sealed partial class OverlayWidget : Window
         ArcReactor.SpectrumAnalyzer.UpdateRms(rms);
     }
 
-    /// <summary>
-    /// Displays speech recognition subtitles with auto-fadeout after 3 seconds of silence.
-    /// </summary>
-    public void ShowSpeechSubtitle(string text)
-    {
-        if (!Dispatcher.CheckAccess())
-        {
-            Dispatcher.BeginInvoke(() => ShowSpeechSubtitle(text));
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(text)) return;
-
-        SpeechSubtitleText.Text = text.Trim();
-        _subtitleFadeTimer.Stop();
-        SpeechSubtitlePopup.IsOpen = true;
-
-        var fadeIn = new DoubleAnimation
-        {
-            To = 1.0,
-            Duration = TimeSpan.FromMilliseconds(150),
-            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
-        };
-        SpeechSubtitleBorder.BeginAnimation(UIElement.OpacityProperty, fadeIn, HandoffBehavior.SnapshotAndReplace);
-
-        _subtitleFadeTimer.Start();
-    }
-
-    private void OnSubtitleFadeTimerTick(object? sender, EventArgs e)
-    {
-        _subtitleFadeTimer.Stop();
-        var fadeOut = new DoubleAnimation
-        {
-            To = 0.0,
-            Duration = TimeSpan.FromMilliseconds(400),
-            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn }
-        };
-        fadeOut.Completed += (s, args) => SpeechSubtitlePopup.IsOpen = false;
-        SpeechSubtitleBorder.BeginAnimation(UIElement.OpacityProperty, fadeOut, HandoffBehavior.SnapshotAndReplace);
-    }
-
-    private void OnTimerPollingTick(object? sender, EventArgs e)
-    {
-        var activeTimers = TimerService.Instance?.GetActiveTimers();
-        if (activeTimers != null && activeTimers.Count > 0)
-        {
-            var earliest = activeTimers.OrderBy(t => t.Remaining).FirstOrDefault();
-            if (earliest != null && !earliest.IsExpired)
-            {
-                TimerOverlayBorder.Visibility = Visibility.Visible;
-                TimerOverlayText.Text = $"⏱ {earliest.Remaining:mm\\:ss}";
-                UpdateAuxiliaryPositions();
-                return;
-            }
-        }
-
-        TimerOverlayBorder.Visibility = Visibility.Collapsed;
-    }
-
-    private void OnActionResetTimerTick(object? sender, EventArgs e)
-    {
-        _actionResetTimer.Stop();
-        if (_currentState == JarvisState.Action)
-        {
-            SetState(JarvisState.Idle);
-        }
-    }
 
     public void AttachServices(LlmIntentService llmService)
     {
@@ -352,84 +273,6 @@ public sealed partial class OverlayWidget : Window
         Canvas.SetTop(TimerOverlayBorder, center.Y + 48.0);
     }
 
-    /// <summary>
-    /// Thread-safe state update that transitions DropShadowEffect glow and reactor visuals.
-    /// </summary>
-    public void SetState(JarvisState state)
-    {
-        if (!Dispatcher.CheckAccess())
-        {
-            Dispatcher.BeginInvoke(() => SetState(state));
-            return;
-        }
-
-        if (_currentState == state && state != JarvisState.Action)
-        {
-            return;
-        }
-
-        _currentState = state;
-        ArcReactor.SetState(state);
-
-        // Animate DropShadowEffect glow
-        ApplyGlowAnimation(state);
-
-        if (state == JarvisState.Action)
-        {
-            _actionResetTimer.Stop();
-            _actionResetTimer.Start();
-        }
-        else
-        {
-            _actionResetTimer.Stop();
-        }
-    }
-
-    private void ApplyGlowAnimation(JarvisState state)
-    {
-        if (_isOverdriveGlowApplied) return;
-        Color targetColor = GetStateGlowColor(state);
-        var glowAnim = new ColorAnimation
-        {
-            To = targetColor,
-            Duration = TimeSpan.FromMilliseconds(400),
-            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
-        };
-
-        OuterGlow.BeginAnimation(DropShadowEffect.ColorProperty, glowAnim, HandoffBehavior.SnapshotAndReplace);
-    }
-
-    private void OnArcReactorOverdriveFrame(bool isActive, double progress, float beatIntensity)
-    {
-        if (isActive && progress > 0.1)
-        {
-            if (!_isOverdriveGlowApplied)
-            {
-                _isOverdriveGlowApplied = true;
-                AnimateOverdriveGlow(Color.FromRgb(0xFF, 0x00, 0x3C));
-            }
-        }
-        else if (!isActive && progress <= 0.05)
-        {
-            if (_isOverdriveGlowApplied)
-            {
-                _isOverdriveGlowApplied = false;
-                ApplyGlowAnimation(_currentState);
-            }
-        }
-    }
-
-    private void AnimateOverdriveGlow(Color targetColor)
-    {
-        var glowAnim = new ColorAnimation
-        {
-            To = targetColor,
-            Duration = TimeSpan.FromMilliseconds(250),
-            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
-        };
-
-        OuterGlow.BeginAnimation(DropShadowEffect.ColorProperty, glowAnim, HandoffBehavior.SnapshotAndReplace);
-    }
 
     private void Window_MouseDown(object sender, MouseButtonEventArgs e)
     {
@@ -519,17 +362,8 @@ public sealed partial class OverlayWidget : Window
 
     private void StartLoopbackCapture()
     {
-        try
-        {
-            _loopbackCapture = new NAudio.Wave.WasapiLoopbackCapture();
-            _loopbackCapture.DataAvailable += OnLoopbackDataAvailable;
-            _loopbackCapture.StartRecording();
-            JarvisLog.Info("HUD", "WASAPI Loopback capture started successfully for music and beat reactivity.");
-        }
-        catch (Exception ex)
-        {
-            JarvisLog.Warn("HUD", $"WASAPI Loopback capture not available on current audio device: {ex.Message}");
-        }
+        _loopbackCaptureService.OnDataAvailable += OnLoopbackDataAvailable;
+        _loopbackCaptureService.Start();
     }
 
     /// <summary>
@@ -546,18 +380,18 @@ public sealed partial class OverlayWidget : Window
     /// Processes incoming WASAPI Loopback system audio bytes strictly in-place with zero queue allocations.
     /// Bytes are read immediately into SpectrumAnalyzer and discarded without persisting in any List or unbounded Queue.
     /// </summary>
-    private void OnLoopbackDataAvailable(object? sender, NAudio.Wave.WaveInEventArgs e)
+    private void OnLoopbackDataAvailable(byte[] buffer, int bytesRecorded, NAudio.Wave.WaveFormat waveFormat)
     {
         if (IgnoreTtsInLoopback && _isSpeaking)
         {
             return;
         }
 
-        if (_loopbackCapture != null && e.BytesRecorded > 0)
+        if (bytesRecorded > 0)
         {
             try
             {
-                ArcReactor.SpectrumAnalyzer.ProcessLoopback(e.Buffer, e.BytesRecorded, _loopbackCapture.WaveFormat);
+                ArcReactor.SpectrumAnalyzer.ProcessLoopback(buffer, bytesRecorded, waveFormat);
             }
             catch (Exception ex)
             {
@@ -568,20 +402,8 @@ public sealed partial class OverlayWidget : Window
 
     private void StopLoopbackCapture()
     {
-        if (_loopbackCapture != null)
-        {
-            _loopbackCapture.DataAvailable -= OnLoopbackDataAvailable;
-            try
-            {
-                _loopbackCapture.StopRecording();
-            }
-            catch (Exception ex)
-            {
-                JarvisLog.Debug("HUD", $"StopRecording loopback: {ex.Message}");
-            }
-            _loopbackCapture.Dispose();
-            _loopbackCapture = null;
-        }
+        _loopbackCaptureService.OnDataAvailable -= OnLoopbackDataAvailable;
+        _loopbackCaptureService.Stop();
     }
 
     protected override void OnClosed(EventArgs e)

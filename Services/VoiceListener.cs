@@ -1,8 +1,5 @@
-using System.Diagnostics;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 using Gem.Core;
-using NAudio.Wave;
 using Vosk;
 
 namespace Gem.Voice;
@@ -16,35 +13,18 @@ public enum VoiceListenerState
 
 /// <summary>
 /// Background microphone listener based on Vosk speech recognition.
-/// Uses a thread-safe singleton Vosk Model instance (_sharedModel) to guarantee zero unmanaged model memory leaks.
-/// Audio buffers are streamed directly to the recognizer without storing in memory collections.
-/// Recognizers are strictly disposed before any recreation on state transitions.
+/// Uses a thread-safe singleton Vosk Model instance to guarantee zero unmanaged memory leaks.
+/// Orchestrates wake-word detection, command recognition, and state machine transitions.
 /// </summary>
-public sealed class VoiceListener : IDisposable
+public sealed partial class VoiceListener : IDisposable
 {
-    /// <summary>
-    /// Global reference to the active VoiceListener instance.
-    /// </summary>
     public static VoiceListener? Instance { get; internal set; }
 
-    /// <summary>
-    /// Plays the wake-word readiness signal asynchronously so it does not block the audio capture thread.
-    /// Completely muted: method body is empty (silent mode).
-    /// </summary>
     public static void PlayReadySoundAsync()
     {
-        // Полное отключение звукового сигнала готовности (бип) — работа в полностью бесшумном режиме.
+        // Silent mode: ready beep signal is disabled
     }
 
-    // =========================================================================
-    // 1. SINGLETON VOSK MODEL (Managed strictly ONCE via VoskModelManager)
-    // =========================================================================
-
-    /// <summary>
-    /// Thread-safe singleton accessor for Vosk.Model.
-    /// Ensures the acoustic model is loaded strictly ONCE across the entire application lifecycle.
-    /// Never re-creates or unloads the model on microphone resets or state transitions.
-    /// </summary>
     public static Model GetOrInitModel(string modelPath) => VoskModelManager.GetOrInitModel(modelPath);
 
     private readonly string _modelPath;
@@ -54,18 +34,16 @@ public sealed class VoiceListener : IDisposable
     private readonly TimeSpan _silenceTimeout;
     private readonly TimeSpan _commandWaitTimeout;
     private readonly IWakeWordDetector _wakeWordDetector;
-    private int _deviceNumber = 0;
+    private readonly SpeechPhraseBuffer _phraseBuffer = new();
+    private readonly MicrophoneAudioRecorder _audioRecorder;
 
-    public int DeviceNumber => _deviceNumber;
+    public int DeviceNumber => _audioRecorder.DeviceNumber;
     public double SilenceThresholdRms
     {
         get => _silenceThresholdRms;
         set => SetNoiseGateRms(value);
     }
 
-    /// <summary>
-    /// Dynamically sets the audio energy noise gate threshold (clamped to 50..600 RMS).
-    /// </summary>
     public void SetNoiseGateRms(double noiseGateRms)
     {
         _silenceThresholdRms = Math.Clamp(noiseGateRms, 50.0, 600.0);
@@ -75,44 +53,18 @@ public sealed class VoiceListener : IDisposable
         }
     }
 
-    /// <summary>
-    /// Dynamically changes the active recording audio device (NAudio WaveIn DeviceNumber).
-    /// </summary>
     public void SetAudioDevice(int deviceNumber)
     {
         lock (_lock)
         {
-            _deviceNumber = deviceNumber;
-            if (_state != VoiceListenerState.Stopped && _waveIn != null)
-            {
-                _waveIn.DataAvailable -= OnAudioDataAvailable;
-                try { _waveIn.StopRecording(); }
-                catch (Exception ex) { Console.WriteLine($"[VoiceListener Warning] StopRecording: {ex.Message}"); }
-                _waveIn.Dispose();
-
-                int bufferMs = 35;
-                int devCount = WaveInEvent.DeviceCount;
-                int devIndex = (_deviceNumber >= 0 && _deviceNumber < devCount) ? _deviceNumber : 0;
-                _waveIn = new WaveInEvent
-                {
-                    DeviceNumber = devIndex,
-                    WaveFormat = new WaveFormat(16000, 16, 1),
-                    BufferMilliseconds = bufferMs,
-                    NumberOfBuffers = 3
-                };
-                _waveIn.DataAvailable += OnAudioDataAvailable;
-                _waveIn.StartRecording();
-            }
+            _audioRecorder.SetDeviceNumber(deviceNumber);
         }
     }
 
     private VoskRecognizer? _recognizer;
-    private WaveInEvent? _waveIn;
-
     private VoiceListenerState _state = VoiceListenerState.Stopped;
     private readonly object _lock = new();
 
-    // Hybrid wake-word tracking & state
     private bool _wakeWordTriggered = false;
     private string _triggeredWakeWord = string.Empty;
 
@@ -120,100 +72,22 @@ public sealed class VoiceListener : IDisposable
     private DateTime _lastSpeechTime = DateTime.MinValue;
     private bool _voiceDetectedInCommand = false;
     private string _pendingCommandText = string.Empty;
-    private string _sessionAccumulatedText = string.Empty;
-    private string _currentPartialText = string.Empty;
     private string _lastLoggedPartial = string.Empty;
     private string _lastPartialText = string.Empty;
     private bool _disposed = false;
     private volatile bool _isPaused = false;
-    private volatile bool _isSpeaking = false;  // Строгая блокировка PCM-фреймов во время TTS (Acoustic Echo Suppression)
-    private volatile bool _isProcessing = false; // Строгая блокировка PCM-фреймов во время работы LLM, роутинга и до завершения TTS + cooldown 250 мс
+    private volatile bool _isSpeaking = false;
+    private volatile bool _isProcessing = false;
 
-    /// <summary>
-    /// Appends a speech chunk to the current session accumulated command text,
-    /// deduplicating overlaps and prefixes.
-    /// </summary>
-    public void AppendSessionText(string chunk)
-    {
-        if (string.IsNullOrWhiteSpace(chunk)) return;
-        chunk = chunk.Trim();
-        if (string.IsNullOrWhiteSpace(_sessionAccumulatedText))
-        {
-            _sessionAccumulatedText = chunk;
-        }
-        else
-        {
-            if (!_sessionAccumulatedText.EndsWith(chunk, StringComparison.OrdinalIgnoreCase))
-            {
-                if (chunk.StartsWith(_sessionAccumulatedText, StringComparison.OrdinalIgnoreCase))
-                {
-                    _sessionAccumulatedText = chunk;
-                }
-                else
-                {
-                    _sessionAccumulatedText = $"{_sessionAccumulatedText} {chunk}".Trim();
-                }
-            }
-        }
-    }
+    public void AppendSessionText(string chunk) => _phraseBuffer.AppendSessionText(chunk);
+    public string GetCurrentSessionText() => _phraseBuffer.GetCurrentSessionText();
 
-    /// <summary>
-    /// Gets the full candidate text for the current command session (accumulated chunks + current partial).
-    /// </summary>
-    public string GetCurrentSessionText()
-    {
-        if (string.IsNullOrWhiteSpace(_sessionAccumulatedText))
-        {
-            return _currentPartialText;
-        }
-        if (string.IsNullOrWhiteSpace(_currentPartialText))
-        {
-            return _sessionAccumulatedText;
-        }
-        if (_currentPartialText.StartsWith(_sessionAccumulatedText, StringComparison.OrdinalIgnoreCase))
-        {
-            return _currentPartialText;
-        }
-        if (_sessionAccumulatedText.EndsWith(_currentPartialText, StringComparison.OrdinalIgnoreCase))
-        {
-            return _sessionAccumulatedText;
-        }
-        return $"{_sessionAccumulatedText} {_currentPartialText}".Trim();
-    }
-
-    /// <summary>
-    /// Event fired when the wake-word is detected.
-    /// </summary>
     public event Action<string>? OnWakeWordDetected;
-
-    /// <summary>
-    /// Event fired when a voice command is captured following the wake-word.
-    /// </summary>
     public event Action<string>? OnCommandSpoken;
-
-    /// <summary>
-    /// Event fired when audio RMS energy level changes.
-    /// </summary>
     public event Action<float>? OnRmsLevelChanged;
-
-    /// <summary>
-    /// Event fired when raw audio PCM bytes are captured from the microphone for visualizer FFT analysis.
-    /// </summary>
     public event Action<byte[], int>? OnAudioBufferAvailable;
-
-    /// <summary>
-    /// Event fired when a real-time partial speech recognition hypothesis is produced.
-    /// </summary>
     public event Action<string>? OnPartialResult;
-
-    /// <summary>
-    /// Event fired when a final speech recognition result is produced.
-    /// </summary>
     public event Action<string>? OnFinalResult;
-
-    /// <summary>
-    /// Event fired on internal status updates or state changes.
-    /// </summary>
     public event Action<VoiceListenerState, string>? OnStatusChanged;
 
     public VoiceListenerState CurrentState
@@ -222,7 +96,6 @@ public sealed class VoiceListener : IDisposable
     }
 
     public bool IsRunning => CurrentState != VoiceListenerState.Stopped;
-
     public bool IsPaused => _isPaused;
     public bool IsProcessing => _isProcessing;
     public bool IsSpeaking => _isSpeaking;
@@ -230,10 +103,15 @@ public sealed class VoiceListener : IDisposable
     public IReadOnlyList<string> WakeWords => _wakeWords;
     public string WakeWordsRegexPattern => _wakeWordsRegexPattern;
 
-    /// <summary>
-    /// Temporarily pauses processing of microphone audio (e.g. while Jarvis is speaking).
-    /// Prevents acoustic feedback/looping where assistant recognizes its own voice.
-    /// </summary>
+    private void ClearPendingState(string initialText = "")
+    {
+        _pendingCommandText = initialText;
+        _phraseBuffer.Reset(initialText);
+        _lastLoggedPartial = initialText;
+        _lastPartialText = initialText;
+        _voiceDetectedInCommand = !string.IsNullOrWhiteSpace(initialText);
+    }
+
     public void PauseListening()
     {
         lock (_lock)
@@ -241,18 +119,10 @@ public sealed class VoiceListener : IDisposable
             _isPaused = true;
             _recognizer?.Reset();
             ResetWakeWordState();
-            _pendingCommandText = string.Empty;
-            _sessionAccumulatedText = string.Empty;
-            _currentPartialText = string.Empty;
-            _lastLoggedPartial = string.Empty;
-            _lastPartialText = string.Empty;
-            _voiceDetectedInCommand = false;
+            ClearPendingState();
         }
     }
 
-    /// <summary>
-    /// Resumes microphone audio processing.
-    /// </summary>
     public void ResumeListening()
     {
         lock (_lock)
@@ -260,23 +130,12 @@ public sealed class VoiceListener : IDisposable
             _isPaused = false;
             _recognizer?.Reset();
             ResetWakeWordState();
-            _pendingCommandText = string.Empty;
-            _sessionAccumulatedText = string.Empty;
-            _currentPartialText = string.Empty;
-            _lastLoggedPartial = string.Empty;
-            _lastPartialText = string.Empty;
-            _voiceDetectedInCommand = false;
+            ClearPendingState();
             _lastSpeechTime = DateTime.UtcNow;
             _stateEnteredTime = DateTime.UtcNow;
         }
     }
 
-    /// <summary>
-    /// Вызывается CompositeVoiceFeedbackService в начале TTS-воспроизведения.
-    /// Выставляет флаг <c>_isSpeaking</c> — все входящие PCM-фреймы с микрофона
-    /// полностью отбрасываются (Acoustic Echo Suppression Level 2).
-    /// Также немедленно сбрасывает буферы KWS/STT, чтобы исключить «хвосты» распознавания.
-    /// </summary>
     public void NotifySpeakingStarted()
     {
         _isSpeaking = true;
@@ -290,10 +149,6 @@ public sealed class VoiceListener : IDisposable
         Console.ResetColor();
     }
 
-    /// <summary>
-    /// Вызывается CompositeVoiceFeedbackService строго ПОСЛЕ cooldown (300 мс) — когда акустическое
-    /// эхо колонок гарантированно затухло. Только после этого снимается блокировка PCM-фреймов.
-    /// </summary>
     public void NotifySpeakingFinished()
     {
         _isSpeaking = false;
@@ -302,10 +157,6 @@ public sealed class VoiceListener : IDisposable
         Console.ResetColor();
     }
 
-    /// <summary>
-    /// Вызывается сразу при фиксации финальной команды (перед отправкой в LLM / Router).
-    /// Немедленно блокирует захват новых команд и вейк-ворда (_isProcessing = true).
-    /// </summary>
     public void NotifyProcessingStarted()
     {
         lock (_lock)
@@ -313,22 +164,13 @@ public sealed class VoiceListener : IDisposable
             _isProcessing = true;
             _recognizer?.Reset();
             ResetWakeWordState();
-            _pendingCommandText = string.Empty;
-            _sessionAccumulatedText = string.Empty;
-            _currentPartialText = string.Empty;
-            _lastLoggedPartial = string.Empty;
-            _lastPartialText = string.Empty;
-            _voiceDetectedInCommand = false;
+            ClearPendingState();
         }
         Console.ForegroundColor = ConsoleColor.DarkGray;
         Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [VoiceListener] Команда отправлена в обработку (LLM / Router) — микрофон заблокирован (_isProcessing = true).");
         Console.ResetColor();
     }
 
-    /// <summary>
-    /// Вызывается строго после завершения обработки и окончания воспроизведения TTS + cooldown (250 мс).
-    /// Снимает блокировку микрофона (_isProcessing = false).
-    /// </summary>
     public void NotifyProcessingFinished()
     {
         lock (_lock)
@@ -336,12 +178,7 @@ public sealed class VoiceListener : IDisposable
             _isProcessing = false;
             _recognizer?.Reset();
             ResetWakeWordState();
-            _pendingCommandText = string.Empty;
-            _sessionAccumulatedText = string.Empty;
-            _currentPartialText = string.Empty;
-            _lastLoggedPartial = string.Empty;
-            _lastPartialText = string.Empty;
-            _voiceDetectedInCommand = false;
+            ClearPendingState();
             _lastSpeechTime = DateTime.UtcNow;
             _stateEnteredTime = DateTime.UtcNow;
         }
@@ -350,10 +187,6 @@ public sealed class VoiceListener : IDisposable
         Console.ResetColor();
     }
 
-    /// <summary>
-    /// Enters confirmation listening mode directly, bypassing wake-word detection.
-    /// Used when assistant asks a confirmation question ("Did you mean X?") and waits for yes/no.
-    /// </summary>
     public void EnterConfirmationListening(string reason = "Awaiting confirmation reply (bypassing wake-word)...")
     {
         lock (_lock)
@@ -361,12 +194,7 @@ public sealed class VoiceListener : IDisposable
             _isPaused = false;
             _recognizer?.Reset();
             ResetWakeWordState();
-            _pendingCommandText = string.Empty;
-            _sessionAccumulatedText = string.Empty;
-            _currentPartialText = string.Empty;
-            _lastLoggedPartial = string.Empty;
-            _lastPartialText = string.Empty;
-            _voiceDetectedInCommand = false;
+            ClearPendingState();
             _lastSpeechTime = DateTime.UtcNow;
             _stateEnteredTime = DateTime.UtcNow;
             ChangeState(VoiceListenerState.ListeningForCommand, reason);
@@ -381,44 +209,8 @@ public sealed class VoiceListener : IDisposable
         "димон", "петрович", "алиса", "компьютер"
     ];
 
-    private static readonly HashSet<string> FastCommands = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "закройся",
-        "закрывайся",
-        "выключись",
-        "стоп",
-        "отмена",
-        "закрой монстер хантер",
-        "закрой игру"
-    };
+    public static bool IsFastCommand(string text) => SpeechPhraseBuffer.IsFastCommand(text);
 
-    /// <summary>
-    /// Checks whether the spoken text matches any of the fast command templates for instant execution.
-    /// </summary>
-    public static bool IsFastCommand(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return false;
-        string trimmed = text.Trim().ToLowerInvariant();
-        if (FastCommands.Contains(trimmed)) return true;
-        foreach (var cmd in FastCommands)
-        {
-            if (trimmed.Equals(cmd, StringComparison.OrdinalIgnoreCase) ||
-                trimmed.StartsWith(cmd + " ", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /// <summary>
-    /// Initializes a new instance of VoiceListener.
-    /// </summary>
-    /// <param name="modelPath">Path to Vosk speech recognition model directory.</param>
-    /// <param name="wakeWords">List of wake-words to trigger on (default: loaded from config / DefaultWakeWords).</param>
-    /// <param name="silenceTimeout">Duration of natural silence after speaking to finish the command.</param>
-    /// <param name="silenceThresholdRms">RMS audio energy threshold to consider audio as speech (default: 450.0).</param>
-    /// <param name="commandWaitTimeout">Max duration to wait for user to start speaking after wake-word.</param>
     public VoiceListener(
         string modelPath = VoskModelHelper.DefaultModelFolder,
         string[]? wakeWords = null,
@@ -431,7 +223,6 @@ public sealed class VoiceListener : IDisposable
         Instance = this;
         _modelPath = modelPath;
 
-        // 1. Загрузи список WakeWords из конфигурации (приведи все к нижнему регистру).
         var settings = AppSettingsService.Load();
         var configured = settings.WakeWords;
         var wordsSource = (wakeWords != null && wakeWords.Length > 0)
@@ -449,13 +240,14 @@ public sealed class VoiceListener : IDisposable
         _wakeWordsRegexPattern = @"^(" + string.Join("|", _wakeWords.Select(Regex.Escape)) + @")\s*";
         _silenceTimeout = silenceTimeout ?? TimeSpan.FromMilliseconds(700);
 
-        // Шумовой порог RMS Gate (диапазон 50–600, по умолчанию 350.0)
         double configuredRms = settings.WakeWord?.NoiseGateRms ?? 350.0;
         _silenceThresholdRms = (silenceThresholdRms != 450.0 && silenceThresholdRms != 350.0 && silenceThresholdRms > 0) ? silenceThresholdRms : configuredRms;
         _commandWaitTimeout = commandWaitTimeout ?? TimeSpan.FromSeconds(4.5);
-        _deviceNumber = deviceNumber ?? settings.Audio?.DeviceIndex ?? 0;
 
-        // 2. Инициализация адаптивного детектора вейк-ворда через WakeWordFactory
+        int devIndex = deviceNumber ?? settings.Audio?.DeviceIndex ?? 0;
+        _audioRecorder = new MicrophoneAudioRecorder(devIndex);
+        _audioRecorder.OnAudioDataAvailable += HandleAudioData;
+
         string primaryWord = settings.WakeWord?.Name ?? _wakeWords.FirstOrDefault() ?? "джарвис";
         float threshold = (float)(settings.WakeWord?.Threshold ?? 0.5);
         int minDurationMs = settings.WakeWord?.MinDurationMs ?? 150;
@@ -495,107 +287,48 @@ public sealed class VoiceListener : IDisposable
         }
     }
 
-    /// <summary>
-    /// Starts background audio capture and Vosk recognition.
-    /// </summary>
     public void Start()
     {
         lock (_lock)
         {
-            if (_state != VoiceListenerState.Stopped)
-            {
-                return;
-            }
+            if (_state != VoiceListenerState.Stopped) return;
 
-            // 1. Get or initialize the static singleton Model (never call new Model() repeatedly!)
             var model = GetOrInitModel(_modelPath);
-
-            // 2. Dispose previous recognizer instance if any exists before creating a new one
             DisposeRecognizer();
 
             _recognizer = new VoskRecognizer(model, 16000.0f);
             _recognizer.SetMaxAlternatives(0);
 
-            // 3. Setup NAudio wave in capture (direct streaming without memory accumulation)
-            int bufferMs = 35;
-            if (bufferMs > 50) bufferMs = 35;
-            int devCount = WaveInEvent.DeviceCount;
-            int devIndex = (_deviceNumber >= 0 && _deviceNumber < devCount) ? _deviceNumber : 0;
-            _waveIn = new WaveInEvent
-            {
-                DeviceNumber = devIndex,
-                WaveFormat = new WaveFormat(16000, 16, 1),
-                BufferMilliseconds = bufferMs,
-                NumberOfBuffers = 3
-            };
-
-            _waveIn.DataAvailable += OnAudioDataAvailable;
-
             ChangeState(VoiceListenerState.WaitingForWakeWord, "Started listening for wake-word...");
-            _waveIn.StartRecording();
+            _audioRecorder.StartRecording();
         }
     }
 
-    /// <summary>
-    /// Stops audio capture and frees audio resources.
-    /// </summary>
     public void Stop()
     {
         lock (_lock)
         {
-            if (_state == VoiceListenerState.Stopped)
-            {
-                return;
-            }
+            if (_state == VoiceListenerState.Stopped) return;
 
             ChangeState(VoiceListenerState.Stopped, "Microphone listener stopped.");
-
-            if (_waveIn != null)
-            {
-                _waveIn.DataAvailable -= OnAudioDataAvailable;
-                try { _waveIn.StopRecording(); }
-                catch (Exception ex) { Console.WriteLine($"[VoiceListener Warning] Ошибка StopRecording: {ex.Message}"); }
-                _waveIn.Dispose();
-                _waveIn = null;
-            }
-
-            // Dispose recognizer on stop
+            _audioRecorder.StopRecording();
             DisposeRecognizer();
-
-            // NOTE: _sharedModel is preserved as a permanent singleton and never disposed or recreated here!
         }
     }
 
-    /// <summary>
-    /// Releases the previous VoskRecognizer unmanaged resources immediately.
-    /// </summary>
     private void DisposeRecognizer()
     {
         if (_recognizer != null)
         {
-            try
-            {
-                _recognizer.Dispose();
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[VoiceListener Warning] Ошибка Dispose VoskRecognizer: {ex.Message}");
-            }
+            try { _recognizer.Dispose(); }
+            catch (Exception ex) { Console.WriteLine($"[VoiceListener Warning] Ошибка Dispose VoskRecognizer: {ex.Message}"); }
             _recognizer = null;
         }
     }
 
-    /// <summary>
-    /// Direct streaming of audio buffers from NAudio to Vosk.
-    /// Audio bytes are passed immediately to recognizer.AcceptWaveform without
-    /// storing or accumulating in any List or MemoryStream collections.
-    /// </summary>
-    private void OnAudioDataAvailable(object? sender, WaveInEventArgs e)
+    private void HandleAudioData(byte[] buffer, int bytesRecorded)
     {
-        if (e.BytesRecorded == 0 || _isPaused || _isSpeaking || _isProcessing)
-        {
-            return;
-        }
+        if (bytesRecorded == 0 || _isPaused || _isSpeaking || _isProcessing) return;
 
         lock (_lock)
         {
@@ -604,59 +337,14 @@ public sealed class VoiceListener : IDisposable
                 return;
             }
 
-            double rms = CalculateRms(e.Buffer, e.BytesRecorded);
-            OnRmsLevelChanged?.Invoke((float)rms);
-            OnAudioBufferAvailable?.Invoke(e.Buffer, e.BytesRecorded);
-            bool isAudioSpeech = rms >= _silenceThresholdRms;
-
-            if (_state == VoiceListenerState.WaitingForWakeWord)
-            {
-                // ШУМОВОЙ ПОРОГ (RMS Energy Gate):
-                // Если энергия кадра ниже порога фонового шума (RMS < 400–500, по умолчанию 450) —
-                // считать кадр тишиной и НЕ передавать его в распознаватель,
-                // предотвращая ложные галлюцинации модели на тихом сопении и шуме комнаты.
-                if (!isAudioSpeech)
-                {
-                    return;
-                }
-
-                ProcessWakeWordListening(e.Buffer, e.BytesRecorded, isAudioSpeech);
-            }
-            else if (_state == VoiceListenerState.ListeningForCommand)
-            {
-                ProcessCommandListening(e.Buffer, e.BytesRecorded, isAudioSpeech);
-            }
-        }
-    }
-
-    internal void SimulateAudioInput(byte[] buffer, int bytesRecorded)
-    {
-        if (bytesRecorded == 0 || _isPaused || _isSpeaking || _isProcessing)
-        {
-            return;
-        }
-
-        lock (_lock)
-        {
-            if (_state == VoiceListenerState.Stopped || _isPaused || _isSpeaking || _isProcessing)
-            {
-                return;
-            }
-
-            double rms = CalculateRms(buffer, bytesRecorded);
+            double rms = AudioEnergyGate.CalculateRms(buffer, bytesRecorded);
             OnRmsLevelChanged?.Invoke((float)rms);
             OnAudioBufferAvailable?.Invoke(buffer, bytesRecorded);
             bool isAudioSpeech = rms >= _silenceThresholdRms;
 
             if (_state == VoiceListenerState.WaitingForWakeWord)
             {
-                // ШУМОВОЙ ПОРОГ (RMS Energy Gate):
-                // Если энергия кадра ниже порога фонового шума — отбрасываем
-                if (!isAudioSpeech)
-                {
-                    return;
-                }
-
+                if (!isAudioSpeech) return;
                 ProcessWakeWordListening(buffer, bytesRecorded, isAudioSpeech);
             }
             else if (_state == VoiceListenerState.ListeningForCommand)
@@ -666,216 +354,9 @@ public sealed class VoiceListener : IDisposable
         }
     }
 
-    internal void ProcessAudioChunkForTesting(byte[] buffer, int bytesRecorded, bool isSpeech = true)
-    {
-        lock (_lock)
-        {
-            if (_isPaused || _isSpeaking || _isProcessing)
-            {
-                return;
-            }
 
-            if (_state == VoiceListenerState.WaitingForWakeWord)
-            {
-                ProcessWakeWordListening(buffer, bytesRecorded, isSpeech);
-            }
-            else if (_state == VoiceListenerState.ListeningForCommand)
-            {
-                ProcessCommandListening(buffer, bytesRecorded, isSpeech);
-            }
-        }
-    }
-
-    private bool TryFindWakeWord(string text, out string matchedWakeWord)
-    {
-        matchedWakeWord = string.Empty;
-        if (string.IsNullOrWhiteSpace(text)) return false;
-
-        var words = text.Split(new[] { ' ', '\t', ',', '.', '!', '?', ':', ';' }, StringSplitOptions.RemoveEmptyEntries);
-        foreach (var word in words)
-        {
-            string cleanWord = word.Trim();
-            foreach (var trigger in _wakeWords)
-            {
-                if (string.Equals(cleanWord, trigger, StringComparison.OrdinalIgnoreCase))
-                {
-                    matchedWakeWord = trigger;
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    private void ProcessWakeWordListening(byte[] buffer, int bytesRecorded, bool isAudioSpeech)
-    {
-        // 1. Приоритетный конвейер: передача входящих PCM-байт в адаптивный вейк-ворд детектор
-        // Если выбрано имя «джарвис», активен OpenWakeWordDetector (<80 мс ONNX).
-        // Если выбрано альтернативное имя («алиса», «петрович»), активен VoskGrammarWakeWordDetector.
-        if (_wakeWordDetector.ProcessFrame(buffer.AsSpan(0, bytesRecorded)))
-        {
-            // Детектор сработал: OnAdaptiveWakeWordDetected уже вызван по событию
-            // и мгновенно перевел FSM в ListeningForCommand (0 мс).
-            return;
-        }
-
-        // 2. Если активен OpenWakeWordDetector (или кастомный детектор для имени «джарвис»), аудиопоток НЕ передается в VoskRecognizer.
-        // Это гарантирует строгий приоритет OpenWakeWord и исключает паразитное срабатывание Vosk с задержками.
-        if (_wakeWordDetector is OpenWakeWordDetector || _wakeWordDetector is not VoskGrammarWakeWordDetector)
-        {
-            return;
-        }
-
-        if (_recognizer == null)
-        {
-            return;
-        }
-
-        // 3. Fallback сквозного распознавания Vosk для кастомных имен с МГНОВЕННЫМ переходом (0 мс)
-        var voskSw = Stopwatch.StartNew();
-        bool isFinal = _recognizer.AcceptWaveform(buffer, bytesRecorded);
-        string json = isFinal ? _recognizer.Result() : _recognizer.PartialResult();
-        string rawText = ExtractTextFromJson(json, isFinal).Trim();
-        voskSw.Stop();
-        long voskLatencyMs = voskSw.ElapsedMilliseconds;
-
-        if (isFinal)
-        {
-            ProcessWakeWordFinalResult(rawText, voskLatencyMs);
-            return;
-        }
-
-        // Processing PartialResult
-        if (string.IsNullOrWhiteSpace(rawText))
-        {
-            return;
-        }
-
-        string text = rawText.ToLowerInvariant().Trim();
-        if (!text.Equals(_lastPartialText, StringComparison.OrdinalIgnoreCase))
-        {
-            _lastPartialText = text;
-            Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [STT: Vosk Partial] \"{text}\"");
-            Console.ResetColor();
-        }
-
-        if (!_wakeWordTriggered)
-        {
-            if (TryFindWakeWord(text, out string matchedName))
-            {
-                _wakeWordTriggered = true;
-                _triggeredWakeWord = matchedName;
-
-                Console.ForegroundColor = ConsoleColor.Magenta;
-                Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [WakeWord: VoskGrammar (\"{_triggeredWakeWord}\")] [Detection Latency: {voskLatencyMs} ms]");
-                Console.ResetColor();
-
-                OnWakeWordDetected?.Invoke(_triggeredWakeWord);
-
-                // Мгновенный переход (0 мс) без ожидания тишины 550 мс!
-                string cleaned = Regex.Replace(text, _wakeWordsRegexPattern, "", RegexOptions.IgnoreCase).Trim();
-                if (cleaned.Equals(text, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(_triggeredWakeWord))
-                {
-                    int idx = cleaned.IndexOf(_triggeredWakeWord, StringComparison.OrdinalIgnoreCase);
-                    if (idx >= 0)
-                    {
-                        cleaned = cleaned[(idx + _triggeredWakeWord.Length)..].Trim();
-                    }
-                }
-
-                if (!string.IsNullOrWhiteSpace(cleaned) && IsFastCommand(cleaned))
-                {
-                    Console.ForegroundColor = ConsoleColor.Magenta;
-                    Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [VoiceListener] FAST PATH команда зафиксирована (мгновенно): '{cleaned}'");
-                    Console.ResetColor();
-
-                    _recognizer.Reset();
-                    ResetWakeWordState();
-
-                    NotifyProcessingStarted();
-                    OnCommandSpoken?.Invoke(cleaned);
-                    TransitionToWaitingForWakeWord("Ready. Listening for wake-word...");
-                    return;
-                }
-
-                TransitionToListeningForCommand(_triggeredWakeWord, string.IsNullOrWhiteSpace(cleaned) ? null : cleaned);
-            }
-        }
-    }
-
-    private void ProcessWakeWordFinalResult(string input, long latencyMs = 0)
-    {
-        if (string.IsNullOrWhiteSpace(input))
-        {
-            if (_wakeWordTriggered)
-            {
-                TransitionToListeningForCommand(_triggeredWakeWord, null);
-            }
-            return;
-        }
-
-        if (!_wakeWordTriggered)
-        {
-            if (TryFindWakeWord(input, out string matchedName))
-            {
-                _wakeWordTriggered = true;
-                _triggeredWakeWord = matchedName;
-
-                Console.ForegroundColor = ConsoleColor.Magenta;
-                Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [WakeWord: VoskGrammar (\"{_triggeredWakeWord}\")] [Detection Latency: {latencyMs} ms]");
-                Console.ResetColor();
-
-                OnWakeWordDetected?.Invoke(_triggeredWakeWord);
-            }
-            else
-            {
-                return;
-            }
-        }
-
-        // 4. Очистка имени при получении финального текста (isFinal / FinalResult):
-        // Динамически сформируй регулярное выражение из списка WakeWords:
-        var pattern = @"^(" + string.Join("|", _wakeWords.Select(Regex.Escape)) + @")\s*";
-        var cleaned = Regex.Replace(input, pattern, "", RegexOptions.IgnoreCase).Trim();
-
-        // Дополнительно: если имя было не в начале
-        if (cleaned.Equals(input, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(_triggeredWakeWord))
-        {
-            int idx = cleaned.IndexOf(_triggeredWakeWord, StringComparison.OrdinalIgnoreCase);
-            if (idx >= 0)
-            {
-                cleaned = cleaned[(idx + _triggeredWakeWord.Length)..].Trim();
-            }
-        }
-
-        if (!string.IsNullOrWhiteSpace(cleaned))
-        {
-            // Если cleaned не пустой (пользователь сказал "джемини установи игру" или "джарвис привет"):
-            // Отправляй в обработку очищенный текст команды.
-            // Возвращай состояние в ожидание вейк-ворда.
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [VoiceListener] Команда зафиксирована (очищена от имени): '{cleaned}'");
-            Console.ResetColor();
-
-            _recognizer?.Reset();
-            ResetWakeWordState();
-
-            NotifyProcessingStarted();
-            OnCommandSpoken?.Invoke(cleaned);
-            TransitionToWaitingForWakeWord("Ready. Listening for wake-word...");
-        }
-        else
-        {
-            // Если cleaned пустой (пользователь сказал только имя и молчит):
-            // Мгновенный переход в режим явного ожидания команды (0 мс)
-            Console.ForegroundColor = ConsoleColor.Magenta;
-            Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [VoiceListener] Произнесено только имя '{_triggeredWakeWord}'. Мгновенный переход (0 мс) в режим явного ожидания команды...");
-            Console.ResetColor();
-
-            TransitionToListeningForCommand(_triggeredWakeWord, null);
-        }
-    }
+    private bool TryFindWakeWord(string text, out string matchedWakeWord) =>
+        SpeechPhraseBuffer.TryFindWakeWord(text, _wakeWords, out matchedWakeWord);
 
     private void ResetWakeWordState()
     {
@@ -884,218 +365,30 @@ public sealed class VoiceListener : IDisposable
         _wakeWordDetector?.Reset();
     }
 
-    /// <summary>
-    /// Transitions into ListeningForCommand mode.
-    /// Uses recognizer.Reset() to guarantee zero native memory churn and fast transition.
-    /// </summary>
     private void TransitionToListeningForCommand(string wakeWord, string? pendingText)
     {
         _recognizer?.Reset();
         ResetWakeWordState();
-
-        _pendingCommandText = pendingText ?? string.Empty;
-        _sessionAccumulatedText = pendingText ?? string.Empty;
-        _currentPartialText = string.Empty;
-        _lastLoggedPartial = pendingText ?? string.Empty;
-        _lastPartialText = pendingText ?? string.Empty;
-        _voiceDetectedInCommand = !string.IsNullOrWhiteSpace(pendingText);
+        ClearPendingState(pendingText ?? string.Empty);
         _lastSpeechTime = DateTime.UtcNow;
 
         ChangeState(VoiceListenerState.ListeningForCommand, $"Wake-word '{wakeWord}' detected! Listening for command...");
     }
 
-    /// <summary>
-    /// Transitions back into WaitingForWakeWord mode.
-    /// Uses recognizer.Reset() without reallocating native resources.
-    /// </summary>
     public void TransitionToWaitingForWakeWord(string reason)
     {
         lock (_lock)
         {
             _recognizer?.Reset();
             ResetWakeWordState();
-
-            _pendingCommandText = string.Empty;
-            _sessionAccumulatedText = string.Empty;
-            _currentPartialText = string.Empty;
-            _lastLoggedPartial = string.Empty;
-            _lastPartialText = string.Empty;
-            _voiceDetectedInCommand = false;
+            ClearPendingState();
 
             ChangeState(VoiceListenerState.WaitingForWakeWord, reason);
             MemoryTrimmer.TrimMemory("VoiceListener Idle", minIntervalSeconds: 15.0);
         }
     }
 
-    private void ProcessCommandListening(byte[] buffer, int bytesRecorded, bool isAudioSpeech)
-    {
-        var now = DateTime.UtcNow;
-
-        // Небольшой защитный интервал (300 мс) после перехода, чтобы остаточный звук/бип от вейк-ворда не вызывал ложный таймаут тишины
-        bool isGracePeriod = (now - _stateEnteredTime) < TimeSpan.FromMilliseconds(300);
-
-        if (isAudioSpeech && !isGracePeriod)
-        {
-            _lastSpeechTime = now;
-            _voiceDetectedInCommand = true;
-        }
-
-        // Таймаут ожидания начала речи: 10 секунд при активном диалоге подтверждения, иначе стандартный таймаут
-        var waitTimeout = Gem.Services.JarvisOrchestrator.Instance.HasPendingAction
-            ? TimeSpan.FromSeconds(10.0)
-            : _commandWaitTimeout;
-
-        if (!_voiceDetectedInCommand && (now - _stateEnteredTime) > waitTimeout)
-        {
-            TransitionToWaitingForWakeWord("Command timeout: No speech detected.");
-            if (Gem.Services.JarvisOrchestrator.Instance.HasPendingAction)
-            {
-                Gem.Services.JarvisOrchestrator.Instance.ResetConfirmationState();
-            }
-            return;
-        }
-
-        bool isFinal = _recognizer!.AcceptWaveform(buffer, bytesRecorded);
-        string json = isFinal ? _recognizer.Result() : _recognizer.PartialResult();
-        string rawText = ExtractTextFromJson(json, isFinal).Trim();
-        string cleanedText = CleanUpCommandText(rawText);
-
-        if (!isFinal)
-        {
-            // Отслеживание изменений в VoskRecognizer.PartialResult()
-            if (!string.IsNullOrWhiteSpace(cleanedText))
-            {
-                _currentPartialText = cleanedText;
-                _voiceDetectedInCommand = true;
-                _lastSpeechTime = now;
-
-                string currentFull = GetCurrentSessionText();
-                _pendingCommandText = currentFull;
-
-                if (!currentFull.Equals(_lastLoggedPartial, StringComparison.OrdinalIgnoreCase))
-                {
-                    _lastLoggedPartial = currentFull;
-                    Console.ForegroundColor = ConsoleColor.DarkGray;
-                    Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [STT: Vosk Partial] \"{currentFull}\"");
-                    Console.ResetColor();
-                }
-                OnPartialResult?.Invoke(currentFull);
-            }
-        }
-        else
-        {
-            // isFinal == true: Vosk зафиксировал завершение промежуточного речевого блока (например, пауза между словами).
-            // ВАЖНО: Не вызываем recognizer.Reset() и не сбрасываем контекст сессии!
-            // Накапливаем распознанные слова в рамках сессии и продолжаем слушать до таймаута тишины.
-            if (!string.IsNullOrWhiteSpace(cleanedText))
-            {
-                AppendSessionText(cleanedText);
-                _currentPartialText = string.Empty;
-                _voiceDetectedInCommand = true;
-                _lastSpeechTime = now;
-                _pendingCommandText = _sessionAccumulatedText;
-
-                Console.ForegroundColor = ConsoleColor.DarkGray;
-                Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [STT: Vosk Chunk] '{cleanedText}' -> Накоплено: '{_sessionAccumulatedText}'");
-                Console.ResetColor();
-            }
-        }
-
-        // FAST PATH: Если во фразе уже распознана быстрая команда или короткий ответ на вопрос подтверждения
-        string candidateCheck = GetCurrentSessionText();
-        bool isFast = IsFastCommand(candidateCheck);
-        bool isConfirmation = Gem.Services.JarvisOrchestrator.Instance.HasPendingAction &&
-            (Gem.Services.JarvisOrchestrator.IsAffirmativeReply(candidateCheck) || Gem.Services.JarvisOrchestrator.IsNegativeReply(candidateCheck));
-
-        if (!string.IsNullOrWhiteSpace(candidateCheck) && (isFast || isConfirmation))
-        {
-            Console.ForegroundColor = ConsoleColor.Magenta;
-            Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [VoiceListener] FAST PATH {(isConfirmation ? "ответ подтверждения" : "команда")} зафиксирована (мгновенно): '{candidateCheck}'");
-            Console.ResetColor();
-
-            _recognizer.Reset();
-            _pendingCommandText = string.Empty;
-            _sessionAccumulatedText = string.Empty;
-            _currentPartialText = string.Empty;
-            _lastLoggedPartial = string.Empty;
-            _lastPartialText = string.Empty;
-            _voiceDetectedInCommand = false;
-
-            NotifyProcessingStarted();
-            OnCommandSpoken?.Invoke(candidateCheck);
-            TransitionToWaitingForWakeWord("Ready. Listening for wake-word...");
-            return;
-        }
-
-        // Сессия распознавания завершается строго по таймауту естественной тишины (не менее 650–750 мс)
-        TimeSpan silenceTimeout = Gem.Services.JarvisOrchestrator.Instance.HasPendingAction
-            ? TimeSpan.FromMilliseconds(500)
-            : _silenceTimeout;
-
-        bool silenceTimeoutElapsed = _voiceDetectedInCommand && (now - _lastSpeechTime) >= silenceTimeout;
-        bool maxDurationExceeded = _voiceDetectedInCommand && (now - _stateEnteredTime) >= TimeSpan.FromSeconds(15);
-
-        if (silenceTimeoutElapsed || maxDurationExceeded)
-        {
-            // Фиксируем остаточный текст через FinalResult()
-            string finalJson = _recognizer.FinalResult();
-            string finalText = ExtractTextFromJson(finalJson, isFinal: true).Trim();
-            string cleanedFinal = CleanUpCommandText(finalText);
-
-            if (!string.IsNullOrWhiteSpace(cleanedFinal))
-            {
-                AppendSessionText(cleanedFinal);
-            }
-            else if (!string.IsNullOrWhiteSpace(_currentPartialText))
-            {
-                AppendSessionText(_currentPartialText);
-            }
-
-            string finalCandidate = CleanUpCommandText(_sessionAccumulatedText);
-            if (string.IsNullOrWhiteSpace(finalCandidate))
-            {
-                finalCandidate = CleanUpCommandText(_pendingCommandText);
-            }
-
-            // Игнорируем случайные паразитные шумы и обрывки длиной менее 2 символов
-            if (!string.IsNullOrWhiteSpace(finalCandidate) && finalCandidate.Length >= 2)
-            {
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [STT: Vosk Final] '{finalCandidate}' (полная фраза, тишина {silenceTimeout.TotalMilliseconds:0} мс)");
-                Console.ResetColor();
-
-                NotifyProcessingStarted();
-                OnFinalResult?.Invoke(finalCandidate);
-                OnCommandSpoken?.Invoke(finalCandidate);
-            }
-            else if (!string.IsNullOrWhiteSpace(finalCandidate))
-            {
-                Console.ForegroundColor = ConsoleColor.DarkYellow;
-                Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [VoiceListener] Игнорирован паразитный шум / обрывок: '{finalCandidate}' (< 2 символов)");
-                Console.ResetColor();
-            }
-
-            TransitionToWaitingForWakeWord("Ready. Listening for wake-word...");
-        }
-    }
-
-    public string CleanUpCommandText(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return string.Empty;
-
-        var pattern = @"^(" + string.Join("|", _wakeWords.Select(Regex.Escape)) + @")\s*";
-        var cleaned = Regex.Replace(text.Trim(), pattern, "", RegexOptions.IgnoreCase).Trim();
-
-        foreach (var wakeWord in _wakeWords)
-        {
-            int idx = cleaned.IndexOf(wakeWord, StringComparison.OrdinalIgnoreCase);
-            if (idx >= 0)
-            {
-                cleaned = cleaned[(idx + wakeWord.Length)..].Trim();
-            }
-        }
-        return cleaned.Trim();
-    }
+    public string CleanUpCommandText(string text) => SpeechPhraseBuffer.CleanUpCommandText(text, _wakeWords);
 
     private void ChangeState(VoiceListenerState newState, string reason)
     {
@@ -1108,46 +401,15 @@ public sealed class VoiceListener : IDisposable
         OnStatusChanged?.Invoke(newState, reason);
     }
 
-    public static double CalculateRms(byte[] buffer, int bytesRecorded)
-    {
-        int sampleCount = bytesRecorded / 2;
-        if (sampleCount == 0) return 0;
-
-        double sumSquares = 0;
-        for (int i = 0; i < bytesRecorded; i += 2)
-        {
-            short sample = (short)(buffer[i] | (buffer[i + 1] << 8));
-            sumSquares += (double)sample * sample;
-        }
-
-        return Math.Sqrt(sumSquares / sampleCount);
-    }
-
-    private static string ExtractTextFromJson(string json, bool isFinal)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-            string propName = isFinal ? "text" : "partial";
-
-            if (root.TryGetProperty(propName, out var textProp))
-            {
-                return textProp.GetString() ?? string.Empty;
-            }
-        }
-        catch
-        {
-            // Ignore json parse hiccups on streaming chunks
-        }
-        return string.Empty;
-    }
+    public static double CalculateRms(byte[] buffer, int bytesRecorded) =>
+        AudioEnergyGate.CalculateRms(buffer, bytesRecorded);
 
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
         Stop();
+        _audioRecorder.Dispose();
         _wakeWordDetector?.Dispose();
         if (Instance == this)
         {

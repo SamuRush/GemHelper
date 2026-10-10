@@ -168,6 +168,64 @@ public static class NativeMethods
     public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
     public const uint MOUSEEVENTF_LEFTUP = 0x0004;
 
+    public const uint TH32CS_SNAPPROCESS = 0x00000002;
+    public const int SW_HIDE = 0;
+    public const int SW_SHOWNORMAL = 1;
+    public const int SW_SHOW = 5;
+    public const int SW_RESTORE = 9;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern IntPtr CreateToolhelp32Snapshot(uint dwFlags, uint th32ProcessID);
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    public static extern bool Process32First(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    public static extern bool Process32Next(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool CloseHandle(IntPtr hObject);
+
+    [DllImport("kernel32.dll")]
+    public static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, [MarshalAs(UnmanagedType.Bool)] bool fAttach);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowThreadProcessId")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr ProcessId);
+
+    public static void ForceForegroundWindow(IntPtr hWnd)
+    {
+        try
+        {
+            uint foreThread = GetWindowThreadProcessId(GetForegroundWindow(), IntPtr.Zero);
+            uint appThread = GetCurrentThreadId();
+
+            if (foreThread != 0 && foreThread != appThread)
+            {
+                AttachThreadInput(foreThread, appThread, true);
+            }
+
+            ShowWindow(hWnd, SW_RESTORE);
+            SetForegroundWindow(hWnd);
+
+            if (foreThread != 0 && foreThread != appThread)
+            {
+                AttachThreadInput(foreThread, appThread, false);
+            }
+        }
+        catch
+        {
+            SetForegroundWindow(hWnd);
+        }
+    }
+
     public static async Task ClickAtAsync(int x, int y)
     {
         SetCursorPos(x, y);

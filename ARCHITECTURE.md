@@ -626,3 +626,86 @@ JARVIS-win-x64/
   1. Сразу после тяжелой инициализации компонентов при старте приложения (`Program.cs`).
   2. Периодический фоновый таймер (каждые 60 секунд) в `OverlayWidget.xaml.cs`.
   3. При переходе `VoiceListener` в состояние `Idle` после завершения серии распознаваний речи.
+
+---
+
+## 9. Архитектурная декомпозиция и модульная структура (Модули $\le$ 300–450 строк)
+
+В рамках комплексного рефакторинга устранена монолитность и God Object паттерны во всех подсистемах проекта. Любой C#-файл в проекте строго укладывается в диапазон $\le$ 300–450 строк, соблюдает Single Responsibility Principle (SRP) и полностью сохраняет Zero-Allocation политику в высоконагруженных циклах (WASAPI loopback, физика частиц, 60 FPS Render Loop).
+
+### 9.1 Win32 & P/Invoke Layer (`Win32/`)
+- `Win32/NativeStructs.cs`: все нативные структуры Win32 API (`RECT`, `POINT`, `PROCESSENTRY32`, `DWM_BLURBEHIND`, `INPUT`, `KEYBDINPUT`, `HARDWAREINPUT`, `MOUSEINPUT`).
+- `Win32/NativeMethods.cs`: P/Invoke декларации Win32 функций (`User32`, `Kernel32`, `Dwmapi`, `Psapi`), манипуляции окнами (`EnumWindows`, `GetWindowRect`, `SetForegroundWindow`, `AttachThreadInput`, `SendInput`) и перечисление процессов (`CreateToolhelp32Snapshot`).
+
+### 9.2 Audio & DSP Pipeline (`UI/`, `Services/Audio/`)
+- `UI/WasapiLoopbackCaptureService.cs`: инкапсуляция `WasapiLoopbackCapture`, lifecycle захвата звуковой карты и передача PCM-буферов в спектроанализатор.
+- `UI/FftProcessor.cs`: алгоритм быстрого преобразования Фурье (Hanning windowing, бит-реверсивная перестановка, баттерфляй, билатеральная симметрия, перевод в dB).
+- `UI/ButterworthBassFilter.cs`: 2-полюсный IIR фильтр низких частот Баттерворта (cutoff $\approx$ 150 Гц) для выделения энергии саб-баса.
+- `UI/BeatDetector.cs`: скользящая история энергии баса, адаптивный порог, кулдаун и обнаружение битовых транзиентов.
+- `UI/AudioSpectrumAnalyzer.cs`: фасад спектрального анализа, объединяющий FFT, фильтр баса и детектор битов в единый Zero-Allocation пайплайн.
+- `Services/Audio/ProcessFamilyTreeResolver.cs`: BFS-обход дерева дочерних и родительских процессов через `Toolhelp32`.
+- `Services/Audio/ElectronWindowController.cs`: поиск окон Electron-плееров и отправка глобальных хоткеев `Ctrl+Up`/`Ctrl+Down`.
+- `Services/Audio/AudioSessionFinder.cs`: перечисление и селекция аудиосессий WASAPI (`ISimpleAudioVolume`, `IAudioSessionEnumerator`).
+- `Services/AppAudioService.cs`: координация громкости приложений и интеграция с CoreAudioApi.
+
+### 9.3 HUD Visualizer & Particle Physics (`UI/`)
+- `UI/ArcReactorVisualHost.cs`: хост WPF визуализатора, таймеры `CompositionTarget.Rendering`, реакция на аудио и овердрайв.
+- `UI/HudPalettes.cs`: структуры `ReactorPalette`, `HudColorTheme`, математика цвета `ColorMath` и предвычисленные замороженные палитры `ArcReactorPalettes`.
+- `UI/OverdriveStateMachine.cs`: стейт-машина накопления энергии, детекции перегрузки (Hyper-Drive) и 5-фазной сборки ядра (Hyper-Slam).
+- `UI/HudRenderer.cs`, `UI/HudRenderer.Geometries.cs`, `UI/HudRenderer.Overdrive.cs`: процедурный рендеринг HUD через замороженные `StreamGeometry` контексты без аллокаций в кадре.
+- `UI/ParticleModels.cs`: легковесные структуры `ShardParticle`, `GlitchCodeBlock` и энум `BoundaryEdge`.
+- `UI/ParticleEngine.cs`: основной жизненный цикл пулов частиц и цикл физики `UpdatePhysics`.
+- `UI/ParticleEngine.Physics.cs`: упругие отскоки от границ экрана, коллизии с окнами Windows через AABB и мини-эквалайзеры застрявших осколков.
+- `UI/ParticleEngine.Glitch.cs`: рендеринг блоков псевдо-дешифровки дампов памяти через `DrawingVisual` и `FormattedText`.
+
+### 9.4 Voice & STT Pipeline (`Voice/`, `Services/`)
+- `Voice/AudioEnergyGate.cs`: быстрое вычисление RMS энергии звукового кадра и гейт фонового шума.
+- `Voice/SpeechPhraseBuffer.cs`: дедупликация частичных/финальных гипотез Vosk, быстрые токены команд.
+- `Voice/MicrophoneAudioRecorder.cs`: низкоуровневая запись через NAudio `WaveInEvent` и смена аудиоустройств на лету.
+- `Services/VoiceListener.cs`: основная стейт-машина слушателя (`WaitingForWakeWord`, `ListeningForCommand`, `Sleeping`), события и публичные API.
+- `Services/VoiceListener.Processing.cs`: фоновые потоки циклов распознавания Vosk для вейк-ворда и команд.
+
+### 9.5 Fast Routing & LLM Dual-Path (`Services/Routing/`, `Services/`)
+- `Services/Routing/LlmSystemPrompt.cs`: системный промпт LLM со схемой JSON-ответа и каталогом команд.
+- `Services/Routing/RoutingHelper.cs`: утилиты удаления префиксов вейк-ворда и построения быстрых аргументов JSON.
+- `Services/Routing/MediaFastMatcher.cs`: мгновенное сопоставление медиакоманд (видео, музыка, треки, плеер).
+- `Services/Routing/TimerFastMatcher.cs`: парсинг длительностей таймеров с предварительно скомпилированными Regex (`RegexOptions.Compiled`).
+- `Services/Routing/VolumeFastMatcher.cs`: сопоставление команд громкости, мута и перевод числительных в числа.
+- `Services/Routing/SystemFastMatcher.cs`: системные хоткеи и погодные запросы.
+- `Services/Routing/AppFastMatcher.cs`: запуск, остановка, установка и удаление приложений.
+- `Services/LlmIntentService.cs`: фасад для вызовов LLM, управления историей диалога и десериализации ответов.
+- `Services/Routing/LlmIntentService.FastMatch.cs`: координация `TryFastMatch` и офлайн-фоллбэков.
+
+### 9.6 Steam Subsystem (`Services/Steam/`, `Services/`)
+- `Services/Steam/SteamModels.cs`: модели данных `SteamGameInfo` и `GameSearchResult`.
+- `Services/Steam/SteamPhonetics.cs`: нормализация названий, транслитерация кириллицы Vosk и расстояние Левенштейна.
+- `Services/Steam/SteamLibraryIndexer.cs`: парсинг реестра, `libraryfolders.vdf`, манифестов `appmanifest_*.acf` и бинарного `appinfo.vdf`.
+- `Services/Steam/SteamUiAutomation.cs`: поиск окон Steam, подтверждение EULA через UI Automation и пиксельное распознавание кнопок.
+- `Services/Steam/SteamInstaller.cs`: протоколы `steam://install/` и `steam://uninstall/`, подтверждение диалогов установки и кликеры.
+- `Services/Steam/SteamService.Search.cs`: фасад поиска игр по нечетким запросам и фоллбэк на LLM.
+- `Services/Steam/SteamService.Aliases.cs`: регистрация алиасов и сохранение в конфигурационный манифест.
+- `Services/SteamService.cs`: синглтон-фасад подсистемы Steam.
+
+### 9.7 Media Session Subsystem (`Services/Media/`, `Services/`)
+- `Services/Media/VideoWindowFinder.cs`: обнаружение и перечисление активных окон видеоплееров и вкладок браузера.
+- `Services/Media/YouTubeLauncher.cs`: запуск YouTube в браузере по умолчанию и автозапуск первого рекомендованного ролика.
+- `Services/Media/GsmtcMediaController.cs`: транспортный контроль через Windows Global System Media Transport Controls.
+- `Services/MediaSessionService.cs`: фасад координации воспроизведения музыки, видео и GSMTC.
+
+### 9.8 Application Catalog & Handlers (`Handlers/App/`, `Services/App/`, `Handlers/`)
+- `Handlers/App/DefaultBrowserResolver.cs`: чтение зарегистрированного браузера по умолчанию из реестра Windows.
+- `Handlers/App/KnownAppRegistry.cs`: каталог известных системных приложений (`AppDefinition`).
+- `Handlers/AppControlCommandHandler.cs`: обработчик команды `app` (start, install, uninstall).
+- `Handlers/AppControlCommandHandler.Lifecycle.cs`: грациозное и принудительное завершение процессов (`close`, `kill`) и проверка статуса (`status`).
+- `Services/App/AppCatalog.cs`: статические справочники процессов и целей завершения.
+- `Services/App/JarvisResponseDispatcher.cs`: диспетчеризация выполнения команд погоды, завершения работы, таймеров и медиа.
+- `Services/AppHandler.cs`: маршрутизация вызовов приложений и игр.
+
+### 9.9 Settings Window Subsystem (`UI/`)
+- `UI/SettingsModels.cs`: модели элементов устройств записи и записей игр.
+- `UI/SettingsWindow.xaml.cs`: инициализация, загрузка настроек и логика сохранения.
+- `UI/SettingsWindow.Audio.cs`: перечисление аудиоустройств, VU-метр и управление порогом шума.
+- `UI/SettingsWindow.VoiceAi.cs`: конфигурация LLM и каскадный выбор голосов Edge-TTS и SAPI5.
+- `UI/SettingsWindow.Steam.cs`: управление пользовательскими алиасами Steam.
+- `UI/SettingsWindow.Hud.cs`: визуальные настройки кастомных цветов и чувствительности HUD.
+
