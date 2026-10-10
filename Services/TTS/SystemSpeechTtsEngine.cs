@@ -25,10 +25,10 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
 
     public bool IsPitchShiftedToMale => _forceLowPitch;
 
-    public SystemSpeechTtsEngine()
+    public SystemSpeechTtsEngine(string? preferredVoice = null)
     {
         _synthesizer = new SpeechSynthesizer();
-        var (voiceName, needPitchShift) = ConfigureMaleRussianVoice(_synthesizer);
+        var (voiceName, needPitchShift) = ConfigureMaleRussianVoice(_synthesizer, preferredVoice);
         SelectedVoiceName = voiceName;
         _forceLowPitch = needPitchShift;
 
@@ -76,7 +76,7 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
     /// Priority order: Aidar (Silero SAPI5) > Baya (Silero SAPI5) > Microsoft Pavel > Any Russian male > Any male > pitch-shift fallback.
     /// Logs all discovered SAPI5 voices at startup.
     /// </summary>
-    public static (string? voiceName, bool needPitchShift) ConfigureMaleRussianVoice(SpeechSynthesizer synthesizer)
+    public static (string? voiceName, bool needPitchShift) ConfigureMaleRussianVoice(SpeechSynthesizer synthesizer, string? preferredVoice = null)
     {
         try
         {
@@ -93,6 +93,28 @@ public sealed class SystemSpeechTtsEngine : ITtsEngine, IDisposable
             if (installedVoices.Count == 0)
             {
                 return (null, true);
+            }
+
+            // If a specific preferred voice was requested, try it first
+            if (!string.IsNullOrWhiteSpace(preferredVoice))
+            {
+                var preferred = installedVoices.FirstOrDefault(v =>
+                    v.Enabled &&
+                    v.VoiceInfo.Name.Contains(preferredVoice, StringComparison.OrdinalIgnoreCase));
+
+                if (preferred != null)
+                {
+                    try
+                    {
+                        synthesizer.SelectVoice(preferred.VoiceInfo.Name);
+                        synthesizer.Rate = 1;
+                        synthesizer.Volume = 100;
+                        return (preferred.VoiceInfo.Name, false);
+                    }
+                    catch
+                    {
+                    }
+                }
             }
 
             // Strictly filter out female voices (Irina, Elena, etc.)

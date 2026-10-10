@@ -26,7 +26,7 @@ public sealed class VoskGrammarWakeWordDetector : IWakeWordDetector
     private readonly string _modelPath;
     private readonly string _customName;
     private readonly int _minDurationMs;
-    private readonly double _noiseGateRms;
+    private double _noiseGateRms;
     private readonly Regex _wakeWordRegex;  // Скомпилированный кэш: строгий токен-матчинг (?:\b|\s|^)джарвис(?:\b|\s|$)
     private VoskRecognizer? _recognizer;
     private bool _disposed = false;
@@ -38,7 +38,12 @@ public sealed class VoskGrammarWakeWordDetector : IWakeWordDetector
     public string WakeWord => _customName;
     public long LastDetectionLatencyMs { get; private set; }
     public int MinDurationMs => _minDurationMs;
-    public double NoiseGateRms => _noiseGateRms;
+    public double NoiseGateRms
+    {
+        get => _noiseGateRms;
+        set => _noiseGateRms = value > 0 ? value : DefaultNoiseGateRms;
+    }
+    public void SetNoiseGateRms(double rms) => NoiseGateRms = rms;
     public int AccumulatedPhraseDurationMs => _accumulatedPhraseDurationMs;
 
     public event Action? OnWakeWordDetected;

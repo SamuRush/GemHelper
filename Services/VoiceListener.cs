@@ -113,10 +113,61 @@ public sealed class VoiceListener : IDisposable
     private readonly string _modelPath;
     private readonly string[] _wakeWords;
     private readonly string _wakeWordsRegexPattern;
-    private readonly double _silenceThresholdRms;
+    private double _silenceThresholdRms;
     private readonly TimeSpan _silenceTimeout;
     private readonly TimeSpan _commandWaitTimeout;
     private readonly IWakeWordDetector _wakeWordDetector;
+    private int _deviceNumber = 0;
+
+    public int DeviceNumber => _deviceNumber;
+    public double SilenceThresholdRms
+    {
+        get => _silenceThresholdRms;
+        set => SetNoiseGateRms(value);
+    }
+
+    /// <summary>
+    /// Dynamically sets the audio energy noise gate threshold (clamped to 50..600 RMS).
+    /// </summary>
+    public void SetNoiseGateRms(double noiseGateRms)
+    {
+        _silenceThresholdRms = Math.Clamp(noiseGateRms, 50.0, 600.0);
+        if (_wakeWordDetector is VoskGrammarWakeWordDetector voskDetector)
+        {
+            voskDetector.NoiseGateRms = _silenceThresholdRms;
+        }
+    }
+
+    /// <summary>
+    /// Dynamically changes the active recording audio device (NAudio WaveIn DeviceNumber).
+    /// </summary>
+    public void SetAudioDevice(int deviceNumber)
+    {
+        lock (_lock)
+        {
+            _deviceNumber = deviceNumber;
+            if (_state != VoiceListenerState.Stopped && _waveIn != null)
+            {
+                _waveIn.DataAvailable -= OnAudioDataAvailable;
+                try { _waveIn.StopRecording(); }
+                catch (Exception ex) { Console.WriteLine($"[VoiceListener Warning] StopRecording: {ex.Message}"); }
+                _waveIn.Dispose();
+
+                int bufferMs = 35;
+                int devCount = WaveInEvent.DeviceCount;
+                int devIndex = (_deviceNumber >= 0 && _deviceNumber < devCount) ? _deviceNumber : 0;
+                _waveIn = new WaveInEvent
+                {
+                    DeviceNumber = devIndex,
+                    WaveFormat = new WaveFormat(16000, 16, 1),
+                    BufferMilliseconds = bufferMs,
+                    NumberOfBuffers = 3
+                };
+                _waveIn.DataAvailable += OnAudioDataAvailable;
+                _waveIn.StartRecording();
+            }
+        }
+    }
 
     private VoskRecognizer? _recognizer;
     private WaveInEvent? _waveIn;
@@ -430,9 +481,10 @@ public sealed class VoiceListener : IDisposable
         string modelPath = VoskModelHelper.DefaultModelFolder,
         string[]? wakeWords = null,
         TimeSpan? silenceTimeout = null,
-        double silenceThresholdRms = 450.0,
+        double silenceThresholdRms = 350.0,
         TimeSpan? commandWaitTimeout = null,
-        IWakeWordDetector? wakeWordDetector = null)
+        IWakeWordDetector? wakeWordDetector = null,
+        int? deviceNumber = null)
     {
         Instance = this;
         _modelPath = modelPath;
@@ -455,10 +507,11 @@ public sealed class VoiceListener : IDisposable
         _wakeWordsRegexPattern = @"^(" + string.Join("|", _wakeWords.Select(Regex.Escape)) + @")\s*";
         _silenceTimeout = silenceTimeout ?? TimeSpan.FromMilliseconds(700);
 
-        // Шумовой порог RMS Gate (диапазон 400-500, по умолчанию 450.0)
-        double configuredRms = settings.WakeWord?.NoiseGateRms ?? 450.0;
-        _silenceThresholdRms = (silenceThresholdRms != 450.0 && silenceThresholdRms > 0) ? silenceThresholdRms : configuredRms;
+        // Шумовой порог RMS Gate (диапазон 50–600, по умолчанию 350.0)
+        double configuredRms = settings.WakeWord?.NoiseGateRms ?? 350.0;
+        _silenceThresholdRms = (silenceThresholdRms != 450.0 && silenceThresholdRms != 350.0 && silenceThresholdRms > 0) ? silenceThresholdRms : configuredRms;
         _commandWaitTimeout = commandWaitTimeout ?? TimeSpan.FromSeconds(4.5);
+        _deviceNumber = deviceNumber ?? settings.Audio?.DeviceIndex ?? 0;
 
         // 2. Инициализация адаптивного детектора вейк-ворда через WakeWordFactory
         string primaryWord = settings.WakeWord?.Name ?? _wakeWords.FirstOrDefault() ?? "джарвис";
@@ -524,8 +577,11 @@ public sealed class VoiceListener : IDisposable
             // 3. Setup NAudio wave in capture (direct streaming without memory accumulation)
             int bufferMs = 35;
             if (bufferMs > 50) bufferMs = 35;
+            int devCount = WaveInEvent.DeviceCount;
+            int devIndex = (_deviceNumber >= 0 && _deviceNumber < devCount) ? _deviceNumber : 0;
             _waveIn = new WaveInEvent
             {
+                DeviceNumber = devIndex,
                 WaveFormat = new WaveFormat(16000, 16, 1),
                 BufferMilliseconds = bufferMs,
                 NumberOfBuffers = 3

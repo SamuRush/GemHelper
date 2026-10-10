@@ -63,6 +63,20 @@
 
 ---
 
+### [x] Task-05: Модернизация окна настроек (Sci-Fi TabControl), диагностика аудио и редизайн HUD
+- **Проблема**: Окно настроек монолитно, отсутствует диагностика микрофона (пользователь не видит входящий сигнал, высокий RMS-порог отсекает речь, невозможно сменить микрофон). HUD-виджет имеет лишний квадратный контейнер и шестеренку.
+- **Зона изменений**: `UI/SettingsWindow.xaml`, `UI/SettingsWindow.xaml.cs`, `UI/OverlayWidget.xaml`, `UI/OverlayWidget.xaml.cs`, `Services/VoiceListener.cs`, `Services/AppSettingsService.cs`, `appsettings.json`, `Gem.Tests/`.
+- **Технические требования**:
+  1. **Диагностика и выбор микрофона**: поддержка выбора устройства через `NAudio.Wave.WaveInEvent.GetCapabilities()`, сохранение `Audio: { DeviceIndex, DeviceName }`, переключение устройства на лету в `VoiceListener`.
+  2. **RMS Noise Gate**: слайдер порога (50–600, по умолчанию 350) с динамическим обновлением порога в рантайме.
+  3. **VU-метр реального времени**: потокобезопасный `ProgressBar` уровня звука в `SettingsWindow`.
+  4. **Выбор TTS и голоса**: выбор движка (Edge-TTS / SAPI5) и переключение голоса (Aidar, Microsoft Pavel, etc.).
+  5. **Архитектура TabControl**: стилизованные темные Sci-Fi вкладки: «🎙 Аудио», «🧠 Искусственный интеллект», «🎮 Игры и Steam», «⚙️ Система» (город погоды, автозапуск, горячие клавиши).
+  6. **Редизайн HUD**: окно строго круглой формы (`AllowsTransparency="True"`, `WindowStyle="None"`, `DropShadowEffect`), удаление квадратного контейнера и шестеренки, открытие настроек по правому клику мыши (`ContextMenu`).
+- **Definition of Done**: `dotnet build Gem.csproj` и `dotnet test Gem.sln` завершаются без ошибок, настройки корректно сохраняются в `appsettings.json`.
+
+---
+
 ## 📦 Завершенные фазы
 
 ### Фаза 1. Ядро и голосовой пайплайн [ЗАВЕРШЕНО]

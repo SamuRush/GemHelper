@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="JARVIS Overlay"
-        Width="240" Height="150"
+        Width="110" Height="110"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
@@ -16,68 +16,37 @@
         MouseDown="Window_MouseDown"
         MouseDoubleClick="Window_MouseDoubleClick">
 
-    <Window.Resources>
-        <!-- Gear button transparent style -->
-        <Style x:Key="GearButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Opacity" Value="0.25"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}" CornerRadius="4" Padding="2">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Opacity" Value="0.95"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
-    </Window.Resources>
-
-    <Grid>
-        <!-- Mini-panel for active timers (top-right corner) -->
-        <Border x:Name="TimerOverlayBorder"
-                HorizontalAlignment="Right" VerticalAlignment="Top"
-                Margin="0,0,10,0"
+    <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+        <!-- Strictly round HUD Sphere container (Square container & gear removed per redesign) -->
+        <Border x:Name="OuterSphere"
+                Width="80" Height="80"
+                CornerRadius="40"
                 Background="#D916161A"
-                BorderBrush="#66FFD600"
-                BorderThickness="1"
-                CornerRadius="8"
-                Padding="6,2"
-                Visibility="Collapsed">
-            <TextBlock x:Name="TimerOverlayText"
-                       Foreground="#FFD600"
-                       FontSize="11"
-                       FontFamily="Consolas, Segoe UI"
-                       FontWeight="SemiBold"
-                       Text="⏱ 00:00"/>
-        </Border>
-
-        <!-- Outer rounded dark square container for JARVIS Core -->
-        <Border x:Name="OuterBorder"
-                Width="70" Height="70"
-                CornerRadius="16"
-                Background="#D916161A"
-                BorderBrush="#33FFFFFF"
-                BorderThickness="1"
+                BorderBrush="#3300E5FF"
+                BorderThickness="1.5"
                 SnapsToDevicePixels="True"
                 HorizontalAlignment="Center"
-                VerticalAlignment="Top"
-                Margin="0,16,0,0">
-            
+                VerticalAlignment="Center"
+                Cursor="Hand"
+                ToolTip="Левый клик: перетащить | Двойной клик: настройки | Правый клик: меню">
+
             <Border.Effect>
-                <DropShadowEffect x:Name="OuterGlow" Color="#00E5FF" BlurRadius="20" ShadowDepth="0" Opacity="0.85"/>
+                <DropShadowEffect x:Name="OuterGlow" Color="#00E5FF" BlurRadius="22" ShadowDepth="0" Opacity="0.9"/>
             </Border.Effect>
+
+            <!-- ContextMenu directly on the sphere for settings and actions -->
+            <Border.ContextMenu>
+                <ContextMenu Background="#16161A" Foreground="#FFFFFF" BorderBrush="#00D2FF" BorderThickness="1">
+                    <MenuItem Header="⚙ Настройки JARVIS" Click="ContextMenuSettings_Click" Foreground="#00E5FF" FontWeight="SemiBold"/>
+                    <Separator Background="#33FFFFFF"/>
+                    <MenuItem Header="❌ Закрыть JARVIS" Click="ContextMenuClose_Click" Foreground="#FF5555"/>
+                </ContextMenu>
+            </Border.ContextMenu>
 
             <Grid>
                 <!-- Outer soft aura glow -->
                 <Ellipse x:Name="AuraGlow"
-                         Width="48" Height="48"
+                         Width="56" Height="56"
                          HorizontalAlignment="Center" VerticalAlignment="Center"
                          Opacity="0.5">
                     <Ellipse.Fill>
@@ -94,7 +63,7 @@
 
                 <!-- Center digital core / sphere -->
                 <Ellipse x:Name="CoreSphere"
-                         Width="36" Height="36"
+                         Width="42" Height="42"
                          HorizontalAlignment="Center" VerticalAlignment="Center"
                          RenderTransformOrigin="0.5,0.5">
                     <Ellipse.RenderTransform>
@@ -112,7 +81,7 @@
 
                 <!-- Inner pulsating / RMS waveform ring -->
                 <Ellipse x:Name="InnerRing"
-                         Width="26" Height="26"
+                         Width="30" Height="30"
                          HorizontalAlignment="Center" VerticalAlignment="Center"
                          Stroke="#80FFFFFF" StrokeThickness="1.5"
                          Opacity="0.4"
@@ -122,42 +91,53 @@
                     </Ellipse.RenderTransform>
                 </Ellipse>
 
-                <!-- Translucent gear button (top-right corner of core) -->
-                <Button x:Name="SettingsButton"
-                        Width="20" Height="20"
-                        HorizontalAlignment="Right" VerticalAlignment="Top"
-                        Margin="0,3,3,0"
-                        Cursor="Hand"
-                        ToolTip="Настройки JARVIS"
-                        Style="{StaticResource GearButtonStyle}"
-                        Click="SettingsButton_Click">
-                    <Path Fill="#B0C4DE"
-                          Data="M19.14,12.94c0.04,-0.3 0.06,-0.61 0.06,-0.94c0,-0.32 -0.02,-0.64 -0.07,-0.94l2.03,-1.58c0.18,-0.14 0.23,-0.41 0.12,-0.61l-1.92,-3.32c-0.12,-0.22 -0.37,-0.29 -0.59,-0.22l-2.39,0.96c-0.5,-0.38 -1.03,-0.7 -1.62,-0.94L14.4,2.81c-0.04,-0.24 -0.24,-0.41 -0.48,-0.41h-3.84c-0.24,0 -0.43,0.17 -0.47,0.41L9.25,5.35C8.66,5.59 8.12,5.92 7.63,6.29L5.24,5.33c-0.22,-0.08 -0.47,0 -0.59,0.22L2.74,8.87c-0.12,0.21 -0.08,0.47 0.12,0.61l2.03,1.58c-0.05,0.3 -0.09,0.63 -0.09,0.94s0.02,0.64 0.07,0.94l-2.03,1.58c-0.18,0.14 -0.23,0.41 -0.12,0.61l1.92,3.32c0.12,0.22 0.37,0.29 0.59,0.22l2.39,-0.96c0.5,0.38 1.03,0.7 1.62,0.94l0.36,2.54c0.05,0.24 0.24,0.41 0.48,0.41h3.84c0.24,0 0.44,-0.17 0.47,-0.41l0.36,-2.54c0.59,-0.24 1.13,-0.56 1.62,-0.94l2.39,0.96c0.22,0.08 0.47,0 0.59,-0.22l1.92,-3.32c0.12,-0.22 0.07,-0.47 -0.12,-0.61L19.14,12.94z M12,15.6c-1.98,0 -3.6,-1.62 -3.6,-3.6s1.62,-3.6 3.6,-3.6s3.6,1.62 3.6,3.6S13.98,15.6 12,15.6z"
-                          Stretch="Uniform"
-                          Width="12" Height="12"/>
-                </Button>
+                <!-- Mini-panel for active timers (bottom badge of core) -->
+                <Border x:Name="TimerOverlayBorder"
+                        HorizontalAlignment="Center" VerticalAlignment="Bottom"
+                        Margin="0,0,0,4"
+                        Background="#D916161A"
+                        BorderBrush="#66FFD600"
+                        BorderThickness="1"
+                        CornerRadius="6"
+                        Padding="4,1"
+                        Visibility="Collapsed">
+                    <TextBlock x:Name="TimerOverlayText"
+                               Foreground="#FFD600"
+                               FontSize="9"
+                               FontFamily="Consolas, Segoe UI"
+                               FontWeight="SemiBold"
+                               Text="⏱ 00:00"/>
+                </Border>
             </Grid>
         </Border>
 
-        <!-- Speech Subtitle Banner at bottom of HUD -->
-        <Border x:Name="SpeechSubtitleBorder"
-                HorizontalAlignment="Center" VerticalAlignment="Bottom"
-                Margin="4,0,4,6"
-                Background="#D916161A"
-                BorderBrush="#3300E5FF"
-                BorderThickness="1"
-                CornerRadius="8"
-                Padding="8,4"
-                MaxWidth="230"
-                Opacity="0">
-            <TextBlock x:Name="SpeechSubtitleText"
-                       Foreground="#E0FFFFFF"
-                       FontSize="11"
-                       FontFamily="Segoe UI"
-                       TextWrapping="Wrap"
-                       TextAlignment="Center"
-                       MaxWidth="218"
-                       Text=""/>
-        </Border>
+        <!-- Speech Subtitle Popup anchored below the sphere -->
+        <Popup x:Name="SpeechSubtitlePopup"
+               PlacementTarget="{Binding ElementName=OuterSphere}"
+               Placement="Bottom"
+               AllowsTransparency="True"
+               IsOpen="False"
+               VerticalOffset="6">
+            <Border x:Name="SpeechSubtitleBorder"
+                    Background="#D916161A"
+                    BorderBrush="#3300E5FF"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="8,4"
+                    MaxWidth="240"
+                    Opacity="0">
+                <Border.Effect>
+                    <DropShadowEffect Color="#000000" BlurRadius="12" ShadowDepth="2" Opacity="0.8"/>
+                </Border.Effect>
+                <TextBlock x:Name="SpeechSubtitleText"
+                           Foreground="#E0FFFFFF"
+                           FontSize="11"
+                           FontFamily="Segoe UI"
+                           TextWrapping="Wrap"
+                           TextAlignment="Center"
+                           MaxWidth="224"
+                           Text=""/>
+            </Border>
+        </Popup>
     </Grid>
 </Window>

@@ -2,10 +2,10 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Настройки JARVIS"
-        Width="580" Height="720"
-        MinWidth="520" MinHeight="620"
+        Width="640" Height="700"
+        MinWidth="580" MinHeight="600"
         WindowStartupLocation="CenterScreen"
-        Background="#16161A"
+        Background="#121217"
         Foreground="#ECECF1"
         FontFamily="Segoe UI, Arial"
         TextOptions.TextFormattingMode="Display"
@@ -16,9 +16,9 @@
     <Window.Resources>
         <!-- Windows 11 Dark Input Box Style -->
         <Style TargetType="TextBox">
-            <Setter Property="Background" Value="#22222B"/>
+            <Setter Property="Background" Value="#1C1C24"/>
             <Setter Property="Foreground" Value="#FFFFFF"/>
-            <Setter Property="BorderBrush" Value="#383846"/>
+            <Setter Property="BorderBrush" Value="#323242"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Padding" Value="8,6"/>
             <Setter Property="FontSize" Value="13"/>
@@ -40,9 +40,9 @@
 
         <!-- Standard Button Style -->
         <Style TargetType="Button">
-            <Setter Property="Background" Value="#2A2A36"/>
+            <Setter Property="Background" Value="#22222E"/>
             <Setter Property="Foreground" Value="#FFFFFF"/>
-            <Setter Property="BorderBrush" Value="#444455"/>
+            <Setter Property="BorderBrush" Value="#38384C"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Padding" Value="14,7"/>
             <Setter Property="FontSize" Value="13"/>
@@ -60,11 +60,11 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="btnBorder" Property="Background" Value="#383848"/>
+                                <Setter TargetName="btnBorder" Property="Background" Value="#2E2E3E"/>
                                 <Setter TargetName="btnBorder" Property="BorderBrush" Value="#00D2FF"/>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="btnBorder" Property="Background" Value="#1E1E28"/>
+                                <Setter TargetName="btnBorder" Property="Background" Value="#181822"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -107,38 +107,82 @@
             <Setter Property="FontSize" Value="14"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Foreground" Value="#00D2FF"/>
-            <Setter Property="Margin" Value="0,18,0,8"/>
+            <Setter Property="Margin" Value="0,14,0,8"/>
         </Style>
 
         <Style x:Key="FieldLabelStyle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="12"/>
-            <Setter Property="Foreground" Value="#A0A0B2"/>
+            <Setter Property="Foreground" Value="#9E9EB2"/>
             <Setter Property="Margin" Value="0,6,0,4"/>
+        </Style>
+
+        <!-- Sci-Fi Dark TabControl and TabItem Styles -->
+        <Style TargetType="TabControl">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+        </Style>
+
+        <Style TargetType="TabItem">
+            <Setter Property="Background" Value="#181822"/>
+            <Setter Property="Foreground" Value="#A0A0B8"/>
+            <Setter Property="BorderBrush" Value="#2A2A38"/>
+            <Setter Property="BorderThickness" Value="1,1,1,0"/>
+            <Setter Property="Padding" Value="14,9"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="tabBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6,6,0,0"
+                                Margin="0,0,4,0"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              ContentSource="Header"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="tabBorder" Property="Background" Value="#222232"/>
+                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="tabBorder" Property="Background" Value="#1E2838"/>
+                                <Setter TargetName="tabBorder" Property="BorderBrush" Value="#00D2FF"/>
+                                <Setter Property="Foreground" Value="#00E5FF"/>
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Modern ComboBox Style -->
+        <Style TargetType="ComboBox">
+            <Setter Property="Background" Value="#1C1C24"/>
+            <Setter Property="Foreground" Value="#FFFFFF"/>
+            <Setter Property="BorderBrush" Value="#323242"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
 
         <!-- GridView Column Header Style -->
         <Style TargetType="GridViewColumnHeader">
-            <Setter Property="Background" Value="#2A2A38"/>
+            <Setter Property="Background" Value="#242432"/>
             <Setter Property="Foreground" Value="#00D2FF"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="Padding" Value="10,6"/>
-            <Setter Property="BorderBrush" Value="#383848"/>
+            <Setter Property="BorderBrush" Value="#323242"/>
             <Setter Property="BorderThickness" Value="0,0,1,1"/>
             <Setter Property="HorizontalContentAlignment" Value="Left"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="GridViewColumnHeader">
-                        <Border Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                              VerticalAlignment="Center"/>
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
         </Style>
 
         <!-- ListView Item Style -->
@@ -148,7 +192,7 @@
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="Padding" Value="6,4"/>
             <Setter Property="BorderThickness" Value="0,0,0,1"/>
-            <Setter Property="BorderBrush" Value="#252532"/>
+            <Setter Property="BorderBrush" Value="#22222E"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ListViewItem">
@@ -161,7 +205,7 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="itemBorder" Property="Background" Value="#2C2C3E"/>
+                                <Setter TargetName="itemBorder" Property="Background" Value="#262636"/>
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
                                 <Setter TargetName="itemBorder" Property="Background" Value="#1E385B"/>
@@ -174,118 +218,231 @@
         </Style>
     </Window.Resources>
 
-    <Grid Margin="20">
+    <Grid Margin="18">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- Window Header -->
-        <StackPanel Grid.Row="0" Margin="0,0,0,10">
+        <!-- Header -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,12">
             <TextBlock Text="⚙ Настройки JARVIS" FontSize="20" FontWeight="Bold" Foreground="#FFFFFF"/>
-            <TextBlock Text="Конфигурация LM Studio, Vosk распознавания и каталога игр Steam"
-                       FontSize="12" Foreground="#888899" Margin="0,3,0,0"/>
-            <Separator Background="#2A2A38" Margin="0,10,0,0"/>
+            <TextBlock Text="Конфигурация аудио и микрофона, нейросети, игр Steam и системных служб"
+                       FontSize="12" Foreground="#88889C" Margin="0,3,0,0"/>
+            <Separator Background="#262634" Margin="0,10,0,0"/>
         </StackPanel>
 
-        <!-- Scrollable content area -->
-        <ScrollViewer Grid.Row="1"
-                      x:Name="MainScrollViewer"
-                      VerticalScrollBarVisibility="Auto"
-                      HorizontalScrollBarVisibility="Disabled"
-                      CanContentScroll="False"
-                      Padding="0,0,12,0">
-            <StackPanel>
-                <!-- Section 1: LM Studio / LLM -->
-                <TextBlock Text="🤖 Модель и Сервер (LM Studio / OpenAI API)" Style="{StaticResource GroupHeaderStyle}"/>
+        <!-- Sci-Fi Tabs Architecture -->
+        <TabControl Grid.Row="1" x:Name="MainTabs">
+            <!-- TAB 1: АУДИО И МИКРОФОН -->
+            <TabItem Header="🎙 Аудио и Микрофон">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="4,8,12,8">
+                    <StackPanel>
+                        <!-- Recording Device Section -->
+                        <TextBlock Text="📡 Устройство записи звука (Микрофон)" Style="{StaticResource GroupHeaderStyle}"/>
+                        <TextBlock Text="Выберите рабочий микрофон (NAudio WaveInEvent):" Style="{StaticResource FieldLabelStyle}"/>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <ComboBox x:Name="CmbAudioDevices" Grid.Column="0" SelectionChanged="CmbAudioDevices_SelectionChanged"/>
+                            <Button x:Name="BtnRefreshDevices" Content="🔄 Обновить" Grid.Column="1" Margin="8,0,0,0" Click="BtnRefreshDevices_Click"/>
+                        </Grid>
 
-                <TextBlock Text="API Base URL (например, http://127.0.0.1:1234/v1):" Style="{StaticResource FieldLabelStyle}"/>
-                <TextBox x:Name="TxtLlmUrl" Text="http://127.0.0.1:1234/v1" Margin="0,0,0,6"/>
+                        <!-- Noise Gate Sensitivity Slider -->
+                        <TextBlock Text="🎚 Чувствительность шумового порога (NoiseGate RMS)" Style="{StaticResource GroupHeaderStyle}"/>
+                        <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Порог отсечения тишины (50 - 600 RMS):" Style="{StaticResource FieldLabelStyle}" Grid.Column="0"/>
+                            <TextBlock x:Name="TxtNoiseGateVal" Text="350 RMS" Foreground="#00E5FF" FontWeight="Bold" FontSize="13" Grid.Column="1"/>
+                        </Grid>
+                        <Slider x:Name="SldNoiseGate" Minimum="50" Maximum="600" Value="350"
+                                TickFrequency="25" IsSnapToTickEnabled="False"
+                                Margin="0,2,0,4" ValueChanged="SldNoiseGate_ValueChanged"/>
+                        <TextBlock Text="Сигнал тише порога отсекается как фоновый шум комнаты. Если Джарвис не слышит микрофон, сдвиньте слайдер влево (уменьшите порог)."
+                                   FontSize="11" Foreground="#88889C" TextWrapping="Wrap" Margin="0,0,0,12"/>
 
-                <TextBlock Text="Имя модели в LM Studio:" Style="{StaticResource FieldLabelStyle}"/>
-                <TextBox x:Name="TxtLlmModel" Text="qwen2.5-1.5b-instruct" Margin="0,0,0,6"/>
+                        <!-- Real-time VU-Meter Signal Indicator -->
+                        <TextBlock Text="📊 Индикатор уровня звука в реальном времени (VU-метр)" Style="{StaticResource GroupHeaderStyle}"/>
+                        <Border Background="#1A1A24" BorderBrush="#323242" BorderThickness="1" CornerRadius="6" Padding="8,8" Margin="0,0,0,4">
+                            <StackPanel>
+                                <ProgressBar x:Name="PrgAudioLevel" Minimum="0" Maximum="600" Value="0" Height="14"
+                                             Foreground="#00E5FF" Background="#121218" BorderThickness="0"/>
+                                <Grid Margin="0,6,0,0">
+                                    <TextBlock x:Name="TxtVuLevel" Text="Текущий уровень: 0 RMS" FontSize="11" Foreground="#00FFAA" HorizontalAlignment="Left"/>
+                                    <TextBlock x:Name="TxtVuStatus" Text="Статус: Ожидание сигнала" FontSize="11" Foreground="#A0A0B8" HorizontalAlignment="Right"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                        <TextBlock Text="Произнесите фразу в микрофон: индикатор должен превышать установленный порог чувствительности."
+                                   FontSize="11" Foreground="#88889C" Margin="0,0,0,14"/>
 
-                <TextBlock Text="API Key (для LM Studio можно оставить 'lm'):" Style="{StaticResource FieldLabelStyle}"/>
-                <TextBox x:Name="TxtLlmApiKey" Text="lm" Margin="0,0,0,6"/>
+                        <!-- TTS Engine and Voice Selection -->
+                        <TextBlock Text="🔊 Синтез речи (TTS) и голос Джарвиса" Style="{StaticResource GroupHeaderStyle}"/>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Margin="0,0,6,0">
+                                <TextBlock Text="Движок синтеза речи:" Style="{StaticResource FieldLabelStyle}"/>
+                                <ComboBox x:Name="CmbTtsEngine" SelectionChanged="CmbTtsEngine_SelectionChanged">
+                                    <ComboBoxItem Content="Edge-TTS (Онлайн нейросеть Microsoft)"/>
+                                    <ComboBoxItem Content="SAPI5 (Офлайн Windows / System.Speech)"/>
+                                </ComboBox>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Margin="6,0,0,0">
+                                <TextBlock Text="Выбор голоса:" Style="{StaticResource FieldLabelStyle}"/>
+                                <ComboBox x:Name="CmbTtsVoice">
+                                    <ComboBoxItem Content="Aidar (Silero SAPI5, Мужской)"/>
+                                    <ComboBoxItem Content="Microsoft Pavel (Windows SAPI5, Мужской)"/>
+                                    <ComboBoxItem Content="ru-RU-DmitryNeural (Edge-TTS, Мужской)"/>
+                                    <ComboBoxItem Content="ru-RU-SvetlanaNeural (Edge-TTS, Женский)"/>
+                                </ComboBox>
+                            </StackPanel>
+                        </Grid>
+                        <Grid Margin="0,4,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="BtnTestVoice" Content="🔊 Проверить голос" Grid.Column="0" Click="BtnTestVoice_Click"/>
+                            <TextBlock Text="Быстрая проверка воспроизведения речи выбранным движком"
+                                       FontSize="11" Foreground="#88889C" VerticalAlignment="Center" Margin="10,0,0,0" Grid.Column="1"/>
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
 
-                <!-- Section 2: Vosk Speech Recognition -->
-                <TextBlock Text="🎙 Голосовое распознавание (Vosk)" Style="{StaticResource GroupHeaderStyle}"/>
+            <!-- TAB 2: ИСКУССТВЕННЫЙ ИНТЕЛЛЕКТ -->
+            <TabItem Header="🧠 Искусственный интеллект">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="4,8,12,8">
+                    <StackPanel>
+                        <TextBlock Text="🤖 Модель и Сервер (LM Studio / OpenAI API)" Style="{StaticResource GroupHeaderStyle}"/>
+                        <TextBlock Text="API Base URL (например, http://127.0.0.1:1234/v1):" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox x:Name="TxtLlmUrl" Text="http://127.0.0.1:1234/v1" Margin="0,0,0,8"/>
 
-                <TextBlock Text="Путь к папке модели Vosk:" Style="{StaticResource FieldLabelStyle}"/>
-                <Grid Margin="0,0,0,6">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBox x:Name="TxtVoskPath" Text="./model" Grid.Column="0"/>
-                    <Button Content="Обзор..." Grid.Column="1" Margin="8,0,0,0" Click="BtnBrowseVosk_Click"/>
-                </Grid>
+                        <TextBlock Text="Имя модели в LM Studio:" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox x:Name="TxtLlmModel" Text="qwen2.5-1.5b-instruct" Margin="0,0,0,8"/>
 
-                <!-- Section 3: Weather (Open-Meteo) -->
-                <TextBlock Text="🌤 Погода (Open-Meteo)" Style="{StaticResource GroupHeaderStyle}"/>
-                <TextBlock Text="Город (для погоды):" Style="{StaticResource FieldLabelStyle}"/>
-                <TextBox x:Name="TxtCityName" Text="Санкт-Петербург" Margin="0,0,0,4"/>
-                <TextBlock Text="Координаты и каноническое название определяются автоматически при сохранении."
-                           FontSize="11" Foreground="#888899" Margin="0,0,0,6"/>
+                        <TextBlock Text="API Key (для локальной LM Studio можно оставить 'lm'):" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox x:Name="TxtLlmApiKey" Text="lm" Margin="0,0,0,12"/>
 
-                <!-- Section 4: Steam Games Catalog -->
-                <TextBlock Text="🎮 Привязка игр Steam (Ключ команды → Steam AppID)" Style="{StaticResource GroupHeaderStyle}"/>
-                <TextBlock Text="Позволяет добавлять новые игры и команды без изменения кода C#."
-                           FontSize="11" Foreground="#888899" Margin="0,0,0,8"/>
+                        <Grid Margin="0,4,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="BtnTestLlm" Content="⚡ Проверить подключение" Grid.Column="0" Click="BtnTestLlm_Click"/>
+                            <TextBlock x:Name="TxtLlmStatus" Text="" FontSize="12" VerticalAlignment="Center" Margin="12,0,0,0" Grid.Column="1"/>
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
 
-                <Border Background="#202028"
-                        BorderBrush="#383848"
-                        BorderThickness="1"
-                        CornerRadius="6"
-                        MinHeight="180"
-                        Height="200">
-                    <ListView x:Name="LstSteamGames"
-                              Background="Transparent"
-                              BorderThickness="0"
-                              Foreground="#FFFFFF"
-                              SelectionMode="Single"
-                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                              ScrollViewer.VerticalScrollBarVisibility="Auto"
-                              PreviewMouseWheel="LstSteamGames_PreviewMouseWheel">
-                        <ListView.View>
-                            <GridView>
-                                <GridViewColumn Header="Ключ вызова команды" Width="260" DisplayMemberBinding="{Binding Key}"/>
-                                <GridViewColumn Header="Steam AppID" Width="180" DisplayMemberBinding="{Binding Value}"/>
-                            </GridView>
-                        </ListView.View>
-                    </ListView>
-                </Border>
+            <!-- TAB 3: ИГРЫ И STEAM -->
+            <TabItem Header="🎮 Игры и Steam">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="4,8,12,8">
+                    <StackPanel>
+                        <TextBlock Text="🎮 Привязка игр Steam (Ключ команды → Steam AppID)" Style="{StaticResource GroupHeaderStyle}"/>
+                        <TextBlock Text="Позволяет добавлять новые игры и команды без изменения кода C#."
+                                   FontSize="11" Foreground="#88889C" Margin="0,0,0,8"/>
 
-                <!-- Add new game controls -->
-                <Grid Margin="0,8,0,3">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="130"/>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="Новый ключ команды:" Style="{StaticResource FieldLabelStyle}" Grid.Column="0"/>
-                    <TextBlock Text="Steam AppID:" Style="{StaticResource FieldLabelStyle}" Grid.Column="1" Margin="4,6,0,4"/>
-                </Grid>
-                <Grid Margin="0,0,0,16">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="130"/>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
+                        <Border Background="#1A1A24" BorderBrush="#323242" BorderThickness="1" CornerRadius="6" Height="220">
+                            <ListView x:Name="LstSteamGames"
+                                      Background="Transparent"
+                                      BorderThickness="0"
+                                      Foreground="#FFFFFF"
+                                      SelectionMode="Single"
+                                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                      ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                <ListView.View>
+                                    <GridView>
+                                        <GridViewColumn Header="Ключ вызова команды" Width="280" DisplayMemberBinding="{Binding Key}"/>
+                                        <GridViewColumn Header="Steam AppID" Width="180" DisplayMemberBinding="{Binding Value}"/>
+                                    </GridView>
+                                </ListView.View>
+                            </ListView>
+                        </Border>
 
-                    <TextBox x:Name="TxtNewGameKey" Grid.Column="0" Margin="0,0,8,0" ToolTip="Ключ вызова (напр. 'cyberpunk')"/>
-                    <TextBox x:Name="TxtNewGameAppId" Grid.Column="1" Margin="0,0,8,0" ToolTip="AppID игры в Steam (напр. '1091500')"/>
-                    <Button Content="➕ Добавить" Grid.Column="2" Margin="0,0,8,0" Click="BtnAddGame_Click"/>
-                    <Button Content="🗑 Удалить" Grid.Column="3" Click="BtnRemoveGame_Click"/>
-                </Grid>
-            </StackPanel>
-        </ScrollViewer>
+                        <!-- Add new game controls -->
+                        <Grid Margin="0,10,0,3">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="130"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Новый ключ команды:" Style="{StaticResource FieldLabelStyle}" Grid.Column="0"/>
+                            <TextBlock Text="Steam AppID:" Style="{StaticResource FieldLabelStyle}" Grid.Column="1" Margin="4,6,0,4"/>
+                        </Grid>
+                        <Grid Margin="0,0,0,16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="130"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <TextBox x:Name="TxtNewGameKey" Grid.Column="0" Margin="0,0,8,0" ToolTip="Ключ вызова (напр. 'киберпанк')"/>
+                            <TextBox x:Name="TxtNewGameAppId" Grid.Column="1" Margin="0,0,8,0" ToolTip="AppID игры в Steam (напр. '1091500')"/>
+                            <Button Content="➕ Добавить" Grid.Column="2" Margin="0,0,8,0" Click="BtnAddGame_Click"/>
+                            <Button Content="🗑 Удалить" Grid.Column="3" Click="BtnRemoveGame_Click"/>
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- TAB 4: СИСТЕМА -->
+            <TabItem Header="⚙️ Система">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="4,8,12,8">
+                    <StackPanel>
+                        <!-- Weather -->
+                        <TextBlock Text="🌤 Погода (Open-Meteo)" Style="{StaticResource GroupHeaderStyle}"/>
+                        <TextBlock Text="Город по умолчанию:" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox x:Name="TxtCityName" Text="Санкт-Петербург" Margin="0,0,0,4"/>
+                        <TextBlock Text="Координаты и прогноз определяются автоматически при сохранении."
+                                   FontSize="11" Foreground="#88889C" Margin="0,0,0,12"/>
+
+                        <!-- Vosk Model Path -->
+                        <TextBlock Text="📁 Модель распознавания Vosk" Style="{StaticResource GroupHeaderStyle}"/>
+                        <TextBlock Text="Путь к каталогу модели Vosk:" Style="{StaticResource FieldLabelStyle}"/>
+                        <Grid Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="TxtVoskPath" Text="./model" Grid.Column="0"/>
+                            <Button Content="Обзор..." Grid.Column="1" Margin="8,0,0,0" Click="BtnBrowseVosk_Click"/>
+                        </Grid>
+
+                        <!-- Windows Autorun -->
+                        <TextBlock Text="🚀 Автозапуск Windows" Style="{StaticResource GroupHeaderStyle}"/>
+                        <CheckBox x:Name="ChkAutoStart" Content="Запускать JARVIS автоматически при старте Windows"
+                                  Foreground="#ECECF1" FontSize="13" Margin="0,4,0,14"/>
+
+                        <!-- Hotkeys & Gestures Info -->
+                        <TextBlock Text="⌨️ Горячие клавиши и управление виджетом" Style="{StaticResource GroupHeaderStyle}"/>
+                        <Border Background="#1A1A24" BorderBrush="#323242" BorderThickness="1" CornerRadius="6" Padding="12,10" Margin="0,0,0,10">
+                            <StackPanel>
+                                <TextBlock Text="• Двойной клик на сферу: Открыть это окно настроек" FontSize="12" Foreground="#C8C8DC" Margin="0,2"/>
+                                <TextBlock Text="• Правый клик на сферу: Контекстное меню (Настройки, Закрыть)" FontSize="12" Foreground="#C8C8DC" Margin="0,2"/>
+                                <TextBlock Text="• Зажатие левой кнопки: Свободное перемещение виджета по экрану" FontSize="12" Foreground="#C8C8DC" Margin="0,2"/>
+                                <TextBlock Text="• Голосовой запрос: 'джарвис &lt;команда&gt;', 'пауза', 'громкость 50', 'погода', 'закройся'" FontSize="12" Foreground="#00FFAA" Margin="0,4,0,0"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
 
         <!-- Bottom Action Bar -->
-        <Grid Grid.Row="2" Margin="0,16,0,0">
+        <Grid Grid.Row="2" Margin="0,14,0,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
@@ -303,10 +460,10 @@
                        Grid.Column="0"
                        Margin="0,0,12,0"/>
 
-            <Button Content="Сохранить"
+            <Button Content="💾 Сохранить"
                     Style="{StaticResource AccentButtonStyle}"
                     Grid.Column="1"
-                    Width="110"
+                    Width="120"
                     Margin="0,0,10,0"
                     Click="BtnSave_Click"/>
 

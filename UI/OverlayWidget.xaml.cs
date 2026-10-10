@@ -166,6 +166,7 @@ public sealed partial class OverlayWidget : Window
 
         SpeechSubtitleText.Text = text.Trim();
         _subtitleFadeTimer.Stop();
+        SpeechSubtitlePopup.IsOpen = true;
 
         var fadeIn = new DoubleAnimation
         {
@@ -187,6 +188,7 @@ public sealed partial class OverlayWidget : Window
             Duration = TimeSpan.FromMilliseconds(400),
             EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn }
         };
+        fadeOut.Completed += (s, args) => SpeechSubtitlePopup.IsOpen = false;
         SpeechSubtitleBorder.BeginAnimation(UIElement.OpacityProperty, fadeOut, HandoffBehavior.SnapshotAndReplace);
     }
 
@@ -473,10 +475,14 @@ public sealed partial class OverlayWidget : Window
         OpenSettings();
     }
 
-    private void SettingsButton_Click(object sender, RoutedEventArgs e)
+    private void ContextMenuSettings_Click(object sender, RoutedEventArgs e)
     {
-        e.Handled = true;
         OpenSettings();
+    }
+
+    private void ContextMenuClose_Click(object sender, RoutedEventArgs e)
+    {
+        Close();
     }
 
     public void OpenSettings()

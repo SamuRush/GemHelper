@@ -4,18 +4,25 @@ using System.Text.Json.Nodes;
 
 namespace Gem.Services;
 
+public sealed class AudioConfig
+{
+    public int DeviceIndex { get; set; } = 0;
+    public string DeviceName { get; set; } = string.Empty;
+}
+
 public sealed class WakeWordConfig
 {
     public string Name { get; set; } = "джарвис";
     public string OnnxModelPath { get; set; } = "Models/WakeWord/jarvis.onnx";
     public string SmallModelPath { get; set; } = "Models/VoskSmall/vosk-model-small-ru";
     public float Threshold { get; set; } = 0.5f;
-    public double NoiseGateRms { get; set; } = 450.0;
+    public double NoiseGateRms { get; set; } = 350.0;
     public int MinDurationMs { get; set; } = 150;
 }
 
 public sealed class AppSettingsData
 {
+    public AudioConfig Audio { get; set; } = new();
     public string LlmBaseUrl { get; set; } = "http://127.0.0.1:1234/v1";
     public string LlmModel { get; set; } = "qwen2.5-1.5b-instruct";
     public string LlmApiKey { get; set; } = "lm";
@@ -43,7 +50,9 @@ public sealed class AppSettingsData
 public sealed class TtsConfig
 {
     public string PreferredEngine { get; set; } = "Edge";
+    public string Voice { get; set; } = "Aidar";
     public string EdgeVoice { get; set; } = "ru-RU-DmitryNeural";
+    public string Sapi5Voice { get; set; } = "Aidar";
     public int ConnectionTimeoutMs { get; set; } = 5000;
     /// <summary>
     /// Если false — Edge-TTS (Дмитрий, онлайн) полностью исключается из пайплайна.
@@ -84,6 +93,12 @@ public static class AppSettingsService
             var node = JsonNode.Parse(json);
             if (node == null) return data;
 
+            if (node["Audio"] is JsonObject audio)
+            {
+                if (audio["DeviceIndex"]?.GetValue<int>() is int devIdx) data.Audio.DeviceIndex = devIdx;
+                if (audio["DeviceName"]?.GetValue<string>() is string devName) data.Audio.DeviceName = devName;
+            }
+
             if (node["Llm"] is JsonObject llm)
             {
                 if (llm["BaseUrl"]?.GetValue<string>() is string url) data.LlmBaseUrl = url;
@@ -99,7 +114,9 @@ public static class AppSettingsService
             if (node["Tts"] is JsonObject tts)
             {
                 if (tts["PreferredEngine"]?.GetValue<string>() is string pe) data.Tts.PreferredEngine = pe;
+                if (tts["Voice"]?.GetValue<string>() is string v) data.Tts.Voice = v;
                 if (tts["EdgeVoice"]?.GetValue<string>() is string ev) data.Tts.EdgeVoice = ev;
+                if (tts["Sapi5Voice"]?.GetValue<string>() is string sv) data.Tts.Sapi5Voice = sv;
                 if (tts["ConnectionTimeoutMs"]?.GetValue<int>() is int ctMs && ctMs > 0) data.Tts.ConnectionTimeoutMs = ctMs;
                 if (tts["EnableEdgeTts"] is { } enableEdgeNode) data.Tts.EnableEdgeTts = enableEdgeNode.GetValue<bool>();
             }
@@ -165,6 +182,11 @@ public static class AppSettingsService
                 ["CityName"] = data.CityName,
                 ["Latitude"] = data.Latitude,
                 ["Longitude"] = data.Longitude,
+                ["Audio"] = new JsonObject
+                {
+                    ["DeviceIndex"] = data.Audio.DeviceIndex,
+                    ["DeviceName"] = data.Audio.DeviceName
+                },
                 ["WakeWord"] = new JsonObject
                 {
                     ["Name"] = data.WakeWord.Name,
@@ -189,7 +211,9 @@ public static class AppSettingsService
                 ["Tts"] = new JsonObject
                 {
                     ["PreferredEngine"] = data.Tts.PreferredEngine,
+                    ["Voice"] = data.Tts.Voice,
                     ["EdgeVoice"] = data.Tts.EdgeVoice,
+                    ["Sapi5Voice"] = data.Tts.Sapi5Voice,
                     ["ConnectionTimeoutMs"] = data.Tts.ConnectionTimeoutMs,
                     ["EnableEdgeTts"] = data.Tts.EnableEdgeTts
                 }
