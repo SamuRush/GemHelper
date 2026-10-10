@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Windows.Automation;
 using Gem.Win32;
 using Microsoft.Win32;
 
@@ -1610,7 +1611,7 @@ public sealed class SteamService
     /// </summary>
     private static async Task<Point?> TryClickBlueButtonAsync(IntPtr hWnd, string? actionLabel = null)
     {
-        Point? buttonPos = FindSteamBlueButton(hWnd);
+        Point? buttonPos = FindSteamButtonViaUiAutomation(hWnd, ["Установить", "Install", "Принять", "Далее", "Next", "Accept"]) ?? FindSteamBlueButton(hWnd);
         if (buttonPos.HasValue)
         {
             SetCursorPos(buttonPos.Value.X, buttonPos.Value.Y);
@@ -1621,7 +1622,7 @@ public sealed class SteamService
             Console.ForegroundColor = ConsoleColor.Green;
             string label = !string.IsNullOrWhiteSpace(actionLabel)
                 ? actionLabel
-                : "Клик по синей кнопке выполнен";
+                : "Клик по кнопке выполнен";
             Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [SteamService Scanner] {label} (X={buttonPos.Value.X}, Y={buttonPos.Value.Y}).");
             Console.ResetColor();
             return buttonPos;
@@ -1629,12 +1630,103 @@ public sealed class SteamService
         return null;
     }
 
-    /// <summary>
-    /// Searches for the Steam "Uninstall" confirmation blue button strictly within the bounds
-    /// of the modal dialog window (bottom-left region), and calculates the exact geometric center.
-    /// </summary>
-    public static Point? FindSteamUninstallButton(IntPtr hWnd)
+    private static readonly string[] DefaultTargetButtonNames =
+    [
+        "Удалить", "Uninstall", "Установить", "Install"
+    ];
+
+    public static bool IsMatchingButtonName(string? name, string[]? targetNames = null)
     {
+        if (string.IsNullOrWhiteSpace(name)) return false;
+        var targets = targetNames ?? DefaultTargetButtonNames;
+        string trimmed = name.Trim();
+        foreach (var target in targets)
+        {
+            if (trimmed.Contains(target, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static bool IsMatchingDialogTitle(string? windowTitle, string? gameTitle = null)
+    {
+        if (string.IsNullOrWhiteSpace(windowTitle)) return false;
+        string trimmed = windowTitle.Trim();
+
+        if (trimmed.Contains("удаление", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Contains("удалить", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Contains("uninstall", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Contains("видален", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Contains("установка", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Contains("установить", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Contains("install", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(gameTitle) && trimmed.Contains(gameTitle, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Searches for a Steam modal dialog action button using Win32 UI Automation (AutomationElement / UIAutomationClient).
+    /// Immune to Windows theme changes, HDR, and custom display DPI scaling (125%/150%).
+    /// </summary>
+    public static Point? FindSteamButtonViaUiAutomation(IntPtr hWnd, string[]? targetButtonNames = null)
+    {
+        if (hWnd == IntPtr.Zero) return null;
+
+        try
+        {
+            var element = AutomationElement.FromHandle(hWnd);
+            if (element == null) return null;
+
+            var buttonCondition = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button);
+            var buttons = element.FindAll(TreeScope.Descendants, buttonCondition);
+
+            foreach (AutomationElement btn in buttons)
+            {
+                string name = btn.Current.Name;
+                if (IsMatchingButtonName(name, targetButtonNames))
+                {
+                    var rect = btn.Current.BoundingRectangle;
+                    if (!rect.IsEmpty && rect.Width > 0 && rect.Height > 0)
+                    {
+                        int centerX = (int)(rect.Left + rect.Width / 2);
+                        int centerY = (int)(rect.Top + rect.Height / 2);
+
+                        Console.ForegroundColor = ConsoleColor.Green;
+                        Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [SteamService UI Automation] Кнопка '{name}' найдена через AutomationElement: Center=({centerX}, {centerY}), Bounds={rect}");
+                        Console.ResetColor();
+
+                        return new Point(centerX, centerY);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.ForegroundColor = ConsoleColor.DarkYellow;
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [SteamService UI Automation] Ошибка UI Automation: {ex.Message}. Фоллбэк на попиксельный сканер.");
+            Console.ResetColor();
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Secondary fallback: searches for the Steam confirmation blue button strictly within the bounds
+    /// of the modal dialog window using pixel scanning (Bitmap.CopyFromScreen).
+    /// </summary>
+    public static Point? FindSteamBlueButtonInWindow(IntPtr hWnd)
+    {
+        if (hWnd == IntPtr.Zero) return null;
         if (!NativeMethods.GetWindowRect(hWnd, out RECT rect)) return null;
 
         int width = rect.Right - rect.Left;
@@ -1702,6 +1794,24 @@ public sealed class SteamService
         int centerY = rect.Top + (minY + maxY) / 2;
 
         return new Point(centerX, centerY);
+    }
+
+    /// <summary>
+    /// Searches for the Steam "Uninstall" confirmation button.
+    /// Priority 1: UI Automation Client (AutomationElement) for theme & DPI independence.
+    /// Priority 2: Secondary fallback to pixel scanning via FindSteamBlueButtonInWindow.
+    /// </summary>
+    public static Point? FindSteamUninstallButton(IntPtr hWnd)
+    {
+        // 1. Primary: UI Automation Client search
+        Point? uiaPoint = FindSteamButtonViaUiAutomation(hWnd, ["Удалить", "Uninstall"]);
+        if (uiaPoint.HasValue)
+        {
+            return uiaPoint;
+        }
+
+        // 2. Secondary fallback: Pixel color scanning
+        return FindSteamBlueButtonInWindow(hWnd);
     }
 
     /// <summary>
@@ -2012,12 +2122,7 @@ public sealed class SteamService
                 string wTitle = GetWindowTitle(hWnd);
 
                 // Check title for "удаление", "удалить", "uninstall", "видален" or game title
-                bool matchesUninstall = !string.IsNullOrEmpty(wTitle) &&
-                    (wTitle.Contains("удаление", StringComparison.OrdinalIgnoreCase) ||
-                     wTitle.Contains("удалить", StringComparison.OrdinalIgnoreCase) ||
-                     wTitle.Contains("uninstall", StringComparison.OrdinalIgnoreCase) ||
-                     wTitle.Contains("видален", StringComparison.OrdinalIgnoreCase) ||
-                     (!string.IsNullOrWhiteSpace(title) && wTitle.Contains(title, StringComparison.OrdinalIgnoreCase)));
+                bool matchesUninstall = IsMatchingDialogTitle(wTitle, title);
 
                 if (matchesUninstall && NativeMethods.GetWindowRect(hWnd, out RECT rect))
                 {
