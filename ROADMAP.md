@@ -90,6 +90,19 @@
 
 ---
 
+### [x] Task-07: Изолированное управление громкостью плеера (AudioSession / WASAPI SimpleAudioVolume)
+- **Проблема**: Команды изменения громкости музыки («музыка тише», «сделай музыку громче», «громкость музыки 50») изменяли глобальную мастер-громкость всей системы Windows, создавая конфликт с системными звуками, играми и Discord.
+- **Зона изменений**: `Services/IAppAudioService.cs`, `Services/AppAudioService.cs`, `Handlers/VolumeCommandHandler.cs`, `Services/LlmIntentService.cs`, `Services/ServiceCollectionExtensions.cs`, `Gem.Tests/PlayerVolumeControlTests.cs`.
+- **Технические требования**:
+  1. **Интеграция с AudioSessionManager (WASAPI / NAudio)**: опрос аудиосессий по умолчанию через `MMDevice.AudioSessionManager.Sessions`, поиск сессий музыкальных плееров (`Y.Music`, `YandexMusic`, `spotify`, etc.) и видео-сессий (`chrome`, `msedge`, `vlc`, etc.).
+  2. **Управление громкостью через `SimpleAudioVolume`**: установка `session.SimpleAudioVolume.Volume` и `session.SimpleAudioVolume.Mute` индивидуально для процесса плеера без модификации `AudioEndpointVolume.MasterVolumeLevelScalar`.
+  3. **Роутер `TryFastMatch`**: распознавание фраз «музыка тише», «музыка громче», «прибавь музыку», «убавь музыку», «громкость музыки 50», «громкость плеера 70», «видео громче», «видео тише» с пробросом `target: "player"` или `target: "video"` в команду `volume`.
+  4. **Сохранение системных команд**: общие фразы «тише», «громче», «звук 50», «выключи звук» продолжают управлять мастер-громкостью системы (`target: "master"`).
+  5. **Тестирование**: создание тестов в `Gem.Tests/PlayerVolumeControlTests.cs` и верификация через `dotnet test Gem.sln`.
+- **Definition of Done**: `dotnet build Gem.csproj` и `dotnet test Gem.sln` проходят без ошибок; громкость плеера меняется изолированно от системной громкости.
+
+---
+
 ## 📦 Завершенные фазы
 
 ### Фаза 1. Ядро и голосовой пайплайн [ЗАВЕРШЕНО]

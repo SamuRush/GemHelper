@@ -629,49 +629,58 @@ public sealed class LlmIntentService
         if (lower.Contains("громк") || lower.Contains("звук") || lower.Contains("тише") || lower.Contains("громче") ||
             lower.Contains("убавь") || lower.Contains("прибавь") || lower.StartsWith("volume") || lower.StartsWith("vol") || Regex.IsMatch(lower, @"^\s*\d{1,3}\s*%\s*$"))
         {
+            bool isVideoVolume = lower.Contains("видео") || lower.Contains("ролик") || lower.Contains("фильм");
+            bool isPlayerVolume = !isVideoVolume && (lower.Contains("музык") || lower.Contains("плеер") || lower.Contains("яндекс") || lower.Contains("трек"));
+            string? target = isVideoVolume ? "video" : (isPlayerVolume ? "player" : null);
+            string targetJson = target != null ? $""", "target": "{target}" """ : "";
+            string targetName = isVideoVolume ? "видео " : (isPlayerVolume ? "плеера " : "");
+
             // Mute
             if (lower.Contains("выключи") || lower.Contains("без звука") || lower.Contains("мут") || lower.Contains("mute") || lower.Contains("заглуши"))
             {
-                var args = CreateFastMatchArgs("""{ "action": "mute", "isMuted": true }""");
-                return new JarvisResponse(new CommandRequest("volume", args), "Звук отключен, сэр.");
+                var args = CreateFastMatchArgs($$"""{ "action": "mute", "isMuted": true{{targetJson}} }""");
+                string reply = target != null ? $"Звук {targetName}отключен, сэр." : "Звук отключен, сэр.";
+                return new JarvisResponse(new CommandRequest("volume", args), reply);
             }
 
             // Unmute
             if (lower.Contains("включи") || lower.Contains("размут") || lower.Contains("unmute") || lower.Contains("верни звук"))
             {
-                var args = CreateFastMatchArgs("""{ "action": "mute", "isMuted": false }""");
-                return new JarvisResponse(new CommandRequest("volume", args), "Звук включен, сэр.");
+                var args = CreateFastMatchArgs($$"""{ "action": "mute", "isMuted": false{{targetJson}} }""");
+                string reply = target != null ? $"Звук {targetName}включен, сэр." : "Звук включен, сэр.";
+                return new JarvisResponse(new CommandRequest("volume", args), reply);
             }
 
             // Status / Query
             if (lower.Contains("статус") || lower.Contains("какой") || lower.Contains("сколько") || lower == "звук" || lower == "громкость")
             {
-                var args = CreateFastMatchArgs("""{ "action": "get" }""");
-                return new JarvisResponse(new CommandRequest("volume", args), "Проверяю громкость, сэр.");
+                var args = CreateFastMatchArgs($$"""{ "action": "get"{{targetJson}} }""");
+                string reply = target != null ? $"Проверяю громкость {targetName}, сэр." : "Проверяю громкость, сэр.";
+                return new JarvisResponse(new CommandRequest("volume", args), reply);
             }
 
             // Relative increase
             if (lower.Contains("прибавь") || lower.Contains("громче") || lower.Contains("выше") || lower.Contains("добавь") || lower.Contains("увеличь") || lower.Contains("+"))
             {
                 int delta = ParseVolumeNumber(lower) ?? 10;
-                var args = CreateFastMatchArgs($$"""{ "action": "change", "delta": {{delta}} }""");
-                return new JarvisResponse(new CommandRequest("volume", args), $"Громкость увеличена на {delta}%, сэр.");
+                var args = CreateFastMatchArgs($$"""{ "action": "change", "delta": {{delta}}{{targetJson}} }""");
+                return new JarvisResponse(new CommandRequest("volume", args), $"Громкость {targetName}увеличена на {delta}%, сэр.");
             }
 
             // Relative decrease
             if (lower.Contains("убавь") || lower.Contains("тише") || lower.Contains("меньше") || lower.Contains("снизь") || lower.Contains("уменьши") || lower.Contains("-"))
             {
                 int delta = ParseVolumeNumber(lower) ?? 10;
-                var args = CreateFastMatchArgs($$"""{ "action": "change", "delta": {{-delta}} }""");
-                return new JarvisResponse(new CommandRequest("volume", args), $"Громкость уменьшена на {delta}%, сэр.");
+                var args = CreateFastMatchArgs($$"""{ "action": "change", "delta": {{-delta}}{{targetJson}} }""");
+                return new JarvisResponse(new CommandRequest("volume", args), $"Громкость {targetName}уменьшена на {delta}%, сэр.");
             }
 
             // Absolute set (e.g. "звук 60", "громкость 50", "звук на 70%", "звук шестьдесят", "звук максимум")
             int? level = ParseVolumeNumber(lower);
             if (level.HasValue)
             {
-                var args = CreateFastMatchArgs($$"""{ "action": "set", "level": {{level.Value}} }""");
-                return new JarvisResponse(new CommandRequest("volume", args), $"Громкость установлена на {level.Value}%, сэр.");
+                var args = CreateFastMatchArgs($$"""{ "action": "set", "level": {{level.Value}}{{targetJson}} }""");
+                return new JarvisResponse(new CommandRequest("volume", args), $"Громкость {targetName}установлена на {level.Value}%, сэр.");
             }
         }
 

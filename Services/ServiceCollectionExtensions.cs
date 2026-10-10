@@ -71,7 +71,12 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddJarvisHandlers(this IServiceCollection services)
     {
         services.AddSingleton<IMediaSessionService, MediaSessionService>();
-        services.AddSingleton<VolumeCommandHandler>();
+        services.AddSingleton<IAppAudioService, AppAudioService>();
+        services.AddSingleton<VolumeCommandHandler>(sp =>
+        {
+            var appAudio = sp.GetService<IAppAudioService>() ?? AppAudioService.Instance;
+            return new VolumeCommandHandler(appAudio);
+        });
         services.AddSingleton<AppControlCommandHandler>(sp =>
         {
             var feedback = sp.GetService<IVoiceFeedbackService>();

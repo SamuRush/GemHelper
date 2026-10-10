@@ -35,7 +35,7 @@ flowchart TD
     DIRECT_RESP --> ROUTER[CommandRouter]
     
     subgraph Execution_Layer [Execution & Handlers]
-        ROUTER -->|command: volume| VOL_H[VolumeCommandHandler / CoreAudioApi]
+        ROUTER -->|command: volume| VOL_H[VolumeCommandHandler / IAppAudioService / CoreAudioApi]
         ROUTER -->|command: media| MED_H[MediaCommandHandler / IMediaSessionService / GSMTC / Win32]
         ROUTER -->|command: timer| TIM_H[TimerCommandHandler / TimerService]
         ROUTER -->|command: app| APP_H[AppControlCommandHandler / SteamService]
@@ -94,7 +94,7 @@ flowchart TD
 |---|---|---|---|---|
 | **1** | **PendingAction (FSM)** | `JarvisOrchestrator` | `да`, `нет`, `отмена`, `удаляй`, `запускай` | **Критический**: предотвращает перехват слов согласия/отмены медиаплеером, таймером или отправку в LLM. |
 | **2** | **Media Control** | `MatchMediaCommand` / `IMediaSessionService` | `останови видео`, `продолжи видео`, `поставь на паузу`, `включи яндекс музыку`, `включи музыку`, `следующий трек`, `предыдущий` | **0 мс задержка**: Адресный роутинг раздельных сценариев (видео vs музыка vs GSMTC). Исключает слепую эмуляцию `VK_MEDIA_PLAY_PAUSE`, опрашивает GSMTC статус, управляет окнами браузеров/плееров через `VK_SPACE`. Изолирован от поиска приложений. |
-| **3** | **Volume / Audio** | `VolumeCommandHandler` / `NAudio` | `тише`, `громче`, `звук 50`, `выключи звук`, `мут` | Высокочастотные системные команды, не требующие работы парсера таймеров или Steam. |
+| **3** | **Volume / Audio** | `VolumeCommandHandler` / `IAppAudioService` / `NAudio` | `тише`, `громче`, `звук 50`, `музыка тише`, `музыка громче`, `громкость музыки 50`, `выключи звук` | Высокочастотные аудиокоманды: разделение системной мастер-громкости (`IAudioEndpointVolume`) и изолированной громкости плеера (`IAppAudioService` / WASAPI `ISimpleAudioVolume`) без взаимных конфликтов. |
 | **4** | **Timers & Reminders** | `MatchTimerCommand` / `TimerService` | `поставь таймер на 10 минут`, `напомни через 5 мин`, `сколько осталось` | Быстрый regex-парсер времени. Проверяется до Steam во избежание коллизий типа *"поставь таймер"* vs *"поставь киберпанк"*. |
 | **5** | **System / Hotkeys / Apps** | `AppHandler` / `AppControlCommandHandler` / `HotkeyCommandHandler` | `закройся`, `открой браузер`, `проводник`, `блокнот`, `сверни все`, `открой калькулятор` | Управление окнами, процессами и системными программами. Строго изолировано от каталога Steam во избежание ложных коллизий. |
 | **6** | **SteamService** | `SteamService` | `установи киберпанк`, `запусти ведьмак`, `удали астра ниро` | Фонетический поиск, Levenshtein, запуск или инициация диалога подтверждения деинсталляции/установки. |
@@ -180,6 +180,12 @@ flowchart TD
   - Асинхронный клиент прогноза погоды Open-Meteo API с геокодингом городов.
 - [`Services/AppSettingsService.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/AppSettingsService.cs):
   - Загрузка, сохранение и валидация конфигурации из `appsettings.json` (включая параметры `WakeWord` и `Tts`).
+- [`Services/IAppAudioService.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/IAppAudioService.cs):
+  - Контракт изолированного управления громкостью конкретного приложения/плеера (`SetAppVolumeAsync`, `ChangeAppVolumeAsync`, `SetAppMuteAsync`, `GetAppVolumeAsync`).
+- [`Services/AppAudioService.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/AppAudioService.cs):
+  - Реализация на базе Windows Audio Session API (WASAPI) через `NAudio.CoreAudioApi.MMDeviceEnumerator` и `AudioSessionManager.Sessions`.
+  - Поиск аудио-сессий музыкальных плееров (`Y.Music`, `YandexMusic`, `spotify`, паттерны `music`), видео-браузеров (`chrome`, `msedge`, `firefox`, `browser`) и медиаплееров (`vlc`, `mpc-hc`).
+  - Управление индивидуальным слайдером приложения в системном микшере (`SimpleAudioVolume.Volume`, `SimpleAudioVolume.Mute`) без затрагивания и без конфликтов с общей мастер-громкостью Windows (`MasterVolumeLevelScalar`).
 
 ### 3.3 Синтез речи (`Services/TTS/`)
 - [`Services/TTS/IVoiceFeedbackService.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Services/TTS/IVoiceFeedbackService.cs):
@@ -206,7 +212,7 @@ flowchart TD
 
 ### 3.4 Обработчики команд (`Handlers/`)
 Все обработчики получают экземпляр `IVoiceFeedbackService` через внедрение зависимостей (DI) в конструкторе, что устраняет обход синтеза и гарантирует прохождение через первичный Edge-TTS с безопасным откатом:
-- [`Handlers/VolumeCommandHandler.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Handlers/VolumeCommandHandler.cs): Управление мастер-громкостью через NAudio `MMDeviceEnumerator` и `IAudioEndpointVolume` (`set`, `change`, `mute`, `get`).
+- [`Handlers/VolumeCommandHandler.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Handlers/VolumeCommandHandler.cs): Двухконтурное управление громкостью. При вызове без указания цели или с `target: "master"` управляет системным звуком через NAudio `MMDeviceEnumerator` и `IAudioEndpointVolume` (`set`, `change`, `mute`, `get`). При передаче `target` (`"player"`, `"music"`, `"video"`, имя процесса) делегирует управление в `IAppAudioService` для изолированной регулировки конкретной аудиосессии через WASAPI `SimpleAudioVolume` без изменения системной мастер-громкости.
 - [`Handlers/MediaCommandHandler.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Handlers/MediaCommandHandler.cs): Обработка мультимедиа-команд через `IMediaSessionService` с поддержкой раздельных контрактов (`pause_video`, `resume_video`, `play_music`, `pause`, `play`, `stop`, `next`, `prev`) и интеграцией с Windows GSMTC.
 - [`Handlers/TimerCommandHandler.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Handlers/TimerCommandHandler.cs): Управление таймерами (`set`, `cancel`, `status`) через `TimerService` (с инжекцией `IVoiceFeedbackService`).
 - [`Handlers/AppControlCommandHandler.cs`](file:///c:/Users/evsee/OneDrive/Desktop/Gem/Handlers/AppControlCommandHandler.cs): Запуск, закрытие, проверка статуса и деинсталляция игр/приложений (с инжекцией `IVoiceFeedbackService` и `IMediaSessionService`). Содержит реестр канонических системных приложений (`browser`, `explorer`, `notepad`, `calc`, `discord`, `telegram`, `steam`), разрешение браузера по умолчанию через реестр Windows (`UrlAssociations\\https\\UserChoice` / `cmd /c start`), строгую изоляцию от каталога Steam во избежание ложных коллизий и асинхронный запуск `StartApplicationAsync` с защитой от повторного озвучивания. **Таблица медиа-алиасов `_mediaAliases`** (`музыка`, `трек`, `песня`, `плеер`, `яндекс музыка` и аналоги): при получении команды запуска музыки делегирует исполнение в `MediaSession.PlayMusicAsync("yandexmusic")` вместо слепого `PlayPause` или `Process.Start`, предотвращая ошибки и запуская пайплайн инициализации.
@@ -254,6 +260,7 @@ flowchart TD
   - `Gem.Tests/DiDecompositionTests.cs`: Тестирование декомпозиции DI-контейнера — проверка регистрации сервисов через `ServiceCollectionExtensions` (`AddJarvisCore`, `AddJarvisHandlers`, `AddJarvisTts`, `ConfigureJarvisRouter`) и отсутствие прямого обращения к синглтонам `.Instance`.
   - `Gem.Tests/SteamAutomationTests.cs`: Тестирование Win32 UI Automation в `SteamService` — сопоставление заголовков модальных окон, сопоставление имен кнопок действий («Удалить», «Uninstall») и безопасная обработка нулевых дескрипторов окон.
   - `Gem.Tests/MediaControlTests.cs`: Комплексное тестирование переработанного медиа-пайплайна — проверка контрактов FastMatch («останови видео», «поставь на паузу», «продолжи видео», «включи яндекс музыку»), маршрутизация в `MediaCommandHandler`, идемпотентность GSMTC Play/Pause, проверка процессов Яндекс Музыки и распознавание окон браузеров и медиаплееров.
+  - `Gem.Tests/PlayerVolumeControlTests.cs`: Тестирование изолированного управления громкостью плеера — распознавание в `TryFastMatch` выражений управления громкостью музыки/плеера/видео («музыка тише», «сделай музыку громче», «громкость музыки 50»), проверка проброса аргумента `target: "player"`, разделение мастер-громкости и сессионного звука `IAppAudioService`, проверка матчинга процессов плееров (`Y.Music`, `YandexMusic`, `spotify`).
 - **Запуск тестов**:
   - Через xUnit runner: `dotnet test` (автоматическое обнаружение всех тестов через `Gem.sln`).
   - Встроенный запуск через консольное приложение: `dotnet run --project Gem.csproj -- --test-features` (блоки `[20]` и `[21]`).
