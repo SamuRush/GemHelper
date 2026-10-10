@@ -1,7 +1,9 @@
 using System;
 using System.Linq;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
@@ -14,17 +16,20 @@ namespace Gem.UI;
 
 /// <summary>
 /// Holographic Arc Reactor HUD overlay widget for JARVIS (Iron Man aesthetic).
-/// Displays a 60 FPS DrawingVisual reactor reflecting assistant states:
-/// - Idle (#00E5FF, sinusoidal breathing pulsation)
-/// - Listening (#FFD600, attentive energetic pulse, reactive FFT crown)
-/// - Thinking (#D500F9, high-speed neural rotation)
-/// - Action (#00E676, emerald expansion flash)
-/// Features real-time radial audio FFT spectrograph, orbital gyro rings, speech subtitles,
-/// active timer badges, window dragging (DragMove), and right-click ContextMenu.
+/// Displays a 60 FPS borderless fullscreen canvas with selective click-through:
+/// - Core circle (radius 75px): HTCLIENT (left-drag positioning, double-click settings, right-click menu, tooltips)
+/// - Rest of screen: HTTRANSPARENT (all mouse clicks and wheel pass directly through to desktop & background apps)
+/// Displays dynamic radial FFT spectrum rays (uncapped), plasma core, biomorphic AI face,
+/// elastic screen-boundary bouncing shard particles, and stuck shard mini-equalizers.
 /// </summary>
 public sealed partial class OverlayWidget : Window
 {
     public static OverlayWidget? Instance { get; private set; }
+
+    private const int WM_NCHITTEST = 0x0084;
+    private const int HTTRANSPARENT = -1;
+    private const int HTCLIENT = 1;
+    public const double CoreHitRadius = 75.0;
 
     private JarvisState _currentState = JarvisState.Idle;
     private readonly DispatcherTimer _actionResetTimer;
@@ -37,8 +42,11 @@ public sealed partial class OverlayWidget : Window
     private IVoiceFeedbackService? _attachedFeedback;
     private NAudio.Wave.WasapiLoopbackCapture? _loopbackCapture;
     private bool _isSpeaking = false;
-    private OverdriveParticleOverlayWindow? _particleOverlay;
     private bool _isOverdriveGlowApplied = false;
+
+    private bool _isDraggingCore = false;
+    private Point _dragStartPos;
+    private Point _initialCenter;
 
     public JarvisState CurrentState => _currentState;
     public bool IgnoreTtsInLoopback { get; set; } = true;
@@ -86,16 +94,6 @@ public sealed partial class OverlayWidget : Window
             _timerPollingTimer.Start();
             _periodicMemoryTrimTimer.Start();
 
-            try
-            {
-                _particleOverlay = new OverdriveParticleOverlayWindow();
-                _particleOverlay.Owner = this;
-            }
-            catch (Exception ex)
-            {
-                JarvisLog.Warn("HUD", $"Failed to initialize OverdriveParticleOverlayWindow: {ex.Message}");
-            }
-
             ArcReactor.OnOverdriveFrame += OnArcReactorOverdriveFrame;
 
             if (VoiceListener.Instance != null && _attachedListener == null)
@@ -113,6 +111,60 @@ public sealed partial class OverlayWidget : Window
 
         // Subscribe to Edge-TTS decoded audio output chunks
         EdgeTtsEngine.OnAudioPlaybackChunk += OnTtsAudioPlaybackChunk;
+    }
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        if (PresentationSource.FromVisual(this) is HwndSource source)
+        {
+            source.AddHook(WndProc);
+        }
+    }
+
+    /// <summary>
+    /// Selective click-through hook via Win32 WM_NCHITTEST:
+    /// Inside CoreHitRadius (~75px) -> HTCLIENT (interactive clicks, drag, context menu).
+    /// Outside CoreHitRadius -> HTTRANSPARENT (clicks pass straight through to desktop/background apps).
+    /// </summary>
+    private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg == WM_NCHITTEST)
+        {
+            if (_isDraggingCore)
+            {
+                handled = true;
+                return (IntPtr)HTCLIENT;
+            }
+
+            int screenX = unchecked((short)(long)lParam);
+            int screenY = unchecked((short)((long)lParam >> 16));
+
+            Point clientPt;
+            try
+            {
+                clientPt = PointFromScreen(new Point(screenX, screenY));
+            }
+            catch
+            {
+                clientPt = new Point(screenX - Left, screenY - Top);
+            }
+
+            Point center = ArcReactor.Center;
+            double dx = clientPt.X - center.X;
+            double dy = clientPt.Y - center.Y;
+
+            if (dx * dx + dy * dy <= CoreHitRadius * CoreHitRadius)
+            {
+                handled = true;
+                return (IntPtr)HTCLIENT;
+            }
+
+            handled = true;
+            return (IntPtr)HTTRANSPARENT;
+        }
+
+        return IntPtr.Zero;
     }
 
     /// <summary>
@@ -247,6 +299,7 @@ public sealed partial class OverlayWidget : Window
             {
                 TimerOverlayBorder.Visibility = Visibility.Visible;
                 TimerOverlayText.Text = $"⏱ {earliest.Remaining:mm\\:ss}";
+                UpdateAuxiliaryPositions();
                 return;
             }
         }
@@ -269,13 +322,33 @@ public sealed partial class OverlayWidget : Window
     }
 
     /// <summary>
-    /// Positions the overlay in the bottom right corner of the primary display above the taskbar.
+    /// Positions the overlay as a borderless fullscreen window covering the primary display,
+    /// with the Arc Reactor core positioned in the bottom-right corner of the work area.
     /// </summary>
     public void PositionInBottomRightCorner()
     {
+        Left = 0;
+        Top = 0;
+        Width = SystemParameters.PrimaryScreenWidth > 0 ? SystemParameters.PrimaryScreenWidth : 1920.0;
+        Height = SystemParameters.PrimaryScreenHeight > 0 ? SystemParameters.PrimaryScreenHeight : 1080.0;
+
         var workArea = SystemParameters.WorkArea;
-        Left = workArea.Right - Width - 24;
-        Top = workArea.Bottom - Height - 24;
+        ArcReactor.Center = new Point(workArea.Right - 130.0, workArea.Bottom - 130.0);
+        UpdateAuxiliaryPositions();
+    }
+
+    /// <summary>
+    /// Synchronizes auxiliary UI elements (Glow anchor ellipse, Timer badge) to ArcReactor.Center.
+    /// </summary>
+    public void UpdateAuxiliaryPositions()
+    {
+        Point center = ArcReactor.Center;
+        Canvas.SetLeft(CoreGlowAnchor, center.X - CoreGlowAnchor.Width / 2.0);
+        Canvas.SetTop(CoreGlowAnchor, center.Y - CoreGlowAnchor.Height / 2.0);
+
+        double timerW = TimerOverlayBorder.ActualWidth > 0 ? TimerOverlayBorder.ActualWidth : 60.0;
+        Canvas.SetLeft(TimerOverlayBorder, center.X - timerW / 2.0);
+        Canvas.SetTop(TimerOverlayBorder, center.Y + 48.0);
     }
 
     /// <summary>
@@ -327,18 +400,6 @@ public sealed partial class OverlayWidget : Window
 
     private void OnArcReactorOverdriveFrame(bool isActive, double progress, float beatIntensity)
     {
-        Point center;
-        try
-        {
-            center = PointToScreen(new Point(ActualWidth / 2.0, ActualHeight / 2.0));
-        }
-        catch
-        {
-            center = new Point(Left + ActualWidth / 2.0, Top + ActualHeight / 2.0);
-        }
-
-        _particleOverlay?.UpdateOverdrive(center, isActive, progress, beatIntensity);
-
         if (isActive && progress > 0.1)
         {
             if (!_isOverdriveGlowApplied)
@@ -373,7 +434,47 @@ public sealed partial class OverlayWidget : Window
     {
         if (e.ChangedButton == MouseButton.Left)
         {
-            DragMove();
+            Point mousePos = e.GetPosition(this);
+            Point center = ArcReactor.Center;
+            double dx = mousePos.X - center.X;
+            double dy = mousePos.Y - center.Y;
+
+            if (dx * dx + dy * dy <= CoreHitRadius * CoreHitRadius)
+            {
+                _isDraggingCore = true;
+                _dragStartPos = mousePos;
+                _initialCenter = center;
+                CaptureMouse();
+                e.Handled = true;
+            }
+        }
+    }
+
+    private void Window_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (_isDraggingCore)
+        {
+            Point curPos = e.GetPosition(this);
+            double deltaX = curPos.X - _dragStartPos.X;
+            double deltaY = curPos.Y - _dragStartPos.Y;
+
+            double maxW = ActualWidth > 0 ? ActualWidth : (SystemParameters.PrimaryScreenWidth > 0 ? SystemParameters.PrimaryScreenWidth : 1920.0);
+            double maxH = ActualHeight > 0 ? ActualHeight : (SystemParameters.PrimaryScreenHeight > 0 ? SystemParameters.PrimaryScreenHeight : 1080.0);
+
+            double newX = Math.Clamp(_initialCenter.X + deltaX, CoreHitRadius, maxW - CoreHitRadius);
+            double newY = Math.Clamp(_initialCenter.Y + deltaY, CoreHitRadius, maxH - CoreHitRadius);
+
+            ArcReactor.Center = new Point(newX, newY);
+            UpdateAuxiliaryPositions();
+        }
+    }
+
+    private void Window_MouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_isDraggingCore && e.ChangedButton == MouseButton.Left)
+        {
+            _isDraggingCore = false;
+            ReleaseMouseCapture();
         }
     }
 
@@ -489,16 +590,6 @@ public sealed partial class OverlayWidget : Window
         StopLoopbackCapture();
         ArcReactor.StopRendering();
         ArcReactor.OnOverdriveFrame -= OnArcReactorOverdriveFrame;
-
-        if (_particleOverlay != null)
-        {
-            try
-            {
-                _particleOverlay.Close();
-            }
-            catch { }
-            _particleOverlay = null;
-        }
 
         _actionResetTimer.Stop();
         _actionResetTimer.Tick -= OnActionResetTimerTick;

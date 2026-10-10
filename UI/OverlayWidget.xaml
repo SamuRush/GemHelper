@@ -3,7 +3,6 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ui="clr-namespace:Gem.UI"
         Title="JARVIS Arc Reactor"
-        Width="220" Height="220"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
@@ -15,19 +14,16 @@
         TextOptions.TextRenderingMode="ClearType"
         SnapsToDevicePixels="True"
         MouseDown="Window_MouseDown"
+        MouseMove="Window_MouseMove"
+        MouseUp="Window_MouseUp"
         MouseDoubleClick="Window_MouseDoubleClick">
 
-    <Grid x:Name="ReactorRoot" HorizontalAlignment="Center" VerticalAlignment="Center" Width="220" Height="220">
-        <!-- Holographic JARVIS Arc Reactor (Layer 1, Layer 2, Layer 3 60 FPS DrawingVisual) -->
+    <Grid x:Name="RootGrid" Background="Transparent" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+        <!-- Holographic JARVIS Arc Reactor & Real-Time Audio FFT Spectrograph (Fullscreen Canvas) -->
         <ui:ArcReactorVisualHost x:Name="ArcReactor"
-                                 Width="216" Height="216"
-                                 HorizontalAlignment="Center" VerticalAlignment="Center"
+                                 HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
                                  Cursor="Hand"
                                  ToolTip="Левый клик: перетащить | Двойной клик: настройки | Правый клик: меню">
-            <ui:ArcReactorVisualHost.Effect>
-                <DropShadowEffect x:Name="OuterGlow" Color="#00E5FF" BlurRadius="26" ShadowDepth="0" Opacity="0.95"/>
-            </ui:ArcReactorVisualHost.Effect>
-
             <!-- ContextMenu directly on the Arc Reactor core -->
             <ui:ArcReactorVisualHost.ContextMenu>
                 <ContextMenu Background="#16161A" Foreground="#FFFFFF" BorderBrush="#00E5FF" BorderThickness="1">
@@ -38,27 +34,36 @@
             </ui:ArcReactorVisualHost.ContextMenu>
         </ui:ArcReactorVisualHost>
 
-        <!-- Mini-panel for active timers (bottom badge of core) -->
-        <Border x:Name="TimerOverlayBorder"
-                HorizontalAlignment="Center" VerticalAlignment="Bottom"
-                Margin="0,0,0,8"
-                Background="#D916161A"
-                BorderBrush="#66FFD600"
-                BorderThickness="1"
-                CornerRadius="6"
-                Padding="6,2"
-                Visibility="Collapsed">
-            <TextBlock x:Name="TimerOverlayText"
-                       Foreground="#FFD600"
-                       FontSize="10"
-                       FontFamily="Consolas, Segoe UI"
-                       FontWeight="SemiBold"
-                       Text="⏱ 00:00"/>
-        </Border>
+        <!-- Canvas for auxiliary elements anchored relative to ArcReactor.Center -->
+        <Canvas x:Name="AuxCanvas" IsHitTestVisible="False" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+            <!-- Holographic glow anchor placed behind the core (lightweight 150x150 blur surface) -->
+            <Ellipse x:Name="CoreGlowAnchor" Width="150" Height="150" IsHitTestVisible="False">
+                <Ellipse.Effect>
+                    <DropShadowEffect x:Name="OuterGlow" Color="#00E5FF" BlurRadius="26" ShadowDepth="0" Opacity="0.95"/>
+                </Ellipse.Effect>
+            </Ellipse>
 
-        <!-- Speech Subtitle Popup anchored below the Arc Reactor -->
+            <!-- Mini-panel for active timers (bottom badge of core) -->
+            <Border x:Name="TimerOverlayBorder"
+                    Background="#D916161A"
+                    BorderBrush="#66FFD600"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    Padding="6,2"
+                    Visibility="Collapsed"
+                    IsHitTestVisible="False">
+                <TextBlock x:Name="TimerOverlayText"
+                           Foreground="#FFD600"
+                           FontSize="10"
+                           FontFamily="Consolas, Segoe UI"
+                           FontWeight="SemiBold"
+                           Text="⏱ 00:00"/>
+            </Border>
+        </Canvas>
+
+        <!-- Speech Subtitle Popup anchored below the Arc Reactor core -->
         <Popup x:Name="SpeechSubtitlePopup"
-               PlacementTarget="{Binding ElementName=ArcReactor}"
+               PlacementTarget="{Binding ElementName=CoreGlowAnchor}"
                Placement="Bottom"
                AllowsTransparency="True"
                IsOpen="False"

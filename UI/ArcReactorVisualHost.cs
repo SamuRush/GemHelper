@@ -359,9 +359,19 @@ public static class ArcReactorPalettes
     }
 }
 
+public enum BoundaryEdge : byte
+{
+    None = 0,
+    Left = 1,
+    Right = 2,
+    Top = 3,
+    Bottom = 4
+}
+
 /// <summary>
 /// Lightweight struct representing a single energy shard in the reactor overdrive shatter particle system.
 /// Fixed-size pool in ArcReactorVisualHost guarantees 0 allocations in the render loop.
+/// Supports screen boundary collisions, elastic bounce physics, and stuck shard mini-visualizer.
 /// </summary>
 public struct ShardParticle
 {
@@ -377,6 +387,23 @@ public struct ShardParticle
     public double RotSpeed;
     public float Life;
     public bool Active;
+
+    // Screen boundary collision and stuck mini-equalizer state
+    public bool IsStuck;
+    public BoundaryEdge StuckEdge;
+    public double StuckX;
+    public double StuckY;
+    public double StuckAngle;
+
+    // 8 miniature spectral bars for Stuck Shard Mini-Visualizer
+    public float MiniBar0;
+    public float MiniBar1;
+    public float MiniBar2;
+    public float MiniBar3;
+    public float MiniBar4;
+    public float MiniBar5;
+    public float MiniBar6;
+    public float MiniBar7;
 }
 
 /// <summary>
@@ -427,13 +454,35 @@ public sealed class ArcReactorVisualHost : FrameworkElement
     // Overdrive Shatter particle system state (fixed pool, zero allocations at 60 FPS)
     private readonly ShardParticle[] _shards = new ShardParticle[DefaultShardCount];
     private readonly StreamGeometry _dynamicShardsGeometry = new();
+    private readonly StreamGeometry _dynamicStuckBarsGeometry = new();
+    private readonly Random _rand = new(42);
     private double _bassEnergyAccumulator = 0.0;
+    private double _cooldownTimer = 0.0;
+    private bool _wasOverdriveActive = false;
+    private bool _shardsExploded = false;
+
+    private Point? _centerOverride = null;
+    public Point Center
+    {
+        get
+        {
+            if (_centerOverride.HasValue) return _centerOverride.Value;
+            double w = ActualWidth > 0 ? ActualWidth : (SystemParameters.PrimaryScreenWidth > 0 ? SystemParameters.PrimaryScreenWidth : 1920.0);
+            double h = ActualHeight > 0 ? ActualHeight : (SystemParameters.PrimaryScreenHeight > 0 ? SystemParameters.PrimaryScreenHeight : 1080.0);
+            if (w <= 300) return new Point(w / 2.0, h / 2.0);
+            return new Point(w - 150.0, h - 150.0);
+        }
+        set => _centerOverride = value;
+    }
 
     public bool EnableShatterOverdrive { get; set; } = true;
     public bool EnableFullscreenOverdrive { get; set; } = true;
     public double OverdriveThreshold { get; set; } = 0.85;
+    public double OverdriveCooldown { get; set; } = 10.0;
     public bool IsOverdriveActive { get; private set; } = false;
     public double OverdriveProgress { get; private set; } = 0.0;
+    public double CooldownRemaining => _cooldownTimer;
+    public bool IsOnCooldown => _cooldownTimer > 0.0;
     public int ShardCount => _shards.Length;
     public ShardParticle[] GetShardSnapshot() => (ShardParticle[])_shards.Clone();
     public event Action<bool, double, float>? OnOverdriveFrame;
@@ -518,6 +567,7 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         EnableShatterOverdrive = config.EnableShatterOverdrive;
         EnableFullscreenOverdrive = config.EnableFullscreenOverdrive;
         OverdriveThreshold = config.OverdriveThreshold;
+        OverdriveCooldown = config.OverdriveCooldown;
 
         if (CurrentTheme == HudColorTheme.Custom)
         {
@@ -555,6 +605,7 @@ public sealed class ArcReactorVisualHost : FrameworkElement
 
     private void InitShards()
     {
+        Point center = Center;
         for (int i = 0; i < DefaultShardCount; i++)
         {
             double angle = i * (2.0 * Math.PI / DefaultShardCount);
@@ -567,19 +618,34 @@ public sealed class ArcReactorVisualHost : FrameworkElement
                 BaseAngle = angle,
                 BaseRadius = baseRadius,
                 CurrentRadius = baseRadius,
-                X = baseRadius * Math.Cos(angle),
-                Y = baseRadius * Math.Sin(angle),
+                X = center.X + baseRadius * Math.Cos(angle),
+                Y = center.Y + baseRadius * Math.Sin(angle),
+                Vx = 0.0,
+                Vy = 0.0,
                 Size = size,
                 Rotation = angle,
                 RotSpeed = rotSpeed,
                 Life = 0f,
-                Active = false
+                Active = false,
+                IsStuck = false,
+                StuckEdge = BoundaryEdge.None,
+                StuckX = 0.0,
+                StuckY = 0.0,
+                StuckAngle = 0.0,
+                MiniBar0 = 0f, MiniBar1 = 0f, MiniBar2 = 0f, MiniBar3 = 0f,
+                MiniBar4 = 0f, MiniBar5 = 0f, MiniBar6 = 0f, MiniBar7 = 0f
             };
         }
     }
 
     public void TriggerBassFrame(float subBassEnergy, float beatIntensity, double dt)
     {
+        // 1. Update cooldown timer
+        if (_cooldownTimer > 0.0)
+        {
+            _cooldownTimer = Math.Max(0.0, _cooldownTimer - dt);
+        }
+
         if (!EnableShatterOverdrive && !EnableFullscreenOverdrive)
         {
             IsOverdriveActive = false;
@@ -593,35 +659,57 @@ public sealed class ArcReactorVisualHost : FrameworkElement
         float triggerThreshold = (float)Math.Clamp(OverdriveThreshold, 0.40, 1.50);
         float inputGate = 0.45f * (triggerThreshold / 0.85f);
         float combined = subBassEnergy * 0.6f + beatIntensity * 0.4f;
-        if (combined > inputGate)
+
+        if (_cooldownTimer > 0.0)
         {
-            _bassEnergyAccumulator += (combined - inputGate * 0.75f) * dt * 2.5;
+            // Trigger is strictly locked during cooldown!
+            _bassEnergyAccumulator = 0.0;
+            IsOverdriveActive = false;
         }
         else
         {
-            _bassEnergyAccumulator -= dt * 1.2;
-        }
+            if (combined > inputGate)
+            {
+                _bassEnergyAccumulator += (combined - inputGate * 0.75f) * dt * 2.5;
+            }
+            else
+            {
+                _bassEnergyAccumulator -= dt * 2.0;
+            }
 
-        // Sudden drop / peak hit kick
-        if (beatIntensity > 0.90f && subBassEnergy > 0.80f)
-        {
-            _bassEnergyAccumulator = Math.Max(_bassEnergyAccumulator, (double)triggerThreshold);
-        }
+            // Sudden drop / peak hit kick
+            if (beatIntensity > 0.90f && subBassEnergy > 0.80f)
+            {
+                _bassEnergyAccumulator = Math.Max(_bassEnergyAccumulator, (double)triggerThreshold);
+            }
 
-        _bassEnergyAccumulator = Math.Clamp(_bassEnergyAccumulator, 0.0, 2.0);
+            _bassEnergyAccumulator = Math.Clamp(_bassEnergyAccumulator, 0.0, 2.0);
 
-        if (!IsOverdriveActive && _bassEnergyAccumulator >= triggerThreshold)
-        {
-            IsOverdriveActive = true;
-        }
-        else if (IsOverdriveActive && _bassEnergyAccumulator <= triggerThreshold * 0.35)
-        {
-            IsOverdriveActive = false;
+            if (!IsOverdriveActive && _bassEnergyAccumulator >= triggerThreshold)
+            {
+                IsOverdriveActive = true;
+            }
+            else if (IsOverdriveActive && _bassEnergyAccumulator <= triggerThreshold * 0.35)
+            {
+                IsOverdriveActive = false;
+            }
         }
 
         double targetProgress = IsOverdriveActive ? Math.Clamp(_bassEnergyAccumulator / triggerThreshold, 0.4, 1.0) : 0.0;
-        double progressSpeed = IsOverdriveActive ? 8.0 : 4.0;
+        double progressSpeed = IsOverdriveActive ? 8.0 : 5.0;
         OverdriveProgress += (targetProgress - OverdriveProgress) * Math.Clamp(dt * progressSpeed, 0.0, 1.0);
+
+        // When Overdrive finishes and shards gather back into core, activate Cooldown!
+        if (_wasOverdriveActive && !IsOverdriveActive && OverdriveProgress <= 0.08)
+        {
+            _wasOverdriveActive = false;
+            _cooldownTimer = OverdriveCooldown;
+        }
+
+        if (IsOverdriveActive)
+        {
+            _wasOverdriveActive = true;
+        }
 
         UpdateShardsPhysics(dt, beatIntensity, subBassEnergy);
 
@@ -630,28 +718,211 @@ public sealed class ArcReactorVisualHost : FrameworkElement
 
     private void UpdateShardsPhysics(double dt, float beatIntensity, float subBassEnergy)
     {
-        for (int i = 0; i < DefaultShardCount; i++)
+        Point center = Center;
+        double boundsW = ActualWidth > 0 ? ActualWidth : (SystemParameters.PrimaryScreenWidth > 0 ? SystemParameters.PrimaryScreenWidth : 1920.0);
+        double boundsH = ActualHeight > 0 ? ActualHeight : (SystemParameters.PrimaryScreenHeight > 0 ? SystemParameters.PrimaryScreenHeight : 1080.0);
+
+        // Chaotic explosion impulse when Overdrive is newly triggered
+        if (IsOverdriveActive && !_shardsExploded)
         {
-            double baseRad = _shards[i].BaseRadius;
-            double targetDist = baseRad + OverdriveProgress * (34.0 + (i % 6) * 9.0);
-            double beatKick = beatIntensity * 14.0 * OverdriveProgress;
-            double targetRadius = targetDist + beatKick;
+            _shardsExploded = true;
+            for (int i = 0; i < DefaultShardCount; i++)
+            {
+                double angle = _shards[i].BaseAngle;
+                double rad = _shards[i].BaseRadius;
+                _shards[i].X = center.X + rad * Math.Cos(angle);
+                _shards[i].Y = center.Y + rad * Math.Sin(angle);
 
-            double speed = IsOverdriveActive ? 9.5 : 5.0;
-            _shards[i].CurrentRadius += (targetRadius - _shards[i].CurrentRadius) * Math.Clamp(dt * speed, 0.0, 1.0);
-
-            _shards[i].Rotation += _shards[i].RotSpeed * dt * (1.0 + beatIntensity * 2.2);
-            _shards[i].Life = (float)Math.Clamp(OverdriveProgress * (0.65f + beatIntensity * 0.35f), 0.0, 1.0);
-            _shards[i].Active = OverdriveProgress > 0.02;
-
-            double rad = _shards[i].BaseAngle + (OverdriveProgress * ((i % 2 == 0) ? 0.3 : -0.3));
-            _shards[i].X = _shards[i].CurrentRadius * Math.Cos(rad);
-            _shards[i].Y = _shards[i].CurrentRadius * Math.Sin(rad);
+                double chaoticAngle = angle + (_rand.NextDouble() - 0.5) * 1.1;
+                double speed = 650.0 + _rand.NextDouble() * 850.0 + beatIntensity * 350.0;
+                _shards[i].Vx = speed * Math.Cos(chaoticAngle);
+                _shards[i].Vy = speed * Math.Sin(chaoticAngle);
+                _shards[i].RotSpeed = ((i % 2 == 0) ? 1.0 : -1.0) * (3.5 + _rand.NextDouble() * 5.5);
+                _shards[i].IsStuck = false;
+                _shards[i].StuckEdge = BoundaryEdge.None;
+                _shards[i].Active = true;
+                _shards[i].Life = 1.0f;
+            }
         }
+        else if (!IsOverdriveActive)
+        {
+            _shardsExploded = false;
+        }
+
+        if (IsOverdriveActive)
+        {
+            float decay = (float)Math.Pow(FalloffSetting, dt * 60.0);
+            for (int i = 0; i < DefaultShardCount; i++)
+            {
+                _shards[i].Life = (float)Math.Clamp(OverdriveProgress * (0.65f + beatIntensity * 0.35f), 0.0, 1.0);
+                _shards[i].Active = true;
+
+                if (_shards[i].IsStuck)
+                {
+                    _shards[i].X = _shards[i].StuckX;
+                    _shards[i].Y = _shards[i].StuckY;
+                    UpdateMiniBars(ref _shards[i], decay);
+                    continue;
+                }
+
+                // Air resistance drag
+                _shards[i].Vx *= Math.Pow(0.92, dt * 60.0);
+                _shards[i].Vy *= Math.Pow(0.92, dt * 60.0);
+
+                // Audio beat kick
+                _shards[i].Vx += beatIntensity * 160.0 * Math.Cos(_shards[i].Rotation) * dt;
+                _shards[i].Vy += beatIntensity * 160.0 * Math.Sin(_shards[i].Rotation) * dt;
+
+                // Move
+                _shards[i].X += _shards[i].Vx * dt;
+                _shards[i].Y += _shards[i].Vy * dt;
+                _shards[i].Rotation += _shards[i].RotSpeed * dt * (1.0 + beatIntensity * 1.5);
+
+                double dx = _shards[i].X - center.X;
+                double dy = _shards[i].Y - center.Y;
+                _shards[i].CurrentRadius = Math.Sqrt(dx * dx + dy * dy);
+
+                CheckBoundaryCollisions(ref _shards[i], boundsW, boundsH);
+            }
+        }
+        else
+        {
+            // Phase Recall: all particles (including stuck ones) detach and fly back into core
+            for (int i = 0; i < DefaultShardCount; i++)
+            {
+                _shards[i].IsStuck = false;
+                _shards[i].StuckEdge = BoundaryEdge.None;
+
+                double targetX = center.X + _shards[i].BaseRadius * Math.Cos(_shards[i].BaseAngle);
+                double targetY = center.Y + _shards[i].BaseRadius * Math.Sin(_shards[i].BaseAngle);
+
+                double recallLerp = Math.Clamp(dt * 7.5, 0.0, 1.0);
+                _shards[i].X += (targetX - _shards[i].X) * recallLerp;
+                _shards[i].Y += (targetY - _shards[i].Y) * recallLerp;
+
+                double dx = _shards[i].X - center.X;
+                double dy = _shards[i].Y - center.Y;
+                _shards[i].CurrentRadius = Math.Sqrt(dx * dx + dy * dy);
+
+                _shards[i].Rotation += _shards[i].RotSpeed * dt * 0.4;
+                _shards[i].Life = (float)Math.Clamp(OverdriveProgress * (0.65f + beatIntensity * 0.35f), 0.0, 1.0);
+                _shards[i].Active = OverdriveProgress > 0.02;
+            }
+        }
+    }
+
+    private void CheckBoundaryCollisions(ref ShardParticle shard, double boundsW, double boundsH)
+    {
+        // Left boundary
+        if (shard.X <= 0)
+        {
+            shard.X = 0;
+            if (_rand.NextDouble() < 0.07)
+            {
+                shard.IsStuck = true;
+                shard.StuckEdge = BoundaryEdge.Left;
+                shard.StuckX = 0;
+                shard.StuckY = shard.Y;
+                shard.StuckAngle = 0.0; // Inward normal points right (+X)
+                shard.Vx = 0; shard.Vy = 0;
+                return;
+            }
+            double bounce = 0.75 + _rand.NextDouble() * 0.10;
+            shard.Vx = Math.Abs(shard.Vx) * bounce;
+            shard.Vy = (shard.Vy + (_rand.NextDouble() - 0.5) * Math.Abs(shard.Vx) * 0.35) * bounce;
+        }
+        // Right boundary
+        else if (shard.X >= boundsW)
+        {
+            shard.X = boundsW;
+            if (_rand.NextDouble() < 0.07)
+            {
+                shard.IsStuck = true;
+                shard.StuckEdge = BoundaryEdge.Right;
+                shard.StuckX = boundsW;
+                shard.StuckY = shard.Y;
+                shard.StuckAngle = Math.PI; // Inward normal points left (-X)
+                shard.Vx = 0; shard.Vy = 0;
+                return;
+            }
+            double bounce = 0.75 + _rand.NextDouble() * 0.10;
+            shard.Vx = -Math.Abs(shard.Vx) * bounce;
+            shard.Vy = (shard.Vy + (_rand.NextDouble() - 0.5) * Math.Abs(shard.Vx) * 0.35) * bounce;
+        }
+
+        // Top boundary
+        if (shard.Y <= 0)
+        {
+            shard.Y = 0;
+            if (_rand.NextDouble() < 0.07)
+            {
+                shard.IsStuck = true;
+                shard.StuckEdge = BoundaryEdge.Top;
+                shard.StuckX = shard.X;
+                shard.StuckY = 0;
+                shard.StuckAngle = Math.PI / 2.0; // Inward normal points down (+Y)
+                shard.Vx = 0; shard.Vy = 0;
+                return;
+            }
+            double bounce = 0.75 + _rand.NextDouble() * 0.10;
+            shard.Vy = Math.Abs(shard.Vy) * bounce;
+            shard.Vx = (shard.Vx + (_rand.NextDouble() - 0.5) * Math.Abs(shard.Vy) * 0.35) * bounce;
+        }
+        // Bottom boundary
+        else if (shard.Y >= boundsH)
+        {
+            shard.Y = boundsH;
+            if (_rand.NextDouble() < 0.07)
+            {
+                shard.IsStuck = true;
+                shard.StuckEdge = BoundaryEdge.Bottom;
+                shard.StuckX = shard.X;
+                shard.StuckY = boundsH;
+                shard.StuckAngle = -Math.PI / 2.0; // Inward normal points up (-Y)
+                shard.Vx = 0; shard.Vy = 0;
+                return;
+            }
+            double bounce = 0.75 + _rand.NextDouble() * 0.10;
+            shard.Vy = -Math.Abs(shard.Vy) * bounce;
+            shard.Vx = (shard.Vx + (_rand.NextDouble() - 0.5) * Math.Abs(shard.Vy) * 0.35) * bounce;
+        }
+    }
+
+    private void UpdateMiniBars(ref ShardParticle shard, float decay)
+    {
+        UpdateSingleMiniBar(ref shard.MiniBar0, 2, decay);
+        UpdateSingleMiniBar(ref shard.MiniBar1, 6, decay);
+        UpdateSingleMiniBar(ref shard.MiniBar2, 12, decay);
+        UpdateSingleMiniBar(ref shard.MiniBar3, 20, decay);
+        UpdateSingleMiniBar(ref shard.MiniBar4, 28, decay);
+        UpdateSingleMiniBar(ref shard.MiniBar5, 38, decay);
+        UpdateSingleMiniBar(ref shard.MiniBar6, 48, decay);
+        UpdateSingleMiniBar(ref shard.MiniBar7, 58, decay);
+    }
+
+    private void UpdateSingleMiniBar(ref float bar, int freqIdx, float decay)
+    {
+        freqIdx = Math.Clamp(freqIdx, 0, RayCount - 1);
+        float target = _currentSpectrum[freqIdx];
+        if (target > bar) bar = target;
+        else bar = Math.Max(target, bar * decay);
     }
 
     protected override int VisualChildrenCount => 1;
     protected override Visual GetVisualChild(int index) => _drawingVisual;
+
+    protected override HitTestResult? HitTestCore(PointHitTestParameters hitTestParameters)
+    {
+        Point pt = hitTestParameters.HitPoint;
+        Point center = Center;
+        double dx = pt.X - center.X;
+        double dy = pt.Y - center.Y;
+        if (dx * dx + dy * dy <= 75.0 * 75.0)
+        {
+            return new PointHitTestResult(this, pt);
+        }
+        return null;
+    }
 
     private void PrecomputeTrigonometry()
     {
@@ -939,13 +1210,13 @@ public sealed class ArcReactorVisualHost : FrameworkElement
 
     private void RenderFrame(double now)
     {
-        double width = ActualWidth > 0 ? ActualWidth : 220.0;
-        double height = ActualHeight > 0 ? ActualHeight : 220.0;
-        double cx = width / 2.0;
-        double cy = height / 2.0;
-        Point center = new Point(cx, cy);
+        Point center = Center;
+        double cx = center.X;
+        double cy = center.Y;
 
-        double baseScale = Math.Min(width, height) / 220.0;
+        double baseScale = (ActualWidth > 0 && ActualWidth <= 300)
+            ? Math.Min(ActualWidth, ActualHeight) / 220.0
+            : 1.0;
         if (baseScale <= 0.01) baseScale = 1.0;
 
         // Central core radius smoothly modulated by sub-bass energy (20-150 Hz) via Lerp and BassScale setting (up to 3.0)
@@ -1053,50 +1324,11 @@ public sealed class ArcReactorVisualHost : FrameworkElement
             dc.Pop();
 
             // =================================================================
-            // OVERDRIVE SHATTER SHARD PARTICLE SYSTEM
-            // 32 energetic crystalline shards flying outward with drag physics,
-            // pulsating in scale and brightness in sync with incoming audio beat.
-            // Batched in dynamic StreamGeometry (0 GC allocations)
-            // =================================================================
-            if (OverdriveProgress > 0.02)
-            {
-                using (var sCtx = _dynamicShardsGeometry.Open())
-                {
-                    for (int i = 0; i < DefaultShardCount; i++)
-                    {
-                        if (!_shards[i].Active) continue;
-
-                        double sx = cx + _shards[i].X;
-                        double sy = cy + _shards[i].Y;
-                        double size = _shards[i].Size * (1.0 + 0.35 * _analyzer.BeatIntensity);
-                        double rot = _shards[i].Rotation;
-
-                        double cosR = Math.Cos(rot);
-                        double sinR = Math.Sin(rot);
-                        double tanX = -sinR;
-                        double tanY = cosR;
-
-                        Point sp0 = new Point(sx + size * cosR, sy + size * sinR);
-                        Point sp1 = new Point(sx + size * 0.45 * tanX, sy + size * 0.45 * tanY);
-                        Point sp2 = new Point(sx - size * 0.75 * cosR, sy - size * 0.75 * sinR);
-                        Point sp3 = new Point(sx - size * 0.45 * tanX, sy - size * 0.45 * tanY);
-
-                        sCtx.BeginFigure(sp0, true, true);
-                        sCtx.LineTo(sp1, true, false);
-                        sCtx.LineTo(sp2, true, false);
-                        sCtx.LineTo(sp3, true, false);
-                    }
-                }
-                dc.DrawGeometry(pal.PrimaryBrush, pal.PrimaryPen, _dynamicShardsGeometry);
-            }
-
-            // =================================================================
             // LAYER 1: RADIAL AUDIO SPECTROGRAPH (Procedural Crown of 128 Rays)
             // Batch rendering via StreamGeometry & StreamGeometryContext (0 allocations)
-            // Exponential non-linear shaping ensures quiet sounds are visible while loud hits blast upward.
-            // Dynamic max height scales with user Gain (1.0 - 15.0).
+            // Uncapped dynamic max height expands into full screen canvas.
             // =================================================================
-            double dynamicMaxRayHeight = 22.0 + Math.Max(0.0, GainSetting - 1.0) * 2.5;
+            double dynamicMaxRayHeight = 28.0 + Math.Max(0.0, GainSetting - 1.0) * 8.0;
 
             using (var rayCtx = _dynamicRaysGeometry.Open())
             {
@@ -1152,6 +1384,91 @@ public sealed class ArcReactorVisualHost : FrameworkElement
             dc.DrawEllipse(null, pal.PenContainment, center, BaseRadius + dynamicMaxRayHeight * 0.85, BaseRadius + dynamicMaxRayHeight * 0.85);
 
             dc.Pop(); // _rootScaleTransform
+
+            // =================================================================
+            // OVERDRIVE SHATTER SHARD PARTICLE SYSTEM & BOUNDARY MINI-EQUALIZERS
+            // 32 energetic crystalline shards flying outward across the screen with drag physics,
+            // bouncing elastically off monitor edges, occasionally sticking and projecting
+            // miniature spectral equalizers. Batched in StreamGeometry (0 GC allocations).
+            // Rendered outside _rootScaleTransform in 1:1 canvas pixel space.
+            // =================================================================
+            if (OverdriveProgress > 0.02)
+            {
+                using (var sCtx = _dynamicShardsGeometry.Open())
+                {
+                    for (int i = 0; i < DefaultShardCount; i++)
+                    {
+                        if (!_shards[i].Active) continue;
+
+                        double sx = _shards[i].X;
+                        double sy = _shards[i].Y;
+                        double size = _shards[i].Size * (1.0 + 0.35 * _analyzer.BeatIntensity);
+                        double rot = _shards[i].Rotation;
+
+                        double cosR = Math.Cos(rot);
+                        double sinR = Math.Sin(rot);
+                        double tanX = -sinR;
+                        double tanY = cosR;
+
+                        Point sp0 = new Point(sx + size * cosR, sy + size * sinR);
+                        Point sp1 = new Point(sx + size * 0.45 * tanX, sy + size * 0.45 * tanY);
+                        Point sp2 = new Point(sx - size * 0.75 * cosR, sy - size * 0.75 * sinR);
+                        Point sp3 = new Point(sx - size * 0.45 * tanX, sy - size * 0.45 * tanY);
+
+                        sCtx.BeginFigure(sp0, true, true);
+                        sCtx.LineTo(sp1, true, false);
+                        sCtx.LineTo(sp2, true, false);
+                        sCtx.LineTo(sp3, true, false);
+                    }
+                }
+                dc.DrawGeometry(pal.PrimaryBrush, pal.PrimaryPen, _dynamicShardsGeometry);
+
+                // Stuck Shard Mini-Visualizers (Fan of 8 inward-pointing spectral bars)
+                bool hasStuckBars = false;
+                using (var barCtx = _dynamicStuckBarsGeometry.Open())
+                {
+                    for (int i = 0; i < DefaultShardCount; i++)
+                    {
+                        if (!_shards[i].Active || !_shards[i].IsStuck) continue;
+                        hasStuckBars = true;
+
+                        double sx = _shards[i].StuckX;
+                        double sy = _shards[i].StuckY;
+                        double normAngle = _shards[i].StuckAngle;
+
+                        for (int k = 0; k < 8; k++)
+                        {
+                            float barVal = k switch
+                            {
+                                0 => _shards[i].MiniBar0,
+                                1 => _shards[i].MiniBar1,
+                                2 => _shards[i].MiniBar2,
+                                3 => _shards[i].MiniBar3,
+                                4 => _shards[i].MiniBar4,
+                                5 => _shards[i].MiniBar5,
+                                6 => _shards[i].MiniBar6,
+                                _ => _shards[i].MiniBar7
+                            };
+
+                            double fanOffset = -0.55 + k * (1.10 / 7.0);
+                            double fanAngle = normAngle + fanOffset;
+                            double cosF = Math.Cos(fanAngle);
+                            double sinF = Math.Sin(fanAngle);
+
+                            double barLen = 5.0 + barVal * 32.0 * Math.Clamp(GainSetting / 3.0, 0.8, 3.5);
+                            Point p0 = new Point(sx + 4.0 * cosF, sy + 4.0 * sinF);
+                            Point p1 = new Point(sx + (4.0 + barLen) * cosF, sy + (4.0 + barLen) * sinF);
+
+                            barCtx.BeginFigure(p0, false, false);
+                            barCtx.LineTo(p1, true, false);
+                        }
+                    }
+                }
+                if (hasStuckBars)
+                {
+                    dc.DrawGeometry(null, pal.RayPen, _dynamicStuckBarsGeometry);
+                }
+            }
         }
     }
 

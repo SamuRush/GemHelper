@@ -285,4 +285,186 @@ public class OverdriveShatterTests
 
         if (threadEx != null) throw threadEx;
     }
+
+    [Fact]
+    public void HudSettings_OverdriveCooldown_DefaultValuesAndPersistence()
+    {
+        var settings = new HudSettingsConfig();
+        Assert.Equal(10.0, settings.OverdriveCooldown, precision: 2);
+
+        var custom = new HudSettingsConfig
+        {
+            OverdriveCooldown = 24.0
+        };
+
+        string tempJsonPath = Path.Combine(Path.GetTempPath(), $"hud_cooldown_{Guid.NewGuid()}.json");
+        try
+        {
+            HudSettingsStorage.SaveToFile(custom, tempJsonPath);
+            var loaded = HudSettingsStorage.LoadFromFile(tempJsonPath);
+            Assert.NotNull(loaded);
+            Assert.Equal(24.0, loaded.OverdriveCooldown, precision: 2);
+        }
+        finally
+        {
+            if (File.Exists(tempJsonPath)) File.Delete(tempJsonPath);
+        }
+    }
+
+    [Fact]
+    public void ArcReactorVisualHost_OverdriveCooldown_BlocksRetriggerUntilExpired()
+    {
+        Exception? threadEx = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var host = new ArcReactorVisualHost
+                {
+                    OverdriveCooldown = 5.0 // 5 seconds cooldown
+                };
+
+                // Trigger overdrive
+                for (int i = 0; i < 20; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 1.0f, beatIntensity: 1.0f, dt: 0.05);
+                }
+
+                Assert.True(host.IsOverdriveActive);
+
+                // Run silence until overdrive finishes and magnetic reverse gathers shards back
+                for (int i = 0; i < 50; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.05);
+                }
+
+                Assert.False(host.IsOverdriveActive);
+                Assert.True(host.IsOnCooldown, "Host should be in cooldown state after overdrive concludes");
+                Assert.True(host.CooldownRemaining > 0.0, "Cooldown timer should be positive");
+
+                // Attempt to retrigger immediately during cooldown with heavy bass
+                for (int i = 0; i < 20; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 1.0f, beatIntensity: 1.0f, dt: 0.05);
+                }
+
+                Assert.False(host.IsOverdriveActive, "Overdrive must NOT trigger while on cooldown");
+
+                // Advance time past the 5-second cooldown
+                for (int i = 0; i < 110; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.05);
+                }
+
+                Assert.False(host.IsOnCooldown, "Cooldown should expire after duration passes");
+                Assert.Equal(0.0, host.CooldownRemaining, precision: 2);
+
+                // Now heavy bass should trigger overdrive again
+                for (int i = 0; i < 25; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 1.0f, beatIntensity: 1.0f, dt: 0.05);
+                }
+
+                Assert.True(host.IsOverdriveActive, "Overdrive should trigger after cooldown expired");
+            }
+            catch (Exception ex)
+            {
+                threadEx = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        if (threadEx != null) throw threadEx;
+    }
+
+    [Fact]
+    public void OverlayWidget_CoreHitRadius_Is75Px()
+    {
+        Assert.Equal(75.0, OverlayWidget.CoreHitRadius);
+
+        // Verify distance calculation logic:
+        // Inside radius (e.g. 50px away) -> inside
+        double dxInside = 30.0;
+        double dyInside = 40.0;
+        double distSqInside = dxInside * dxInside + dyInside * dyInside; // 900 + 1600 = 2500 <= 5625
+        Assert.True(distSqInside <= OverlayWidget.CoreHitRadius * OverlayWidget.CoreHitRadius);
+
+        // Outside radius (e.g. 100px away) -> outside
+        double dxOutside = 80.0;
+        double dyOutside = 60.0;
+        double distSqOutside = dxOutside * dxOutside + dyOutside * dyOutside; // 6400 + 3600 = 10000 > 5625
+        Assert.False(distSqOutside <= OverlayWidget.CoreHitRadius * OverlayWidget.CoreHitRadius);
+    }
+
+    [Fact]
+    public void ArcReactorVisualHost_BoundaryCollisions_AndStuckShardRecall()
+    {
+        Exception? threadEx = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var host = new ArcReactorVisualHost
+                {
+                    OverdriveThreshold = 0.50
+                };
+
+                // Trigger overdrive
+                for (int i = 0; i < 20; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 1.0f, beatIntensity: 1.0f, dt: 0.05);
+                }
+
+                Assert.True(host.IsOverdriveActive);
+
+                // Run multiple energetic frames so shards fly out and collide with screen boundaries
+                for (int i = 0; i < 40; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 0.9f, beatIntensity: 0.8f, dt: 0.05);
+                }
+
+                var snapshot = host.GetShardSnapshot();
+                Assert.Equal(host.ShardCount, snapshot.Length);
+
+                double expectedW = System.Windows.SystemParameters.PrimaryScreenWidth > 0 ? System.Windows.SystemParameters.PrimaryScreenWidth : 1920.0;
+                double expectedH = System.Windows.SystemParameters.PrimaryScreenHeight > 0 ? System.Windows.SystemParameters.PrimaryScreenHeight : 1080.0;
+
+                foreach (var shard in snapshot)
+                {
+                    // Shards must remain inside screen boundary limits (0 to expectedW, 0 to expectedH)
+                    Assert.InRange(shard.X, 0.0, expectedW);
+                    Assert.InRange(shard.Y, 0.0, expectedH);
+                    Assert.True(shard.Active);
+
+                    // Mini bars for stuck shards must be non-negative
+                    Assert.True(shard.MiniBar0 >= 0.0f);
+                    Assert.True(shard.MiniBar7 >= 0.0f);
+                }
+
+                // Recall phase: shards must unstick and gather back into core
+                for (int i = 0; i < 50; i++)
+                {
+                    host.TriggerBassFrame(subBassEnergy: 0.0f, beatIntensity: 0.0f, dt: 0.05);
+                }
+
+                var recallSnapshot = host.GetShardSnapshot();
+                foreach (var shard in recallSnapshot)
+                {
+                    Assert.False(shard.IsStuck, "Stuck shards must unstick during recall phase");
+                    Assert.Equal(BoundaryEdge.None, shard.StuckEdge);
+                }
+            }
+            catch (Exception ex)
+            {
+                threadEx = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        if (threadEx != null) throw threadEx;
+    }
 }

@@ -751,6 +751,21 @@
                                 TickFrequency="0.05" IsSnapToTickEnabled="False"
                                 Margin="24,2,0,4" ValueChanged="HudSetting_ValueChanged"/>
                         <TextBlock Text="Чувствительность к басовому дропу и серии мощных ударов (0.40 - легкий триггер, 1.50 - только экстремальные дропы)."
+                                   FontSize="11" Foreground="#88889C" Margin="24,0,0,10" TextWrapping="Wrap"/>
+
+                        <!-- Overdrive Cooldown Slider -->
+                        <Grid Margin="24,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Кулдаун перегрузки (сек):" Style="{StaticResource FieldLabelStyle}" Grid.Column="0"/>
+                            <TextBlock x:Name="TxtOverdriveCooldownVal" Text="10 сек" Foreground="#00E5FF" FontWeight="Bold" FontSize="13" Grid.Column="1"/>
+                        </Grid>
+                        <Slider x:Name="SldOverdriveCooldown" Minimum="5.0" Maximum="30.0" Value="10.0"
+                                TickFrequency="1.0" IsSnapToTickEnabled="False"
+                                Margin="24,2,0,4" ValueChanged="HudSetting_ValueChanged"/>
+                        <TextBlock Text="Минимальная пауза в секундах между циклами перегрузки, блокирующая непрерывные взрывы подряд на длинных дропах."
                                    FontSize="11" Foreground="#88889C" Margin="24,0,0,14" TextWrapping="Wrap"/>
 
                         <!-- Color Shift Checkbox -->

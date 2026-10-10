@@ -149,6 +149,8 @@ public sealed partial class SettingsWindow : Window
             ChkFullscreenOverdrive.IsChecked = hud.EnableFullscreenOverdrive;
             SldOverdriveThreshold.Value = hud.OverdriveThreshold;
             TxtOverdriveThresholdVal.Text = $"{hud.OverdriveThreshold:F2}";
+            SldOverdriveCooldown.Value = hud.OverdriveCooldown;
+            TxtOverdriveCooldownVal.Text = $"{hud.OverdriveCooldown:F0} сек";
 
             TxtCustomCoreColor.Text = hud.CustomCoreColor ?? "#00E5FF";
             TxtCustomGlowColor.Text = hud.CustomGlowColor ?? "#0040FF";
@@ -758,6 +760,8 @@ public sealed partial class SettingsWindow : Window
             TxtHudFalloffVal.Text = $"{SldHudFalloff.Value:F2}";
         if (TxtOverdriveThresholdVal != null && SldOverdriveThreshold != null)
             TxtOverdriveThresholdVal.Text = $"{SldOverdriveThreshold.Value:F2}";
+        if (TxtOverdriveCooldownVal != null && SldOverdriveCooldown != null)
+            TxtOverdriveCooldownVal.Text = $"{SldOverdriveCooldown.Value:F0} сек";
 
         UpdateCustomPanelVisibility();
 
@@ -823,6 +827,7 @@ public sealed partial class SettingsWindow : Window
             EnableShatterOverdrive = ChkShatterOverdrive?.IsChecked == true,
             EnableFullscreenOverdrive = ChkFullscreenOverdrive?.IsChecked == true,
             OverdriveThreshold = SldOverdriveThreshold?.Value ?? 0.85,
+            OverdriveCooldown = SldOverdriveCooldown?.Value ?? 10.0,
             CustomCoreColor = TxtCustomCoreColor?.Text?.Trim() ?? "#00E5FF",
             CustomGlowColor = TxtCustomGlowColor?.Text?.Trim() ?? "#0040FF",
             CustomRaysColor = TxtCustomRaysColor?.Text?.Trim() ?? "#00FFAA"
