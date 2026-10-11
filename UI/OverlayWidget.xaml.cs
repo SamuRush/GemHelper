@@ -41,6 +41,7 @@ public sealed partial class OverlayWidget : Window
     private VoiceListener? _attachedListener;
     private IVoiceFeedbackService? _attachedFeedback;
     private readonly WasapiLoopbackCaptureService _loopbackCaptureService = new();
+    private OverdriveParticleOverlayWindow? _particleOverlay;
     private bool _isSpeaking = false;
     private bool _isOverdriveGlowApplied = false;
 
@@ -94,6 +95,7 @@ public sealed partial class OverlayWidget : Window
             _timerPollingTimer.Start();
             _periodicMemoryTrimTimer.Start();
 
+            _particleOverlay = new OverdriveParticleOverlayWindow();
             ArcReactor.OnOverdriveFrame += OnArcReactorOverdriveFrame;
 
             if (VoiceListener.Instance != null && _attachedListener == null)
@@ -413,6 +415,8 @@ public sealed partial class OverlayWidget : Window
         StopLoopbackCapture();
         ArcReactor.StopRendering();
         ArcReactor.OnOverdriveFrame -= OnArcReactorOverdriveFrame;
+        _particleOverlay?.Close();
+        _particleOverlay = null;
 
         _actionResetTimer.Stop();
         _actionResetTimer.Tick -= OnActionResetTimerTick;

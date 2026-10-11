@@ -663,7 +663,20 @@ JARVIS-win-x64/
 - `UI/ParticleEngine.cs`: основной жизненный цикл пулов частиц, направленная конусная детонация из эпицентра раскрытия ядра (Directional Cone Burst) со скоростью, увеличенной в 4 раза (2200–5000 px/s), и физика движения.
 - `UI/ParticleEngine.Physics.cs`: упругие отскоки от границ экрана, коллизии с окнами Windows через AABB, сниженная вероятность застревания (1.5%) и мини-эквалайзеры застрявших осколков.
 - `UI/ParticleEngine.Glitch.cs`: рендеринг блоков псевдо-дешифровки дампов памяти через `DrawingVisual` и `FormattedText` с катаканой и рандомизацией шрифтов (9-20 pt).
-- `UI/OverdriveParticleOverlayWindow.cs`: полноэкранный кликабельно-прозрачный оверлей с частицами и сверхзвуковыми motion streaks.
+- `UI/OverdriveParticleOverlayWindow.cs`: аппаратный оверлей овердрайва, инкапсулирующий аппаратный рендерер DirectX 11 (`D3D11OverlayRenderer`), управляющий физикой частиц и 60 FPS представлением DXGI SwapChain.
+
+### 9.4 DirectX 11 Transparent Hardware Overlay Subsystem (`UI/DirectX/`)
+- `UI/DirectX/D3D11Native.cs`: Win32 P/Invoke функции, стили окон (`WS_EX_LAYERED`, `WS_EX_TRANSPARENT`, `WS_EX_TOPMOST`, `WS_EX_NOACTIVATE`), `DwmExtendFrameIntoClientArea` и структура сообщений.
+- `UI/DirectX/D3D11OverlayWindow.cs`: полноэкранное прозрачное Win32-окно с обработкой `WM_NCHITTEST -> HTTRANSPARENT` для нулевого вмешательства в клики рабочего стола и непрерывным циклом сообщений.
+- `UI/DirectX/D3D11ConstantBuffers.cs`: 16-байт выровненные структуры HLSL константных буферов (`GlobalCBuffer`, `RefractionCBuffer`, `BloomCBuffer`, `ShardInstanceData`, `LightningVertex`, `QuadVertex`).
+- `UI/DirectX/D3D11ShaderSources.cs`: исходный код HLSL (Shader Model 5.0) шейдеров преломления стекла (Glass Refraction / UV displacement с 3-5 px хроматической аберрацией), плазменных молний с процедурным джиттером вершин, инстансированных осколков с гиперзвуковым растяжением по вектору скорости (motion blur) и HDR Bloom / Gaussian blur.
+- `UI/DirectX/D3D11Shaders.cs`: компиляция шейдеров в рантайме через `Vortice.D3DCompiler` и создание `ID3D11InputLayout`.
+- `UI/DirectX/D3D11DeviceContextManager.cs`: инициализация `ID3D11Device`, `ID3D11DeviceContext` (Hardware с фоллбэком на WARP), `IDXGISwapChain1` (`DXGI_FORMAT_R8G8B8A8_UNORM`, `DXGI_ALPHA_MODE_PREMULTIPLIED`, `SwapEffect.FlipDiscard`), бленд-стейты (`PremultipliedAlpha`, `AdditiveBlend`), `RasterizerState` и линейный сэмплер.
+- `UI/DirectX/D3D11ShardEmitter.cs`: GPU-инстансинг 2D-полигонов шрапнели, начальный импульс взрыва увеличен в 4 раза (2200–5000 px/s), хаотичные упругие рикошеты от границ экрана и динамический буфер инстансов.
+- `UI/DirectX/D3D11RefractionPass.cs`: захват пикселей фона (BitBlt DIB) и полноэкранный шейдерный проход оптического преломления с разведением каналов R и B на 3-5 px.
+- `UI/DirectX/D3D11LightningPass.cs`: генерация ветвящихся высоковольтных плазменных дуг вдоль трещин с процедурным джиттером координат вершин.
+- `UI/DirectX/D3D11BloomPipeline.cs`: аппаратный 2-проходный Bloom и Neon Glow (выделение ярких участков > 0.45, раздельный Gaussian Blur по горизонтали и вертикали, аддитивное наложение ослепительного свечения #FFFFFF / #FF003C / #00E5FF).
+- `UI/DirectX/D3D11OverlayRenderer.cs`: высокоуровневый фасад-оркестратор всего конвейера аппаратного рендеринга DirectX 11, синхронизация кадров и Present в DXGI SwapChain.
 
 ### 9.4 Voice & STT Pipeline (`Voice/`, `Services/`)
 - `Voice/AudioEnergyGate.cs`: быстрое вычисление RMS энергии звукового кадра и гейт фонового шума.

@@ -72,6 +72,8 @@ public sealed partial class OverlayWidget
 
     private void OnArcReactorOverdriveFrame(bool isActive, double progress, float beatIntensity)
     {
+        _particleOverlay?.UpdateOverdrive(ArcReactor.Center, isActive, progress, beatIntensity);
+
         if (isActive && progress > 0.1)
         {
             if (!_isOverdriveGlowApplied)

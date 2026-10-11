@@ -421,6 +421,28 @@
       * Строго соблюден лимит: ни один файл в проекте не превышает 400-500 строк (все UI файлы ≤ 385 строк).
       * 412 тестов в `Gem.sln` успешно пройдены (100% green).
 - **Definition of Done**: `dotnet build Gem.csproj` и `dotnet test Gem.sln` завершаются с кодом 0; фотореалистичный 3D-разлом с объёмным преломляющим стеклом, 3-pass HDR bloom молниями, гиперзвуковыми иглами и кинематографичным коллапсом ядра в точности соответствует референсу.
+
+---
+
+### [x] Task-20: Архитектурный переход графического оверлея на аппаратный DirectX 11 (Vortice.Direct3D11 / DXGI)
+- **Проблема**: Плоский WPF `DrawingVisual` оверлей имел векторные ограничения при выводе фотореалистичных эффектов, полноэкранного оптического преломления и ослепительного Bloom-свечения.
+- **Зона изменений**: `Gem.csproj`, `UI/DirectX/` (`D3D11Native.cs`, `D3D11OverlayWindow.cs`, `D3D11ConstantBuffers.cs`, `D3D11ShaderSources.cs`, `D3D11Shaders.cs`, `D3D11DeviceContextManager.cs`, `D3D11ShardEmitter.cs`, `D3D11RefractionPass.cs`, `D3D11LightningPass.cs`, `D3D11BloomPipeline.cs`, `D3D11OverlayRenderer.cs`), `UI/OverdriveParticleOverlayWindow.cs`, `UI/OverlayWidget.xaml.cs`, `UI/OverlayWidget.Effects.cs`, `Gem.Tests/D3D11OverlayTests.cs`, `ARCHITECTURE.md`.
+- **Технические требования**:
+   1. **D3D11 Transparent Overlay & SwapChain**:
+      * Прозрачное окно Win32 (`WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST`) с DWM frame extension.
+      * Прозрачная DXGI SwapChain (`DXGI_FORMAT_R8G8B8A8_UNORM`, `DXGI_ALPHA_MODE_PREMULTIPLIED`, `SwapEffect.FlipDiscard`).
+      * Интеграция `Vortice.Direct3D11`, `Vortice.DXGI`, `Vortice.D3DCompiler`, `Vortice.Mathematics`.
+   2. **HLSL Overdrive Shader Pipeline**:
+      * Шейдер преломления стекла (Glass Refraction / Normal Distortion) по карте трещин со сдвигом UV и хроматической аберрацией (разведение каналов R и B на 3-5 px).
+      * Постпроцессинг Bloom & Neon Glow: выделение ярких HDR участков (молнии, разломы, ядро) и 2-проходный separable Gaussian blur (#FFFFFF, #FF003C, #00E5FF).
+      * Шейдер плазменных молний: процедурная отрисовка ветвящихся электрических дуг вдоль трещин с динамическим джиттером вершин.
+   3. **GPU/Instanced Shard Physics**:
+      * Инстансированные 2D-полигоны с вытягиванием по вектору скорости (hypersonic Motion Blur).
+      * Начальный импульс взрыва увеличен в 4 раза (2200–5000 px/s), частицы хаотично рикошетят от границ экрана.
+   4. **Верификация**:
+      * Все файлы модульные (< 300 строк кода, строго < 400-500).
+      * 418 тестов в `Gem.sln` (100% green).
+- **Definition of Done**: `dotnet build Gem.csproj` и `dotnet test Gem.sln` завершаются с кодом 0; аппаратный рендеринг без просадок FPS и исключение плоских векторных артефактов.
 ---
 
 ## 📦 Завершенные фазы
